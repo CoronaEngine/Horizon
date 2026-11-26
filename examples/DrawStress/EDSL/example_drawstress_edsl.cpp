@@ -32,11 +32,11 @@ DrawStressEdsl::DrawStressEdsl(void* native_window)
             packets[i].instanceCount = 1;
             packets[i].parameterWord = i * (sizeof(ktm::fmat4x4) / sizeof(uint32_t));
         }
-        vertex_buffer.createDeviceLocal(render_executor, BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
             cube_vertices.data(), cube_vertices.size(), sizeof(cube_vertices[0]));
-        index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
             cube_indices.data(), cube_indices.size(), sizeof(cube_indices[0]));
-        commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect,
+        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
     render_executor.commit().waitForDeferredResources();

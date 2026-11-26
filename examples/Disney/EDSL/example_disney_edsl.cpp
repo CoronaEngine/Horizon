@@ -79,9 +79,9 @@ DisneyEdsl::DisneyEdsl(void* native_window)
             }
         }
 
-        vertex_buffer.createDeviceLocal(render_executor, BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
             vertices.data(), vertices.size(), sizeof(vertices[0]));
-        index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
 
         constexpr uint32_t parameter_words = sizeof(DrawParameters) / sizeof(uint32_t);
@@ -90,7 +90,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
             packets[i] = {.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1,
                           .parameterWord = i * parameter_words};
         }
-        commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect,
+        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
     std::array<DrawParameters, rows * columns> parameters;
@@ -117,7 +117,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
             draw.model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
         }
     }
-    parameter_buffer.createDeviceLocal(render_executor, BufferUsage::StorageBuffer,
+    render_executor << parameter_buffer.createDeviceLocal(BufferUsage::StorageBuffer,
         parameters.data(), parameters.size(), sizeof(DrawParameters));
     render_executor.commit().waitForDeferredResources();
 

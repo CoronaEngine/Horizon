@@ -293,22 +293,22 @@ helicon_compile_shaders(HorizonExamples RASTER_PAIRS
 `batch.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 执行命令缓冲中的前 `count` 条记录。同一个 batch 可以多次调用，按录入顺序在同一 render pass 中绘制。每次调用独立选择几何缓冲、参数和裁剪矩形。CPU 预先生成的命令可以与顶点和索引一起上传，并在后续帧中复用。
 
 ```cpp
-HardwareExecutor upload;
+HardwareExecutor executor;
 HardwareBuffer vertexBuffer, indexBuffer, commands;
-vertexBuffer.createDeviceLocal(upload, BufferUsage::VertexBuffer,
-                               vertices.data(), vertices.size(), sizeof(vertices[0]));
-indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer,
-                              indices.data(), indices.size(), sizeof(indices[0]));
+executor << vertexBuffer.createDeviceLocal(BufferUsage::VertexBuffer,
+                                           vertices.data(), vertices.size(), sizeof(vertices[0]));
+executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer,
+                                          indices.data(), indices.size(), sizeof(indices[0]));
 const RasterIndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
-commands.createDeviceLocal(upload, BufferUsage::RasterIndirect, &packet, 1, sizeof(packet));
-upload.commit().waitForDeferredResources();
+executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &packet, 1, sizeof(packet));
 
 auto batch = pipeline.beginBatch();
 batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
 executor << std::move(batch);
+executor.commit();
 ```
 
-`createDeviceLocal` 在返回前将源数据复制到暂存缓冲，再次调用会替换当前句柄指向的分配。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
+`createDeviceLocal` 替换当前句柄指向的分配，并在返回前将源数据复制到暂存缓冲。返回的 `CopyCommand` 持有暂存缓冲和目标缓冲，调用方用 `executor <<` 将上传排在首次使用之前。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
 
 `beginBatch()` 根据绑定的颜色附件或显式深度附件推导尺寸，按需复用同尺寸的默认深度图，并捕获当前 EDSL 条件和绑定。需要渲染较小区域时传入宽高，需要共享深度图时使用 `setDepthImage()`。
 

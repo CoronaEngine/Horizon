@@ -30,10 +30,10 @@ EdslFeature::EdslFeature(void* native_window)
         for (size_t i = 0; i < quad_indices.size(); ++i)
             indices[6 * face + i] = static_cast<uint16_t>(4 * face + quad_indices[i]);
     }
-    vertex_buffer.createDeviceLocal(executor, BufferUsage::VertexBuffer, vertices.data(), vertices.size(), sizeof(vertices[0]));
-    index_buffer.createDeviceLocal(executor, BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
+    executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer, vertices.data(), vertices.size(), sizeof(vertices[0]));
+    executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
-    commands.createDeviceLocal(executor, BufferUsage::RasterIndirect, &command, 1, sizeof(command));
+    executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &command, 1, sizeof(command));
     executor.commit().waitForDeferredResources();
 
     using namespace EmbeddedShader;

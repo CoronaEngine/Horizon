@@ -130,10 +130,9 @@ public:
     {
     }
 
-    // Replace this handle with a new device-local allocation and queue its initial upload.
-    // The executor owns the staged bytes, so the caller may release data on return.
-    void createDeviceLocal(HardwareExecutor& executor, BufferUsage usage, const void* data,
-                           size_t elementCount, size_t elementSize);
+    // Replace this buffer and return its upload command. The command retains the staged data and destination.
+    [[nodiscard]] CopyCommand createDeviceLocal(BufferUsage usage, const void* data,
+                                                size_t elementCount, size_t elementSize);
 
     HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, BufferUsage usage);
 

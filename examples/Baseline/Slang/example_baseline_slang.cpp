@@ -48,12 +48,12 @@ BaselineSlang::BaselineSlang(void* native_window)
                 indices.push_back(found->second);
             }
         }
-        vertex_buffer.createDeviceLocal(render_executor, BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
             vertices.data(), vertices.size(), sizeof(vertices[0]));
-        index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
         const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
-        commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect, &command, 1, sizeof(command));
+        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &command, 1, sizeof(command));
     }
 
     {

@@ -312,13 +312,13 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
 
     const std::array<float,2> vertices[]{{-1,-1},{3,-1},{-1,3},{0,-1},{1,-1},{1,1},{0,1}};
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
-    HardwareExecutor upload;
+    HardwareExecutor executor;
     HardwareBuffer vertexBuffer;
-    vertexBuffer.createDeviceLocal(upload, BufferUsage::VertexBuffer, vertices, std::size(vertices), sizeof(vertices[0]));
+    executor << vertexBuffer.createDeviceLocal(BufferUsage::VertexBuffer, vertices, std::size(vertices), sizeof(vertices[0]));
     const auto vertexID = vertexBuffer.getBufferID();
     HardwareBuffer indexBuffer = vertexBuffer;
     auto expectInvalidUpload = [&](BufferUsage usage, const void* data, size_t elementSize) {
-        try { indexBuffer.createDeviceLocal(upload, usage, data, 1, elementSize); }
+        try { executor << indexBuffer.createDeviceLocal(usage, data, 1, elementSize); }
         catch (const std::invalid_argument&) {
             expect(indexBuffer.getBufferID() == vertexID, "invalid upload preserves the original buffer");
             return;
@@ -328,13 +328,13 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expectInvalidUpload(BufferUsage::IndexBuffer, nullptr, sizeof(uint16_t));
     expectInvalidUpload(BufferUsage::IndexBuffer, indices.data(), 1);
     expectInvalidUpload(BufferUsage::VertexBuffer, vertices, 2);
+    CopyCommand indexUpload;
     if (explicitDepth) {
-        indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
+        indexUpload = indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     } else {
         const std::vector<uint32_t> wideIndices(indices.begin(), indices.end());
-        indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
+        indexUpload = indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
     }
-    upload.commit().waitForDeferredResources();
     expect(vertexBuffer.getBufferID() == vertexID && indexBuffer.getBufferID() != vertexID,
            "recreating one buffer handle preserves the allocation held by its copy");
     expect(vertexBuffer.getElementCount() == std::size(vertices) &&
@@ -354,8 +354,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), BufferUsage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    HardwareExecutor executor;
-    executor << std::move(first);
+    executor << indexUpload << std::move(first);
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -545,6 +544,11 @@ void test_gpu()
     executor << emptyBuffer.copyTo(emptyBuffer) << emptyBuffer.copyTo(emptyImage)
              << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer);
     expect(backend->commandList.empty(), "copies between empty resources must not record GPU work");
+    const auto emptyUpload = emptyBuffer.createDeviceLocal(BufferUsage::StorageBuffer, nullptr, 0, sizeof(uint32_t));
+    executor << emptyUpload;
+    expect(!emptyUpload && emptyBuffer.getBufferID() && emptyBuffer.getElementCount() == 0 &&
+           emptyBuffer.getElementSize() == sizeof(uint32_t) && backend->commandList.empty(),
+           "a zero-element device-local buffer preserves its dimensions without recording an upload");
     {
         HardwareDisplayer display;
         HardwareImage target(4, 2, ImageFormat::RGBA8_UNORM);

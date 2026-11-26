@@ -60,8 +60,8 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
     return buffer;
 }
 
-void HardwareBuffer::createDeviceLocal(HardwareExecutor& executor, BufferUsage usage, const void* data,
-                                       size_t elementCount, size_t elementSize)
+CopyCommand HardwareBuffer::createDeviceLocal(BufferUsage usage, const void* data,
+                                              size_t elementCount, size_t elementSize)
 {
     if (elementSize == 0)
         throw std::invalid_argument("Device-local buffer element size must be nonzero");
@@ -71,8 +71,6 @@ void HardwareBuffer::createDeviceLocal(HardwareExecutor& executor, BufferUsage u
         throw std::invalid_argument("Raster indices must be 2 or 4 bytes wide");
     if (elementCount && !data)
         throw std::invalid_argument("A nonempty device-local buffer requires initial data");
-    if (elementCount && !executor.getExecutorID())
-        throw std::invalid_argument("Buffer upload requires a valid executor");
 
     if (elementCount > UINT32_MAX || elementSize > UINT32_MAX)
         throw std::length_error("Device-local buffer dimensions exceed the supported range");
@@ -83,11 +81,13 @@ void HardwareBuffer::createDeviceLocal(HardwareExecutor& executor, BufferUsage u
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
     destination.bufferID = reinterpret_cast<uintptr_t>(new ResourceManager::BufferHardwareWrap(
         manager.createBuffer(count, stride, convertBufferUsage(usage), false, true)));
+    CopyCommand upload;
     if (count) {
         HardwareBuffer staging(count, stride, BufferUsage::StorageBuffer, data);
-        executor << staging.copyTo(destination);
+        upload = staging.copyTo(destination);
     }
     *this = std::move(destination);
+    return upload;
 }
 
 HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, BufferUsage usage, const void* data, bool useDedicated)
