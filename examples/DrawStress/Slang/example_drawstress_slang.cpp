@@ -2,7 +2,6 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <utility>
 #include <vector>
 
 // Based on the single-threaded bgfx examples/17-drawstress workload.
@@ -97,9 +96,6 @@ void DrawStressSlang::run(float seconds)
     }
     parameters.flushMapped();
 
-    auto batch = pipeline.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
-
-    render_executor << std::move(batch);
+    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
     display.present(render_executor, final_output_image);
 }

@@ -7,7 +7,6 @@
 
 #include <array>
 #include <cstdint>
-#include <utility>
 
 EdslFeature::EdslFeature(void* native_window)
     : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
@@ -73,8 +72,7 @@ EdslFeature::EdslFeature(void* native_window)
 
 void EdslFeature::run(float)
 {
-    auto batch = geometry.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1);
-    executor << std::move(batch) << lighting(width / group_size, height / group_size);
+    executor << geometry.drawIndirect(vertex_buffer, index_buffer, commands, 1)
+             << lighting(width / group_size, height / group_size);
     display.present(executor, shaded_image);
 }

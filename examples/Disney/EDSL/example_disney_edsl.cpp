@@ -9,7 +9,6 @@
 #include <filesystem>
 #include <fstream>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 DisneyEdsl::DisneyEdsl(void* native_window)
@@ -298,9 +297,6 @@ DisneyEdsl::DisneyEdsl(void* native_window)
 
 void DisneyEdsl::run(float)
 {
-    auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
-
-    render_executor << std::move(batch);
+    render_executor << rasterizer.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
     display.present(render_executor, final_output_image);
 }

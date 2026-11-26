@@ -5,7 +5,6 @@
 #include <filesystem>
 #include <fstream>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 DisneySlang::DisneySlang(void* native_window)
@@ -136,9 +135,6 @@ DisneySlang::DisneySlang(void* native_window)
 
 void DisneySlang::run(float)
 {
-    auto batch = pipeline.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
-
-    render_executor << std::move(batch);
+    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
     display.present(render_executor, final_output_image);
 }

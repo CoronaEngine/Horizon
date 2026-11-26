@@ -17,7 +17,6 @@
 #include <ktm/ktm.h>
 #include <map>
 #include <memory>
-#include <utility>
 #include <vector>
 
 BaselineEdsl::BaselineEdsl(void* native_window)
@@ -103,8 +102,6 @@ void BaselineEdsl::run(float seconds)
 {
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
-    auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1);
-    render_executor << std::move(batch);
+    render_executor << rasterizer.drawIndirect(vertex_buffer, index_buffer, commands, 1);
     display.present(render_executor, color_image);
 }

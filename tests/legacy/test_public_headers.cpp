@@ -26,7 +26,7 @@ template<class T>
 concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T> &&
                          !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T>;
 static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer>);
-static_assert(MoveOnlyHandle<RasterBatch> && std::copyable<CopyCommand>);
+static_assert(MoveOnlyHandle<RasterCommand> && std::copyable<CopyCommand>);
 static_assert(MoveOnlyHandle<ComputePipeline<>> && MoveOnlyHandle<RasterizerPipeline<>>);
 static_assert(MoveOnlyHandle<EmbeddedShader::Texture2DProxy<ktm::fvec4>>);
 static_assert(MoveOnlyHandle<EmbeddedShader::TextureCubeProxy<ktm::fvec4>>);
@@ -50,8 +50,8 @@ static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<st
               !CanReadBackInto<std::vector<uint16_t>>);
 
 template<class... Args>
-concept CanDrawIndirect = requires(RasterBatch& batch, const HardwareBuffer& buffer, Args&&... args) {
-    batch.drawIndirect(buffer, buffer, buffer, 1, std::forward<Args>(args)...);
+concept CanDrawIndirect = requires(RasterizerPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
+    { pipeline.drawIndirect(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<RasterCommand>;
 };
 static_assert(CanDrawIndirect<> && CanDrawIndirect<const HardwareBuffer&>);
 static_assert(!CanDrawIndirect<std::span<const float>>);
@@ -144,10 +144,11 @@ using SharedVertexRaster = decltype(RasterizerPipeline(disney_vert_slang, drawst
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
-static_assert(requires(DisneyRaster& pipeline) {
+static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
     { RasterizerPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
+    { executor << pipeline.drawIndirect(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor&>;
 });
 static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
 static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);

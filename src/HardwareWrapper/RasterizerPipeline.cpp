@@ -110,8 +110,12 @@ void RasterizerPipeline<VS, FS>::setResourceDirect(uint64_t byteOffset, uint32_t
 }
 
 template<class VS, class FS>
-RasterBatch RasterizerPipeline<VS, FS>::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
+RasterCommand RasterizerPipeline<VS, FS>::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                                       const HardwareBuffer& packets, uint32_t count,
+                                                       const HardwareBuffer& parameters, std::optional<ScissorRect> scissor,
+                                                       std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
 {
+    if (!count && !pass) return RasterCommand(nullptr);
     auto& pipeline = state();
     if (pipeline.variants) pipeline.refreshShaderVariant();
     auto& backend = *pipeline.backend;
@@ -131,15 +135,10 @@ RasterBatch RasterizerPipeline<VS, FS>::capture(std::optional<ktm::uvec2> extent
                 backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
         }
     }
-    return RasterBatch(std::make_shared<RasterBatch::Impl>(pipeline.backend, extent, pass, pipeline.resourceUses));
-}
-
-void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                               const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                               std::optional<ScissorRect> scissor)
-{
-    if (!impl_) throw std::logic_error("Raster batch already submitted");
-    impl_->appendIndirect(vertices, indices, packets, count, parameters, scissor);
+    auto draw = std::make_shared<RasterCommand::Impl>(pipeline.backend, extent, pass, pipeline.resourceUses);
+    draw->appendIndirect(vertices, indices, packets, count, parameters, scissor);
+    if (!draw->drawCount && !pass) return RasterCommand(nullptr);
+    return RasterCommand(std::move(draw));
 }
 
 template<class VS, class FS>

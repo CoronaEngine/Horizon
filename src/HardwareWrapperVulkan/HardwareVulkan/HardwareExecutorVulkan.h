@@ -180,6 +180,8 @@ struct HardwareExecutorVulkan
     // void disposeWhenCommitCompletes(std::function<void()> &&deallocator);
 
     DeviceManager::QueueUtils *currentRecordQueue{nullptr};
+    // Number of vkCmdBeginRenderPass calls recorded by the most recent nonempty commit.
+    uint32_t recordedRasterPassCount{};
     std::shared_ptr<HardwareContext::HardwareUtils> hardwareContext;
     std::vector<RecordedCommand> commandList;
     std::vector<VkSemaphoreSubmitInfo> waitSemaphores;

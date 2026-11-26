@@ -501,11 +501,13 @@ public:
     void setDepthImage(HardwareImage& image) { pipeline_.setDepthImage(image); }
     [[nodiscard]] HardwareImage getDepthImage() { return pipeline_.getDepthImage(); }
 
-    [[nodiscard]] RasterBatch beginBatch(uint16_t width, uint16_t height, RasterPass pass = {})
+    [[nodiscard]] RasterCommand drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                             const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters = {},
+                                             std::optional<ScissorRect> scissor = {}, std::optional<RasterPass> pass = {},
+                                             std::optional<ktm::uvec2> extent = {})
     {
-        return pipeline_.beginBatch(width, height, pass);
+        return pipeline_.drawIndirect(vertices, indices, packets, count, parameters, scissor, pass, extent);
     }
-    [[nodiscard]] RasterBatch beginBatch(RasterPass pass = {}) { return pipeline_.beginBatch(pass); }
 
     RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources)
     {

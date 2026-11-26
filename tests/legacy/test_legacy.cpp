@@ -154,7 +154,7 @@ bool has_vulkan_14_device()
 }
 
 // Submit after the pipeline, geometry, draw parameters and output proxies go out of scope.
-void test_raster_batch(bool forceSingleDraw)
+void test_indirect_draws(bool forceSingleDraw)
 {
     using namespace EmbeddedShader;
     HardwareExecutor executor;
@@ -180,7 +180,6 @@ void test_raster_batch(bool forceSingleDraw)
         pipeline.bindRenderTarget(0, overrideColor);
         overrideColor = target;
         pipeline.setRasterState({.depthTest = false, .depthWrite = false});
-        auto batch = pipeline.beginBatch(4, 2);
         // One triangle covers the screen, the other covers only the second pixel row.
         const std::array<std::array<float, 3>, 6> vertices{{
             {-1,-1,1}, {3,-1,1}, {-1,3,1}, {-1,0,1}, {3,0,1}, {-1,2,1}
@@ -198,14 +197,15 @@ void test_raster_batch(bool forceSingleDraw)
         HardwareBuffer red(std::array<float,4>{1,0,0,1}, BufferUsage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
                               BufferUsage::StorageBuffer);
-        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
-        batch.drawIndirect({}, {}, {}, 0);
-        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2});
-        batch.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
+        executor << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2})
+                 << pipeline.drawIndirect({}, {}, {}, 0)
+                 << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2})
+                 << pipeline.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
         useDrawColor = false;
-        auto switched = pipeline.beginBatch({.loadColor = true});
-        switched.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2});
-        executor << std::move(batch) << std::move(switched);
+        // The new shader variant requires a physical split within the same logical pass.
+        executor << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1})
+                 << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2},
+                                          RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
     }
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
@@ -216,13 +216,15 @@ void test_raster_batch(bool forceSingleDraw)
     if (forceSingleDraw) multiDraw = VK_FALSE;
     executor.commit().waitForDeferredResources();
     multiDraw = supported;
+    expect(reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID())->recordedRasterPassCount == 3,
+           "adjacent geometry groups share a pass; switching variants and explicitly loading each start a pass");
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "raster readback");
     const std::array<std::array<float,4>,8> expected{{
-        {1,0,0,1}, {1,0,0,1}, {0,1,1,1}, {0,0,1,1},
-        {1,0,0,1}, {1,0,0,1}, {0,2,2,1}, {0,0,1,1}
+        {1,0,0,1}, {1,0,0,1}, {0,0,4,1}, {0,0,1,1},
+        {1,0,0,1}, {1,0,0,1}, {0,2,2,1}, {0,2,2,1}
     }};
     expect(pixels == expected, "indirect groups must honor scissor, local packet and parameter offsets, "
-           "batch-wide draw index and the captured shader variant");
+           "logical draw indices across a physical split and their reset at an explicit load");
 }
 
 void test_raster_sampled_storage_image()
@@ -244,22 +246,52 @@ void test_raster_sampled_storage_image()
     HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);
     HardwareBuffer commands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
                             BufferUsage::RasterIndirect);
-    auto batch = pipeline.beginBatch(1, 1);
-    batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
     HardwareExecutor executor;
-    executor << upload.copyTo(input) << std::move(batch) << target.copyTo(readback);
+    pipeline.uses({{input, ResourceAccess::Read}});
+    executor << upload.copyTo(input)
+             << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+             << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+             << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
+    auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
+    expect(backend->recordedRasterPassCount == 1, "two draws sampling the same texture share one render pass");
     std::array<Pixel, 1> pixel{};
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == source,
            "fragment UBO handle samples a sampled/storage image from set 0");
 
     target.setClearColor(0, 1, 0, 1);
-    auto clear = pipeline.beginBatch(1, 1);
-    clear.drawIndirect({}, {}, {}, 0);
-    executor << std::move(clear) << target.copyTo(readback);
+    executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+             << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})
+             << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
-    expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == Pixel{0,1,0,1},
+    expect(backend->recordedRasterPassCount == 2 &&
+           readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == Pixel{0,1,0,1},
            "an empty indirect pass still clears its attachment");
+
+    const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
+                               .featuresChain.getChainHead()->features;
+    if (features.fragmentStoresAndAtomics) {
+        HardwareBuffer counter(std::array{0.f}, BufferUsage::StorageBuffer);
+        ArrayProxy<float> values(counter);
+        RasterizerPipeline increment(vs, [&] {
+            Float next;
+            next = values[0] + Float(1.f);
+            values[0] = next;
+            output << Float4(next, 0, 0, 1);
+        });
+        increment.setRasterState({.depthTest = false, .depthWrite = false});
+        for (bool declareAccess : {false, true}) {
+            if (declareAccess) increment.uses({{counter, ResourceAccess::ReadWrite}});
+            executor << increment.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+                     << increment.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+                     << target.copyTo(readback);
+            executor.commit().waitForDeferredResources();
+            const Pixel expected{declareAccess ? 4.f : 2.f, 0, 0, 1};
+            expect(backend->recordedRasterPassCount == 2 &&
+                   readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == expected,
+                   "successive fragment storage writes require a pass boundary even without declared accesses");
+        }
+    }
 }
 
 void test_shared_vertex_stage()
@@ -278,13 +310,10 @@ void test_shared_vertex_stage()
     raster.outColor = target;
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
-    auto batch = raster.beginBatch();
-    batch.drawIndirect(vertices, indices, packets, 1, parameters);
-
     std::array<float, 4> pixel{};
     HardwareBuffer readback(sizeof(pixel), BufferUsage::StorageBuffer);
     HardwareExecutor executor;
-    executor << std::move(batch) << target.copyTo(readback);
+    executor << raster.drawIndirect(vertices, indices, packets, 1, parameters) << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
     // At the center of the render target, the Disney view vector equals camPos.xyz.
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 1.f},
@@ -342,11 +371,9 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
            indexBuffer.getElementCount() == indices.size() &&
            indexBuffer.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
            "staged raster buffers preserve element counts, vertex stride and index width");
-    auto first = pipeline.beginBatch(4, 2);
     HardwareBuffer firstCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
                                  BufferUsage::RasterIndirect);
     HardwareBuffer redAndDepth(std::array<float,5>{1,0,0,1,0.5f}, BufferUsage::StorageBuffer);
-    first.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth);
     HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
     const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                                .featuresChain.getChainHead()->features;
@@ -354,7 +381,8 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), BufferUsage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    executor << indexUpload << std::move(first);
+    executor << indexUpload << pipeline.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth,
+                                                     {}, {}, ktm::uvec2(4, 2));
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -370,12 +398,12 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
         executor << generate(1,1,1);
     }
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
-    auto second = pipeline.beginBatch(4, 2, {true, true});
-    second.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters);
 
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
-    executor << std::move(second) << target.copyTo(readback);
+    executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
+                                      RasterPass{.loadColor = true, .loadDepth = true})
+             << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
     // Both instances contribute green and their absolute instance indices to blue.
@@ -703,16 +731,13 @@ void test_gpu()
     movedRaster.outColor = first;
     movedRaster.vp.proj = ktm::fmat4x4::from_eye();
     movedRaster.vp.view = ktm::fmat4x4::from_eye();
-    auto firstBatch = movedRaster.beginBatch();
-    firstBatch.drawIndirect(vertices, indices, packets, 1, drawParameters);
+    auto firstDraw = movedRaster.drawIndirect(vertices, indices, packets, 1, drawParameters);
     raster = std::move(movedRaster);
     raster.outColor = second;
     raster.vp.view = ktm::translate3d(ktm::fvec3(8.f, 0.f, 0.f));
-    auto secondBatch = raster.beginBatch();
-    secondBatch.drawIndirect(vertices, indices, packets, 1, drawParameters);
     std::array<std::array<float, 4>, 2> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
-    executor << std::move(firstBatch) << std::move(secondBatch)
+    executor << std::move(firstDraw) << raster.drawIndirect(vertices, indices, packets, 1, drawParameters)
              << first.copyTo(readback) << second.copyTo(readback, 0, 0, sizeof(pixels[0]));
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) &&
@@ -739,8 +764,8 @@ int main(int argc, char** argv)
                 return 77;
             }
             test_gpu();
-            test_raster_batch(false);
-            test_raster_batch(true);
+            test_indirect_draws(false);
+            test_indirect_draws(true);
             test_raster_sampled_storage_image();
             test_shared_vertex_stage();
             test_generated_packet_and_attachment_load(true);

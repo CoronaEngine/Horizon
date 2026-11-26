@@ -187,6 +187,7 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
     ResourceBarrierPlanner planner;
     ResourceAccessList accesses;
     ResourceBarriers barriers;
+    recordedRasterPassCount = 0;
     for (auto& recorded : commandList)
     {
         accesses.clear();

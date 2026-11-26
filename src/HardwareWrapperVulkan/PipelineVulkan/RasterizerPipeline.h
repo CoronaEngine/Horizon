@@ -80,7 +80,7 @@ struct RasterizerPipelineVulkan
         ~FramebufferState();
     };
   private:
-    friend class ::RasterBatch;
+    friend class ::RasterCommand;
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
     std::mutex uploadMutex;
     void initializeStageBindings(uint32_t viewCount);
@@ -88,6 +88,7 @@ struct RasterizerPipelineVulkan
     void createGraphicsPipeline(GraphicsState& state);
 
     int multiviewCount{1};
+    bool mergeWithoutUses{};
 
     std::vector<std::shared_ptr<GraphicsState>> graphicsStates;
     std::shared_ptr<FramebufferState> lastFramebuffer;
@@ -117,7 +118,7 @@ struct RasterizerPipelineVulkan
 
 using horizon::detail::RasterizerPipelineVulkan;
 
-struct RasterBatch::Impl final : CommandRecordVulkan
+struct RasterCommand::Impl final : CommandRecordVulkan
 {
     struct GeometryEntry {
         VkDeviceAddress vertices, indices;
@@ -136,6 +137,7 @@ struct RasterBatch::Impl final : CommandRecordVulkan
     ktm::uvec2 imageSize{};
     RasterState state;
     RasterPass pass;
+    bool startsPass{};
     HardwareImage depthImage;
     std::vector<HardwareImage> renderTargets;
     std::vector<VkClearValue> clearValues;
@@ -147,8 +149,10 @@ struct RasterBatch::Impl final : CommandRecordVulkan
     std::shared_ptr<UniformSnapshot> uniform;
     std::shared_ptr<RasterizerPipelineVulkan::FramebufferState> framebuffer;
 
-    Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent, RasterPass pass,
+    Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent, std::optional<RasterPass> pass,
          const std::vector<ResourceUse>& uses);
+    bool sameAttachments(const Impl& next) const;
+    bool canMerge(const Impl& next) const;
     void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                         std::optional<ScissorRect> scissor);

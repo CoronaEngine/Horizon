@@ -46,11 +46,33 @@ HardwareExecutor& HardwareExecutor::enqueue(const ComputePipeline<>& pipeline)
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::operator<<(RasterBatch&& batch)
+HardwareExecutor& HardwareExecutor::operator<<(RasterCommand&& draw)
 {
-    if (!batch.impl_) throw std::logic_error("Raster batch already submitted");
-    execFromId(executorID)->recordOwned(batch.impl_);
-    batch.impl_.reset();
+    if (!draw.impl_) return *this;
+    auto& executor = *execFromId(executorID);
+    auto& current = *draw.impl_;
+    RasterCommand::Impl* previous = nullptr;
+    if (!current.startsPass && !executor.commandList.empty())
+        previous = dynamic_cast<RasterCommand::Impl*>(executor.commandList.back().command);
+
+    if (previous && previous->sameAttachments(current)) {
+        const uint32_t base = previous->drawCount;
+        if (current.drawCount > UINT32_MAX - base) throw std::length_error("Raster pass exceeds the draw index range");
+        if (previous->canMerge(current)) {
+            previous->groups.push_back(std::move(current.groups.front()));
+            previous->groups.back().root.drawBase = base;
+            previous->drawCount += current.drawCount;
+        } else {
+            // A physical split preserves the attachments and the shader-visible draw index.
+            executor.recordOwned(draw.impl_);
+            current.pass = {.loadColor = true, .loadDepth = true};
+            current.groups.front().root.drawBase = base;
+            current.drawCount += base;
+        }
+    } else {
+        executor.recordOwned(draw.impl_);
+    }
+    draw.impl_.reset();
     return *this;
 }
 

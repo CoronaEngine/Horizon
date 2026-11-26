@@ -16,6 +16,26 @@ VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& im
     return (image.imageUsage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT))
         ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 }
+
+bool sameAttachment(const HardwareImage& a, const HardwareImage& b)
+{
+    if (a.getImageID() == b.getImageID()) return true;
+    if (!a || !b) return false;
+    const auto& left = *legacyImageFromId(a.getImageID());
+    const auto& right = *legacyImageFromId(b.getImageID());
+    // Framebuffers use only the first mip of each view.
+    return left.imageHandle == right.imageHandle && left.imageFormat == right.imageFormat &&
+           left.aspectMask == right.aspectMask && left.baseMipLevel == right.baseMipLevel &&
+           left.baseArrayLayer == right.baseArrayLayer && left.arrayLayers == right.arrayLayers;
+}
+
+bool sameResource(const PipelineResource& a, const PipelineResource& b)
+{
+    if (a.index() != b.index()) return false;
+    if (const auto* buffer = std::get_if<HardwareBuffer>(&a))
+        return buffer->getBufferID() == std::get<HardwareBuffer>(b).getBufferID();
+    return std::get<HardwareImage>(a).getImageID() == std::get<HardwareImage>(b).getImageID();
+}
 }
 
 void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResources &resources,
@@ -69,6 +89,8 @@ void RasterizerPipelineVulkan::initializeStageBindings(uint32_t viewCount)
     extractStageBindings(vertex, vertexStageInputs, vertexStageOutputs);
     extractStageBindings(fragment, fragmentStageInputs, fragmentStageOutputs);
     renderTargets.resize(fragmentStageOutputs.size());
+    mergeWithoutUses = EmbeddedShader::rasterShaderCanMergeWithoutUses(vertShaderCode) &&
+                       EmbeddedShader::rasterShaderCanMergeWithoutUses(fragShaderCode);
     multiviewCount = viewCount;
     uboSize = std::max(vertex.uniformBufferSize, fragment.uniformBufferSize);
     if (uboSize) tempUBO = std::make_unique<uint8_t[]>(uboSize);
@@ -383,9 +405,10 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-RasterBatch::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
-                       RasterPass pass, const std::vector<ResourceUse>& uses)
-    : pipeline(std::move(backend)), state(pipeline->rasterState), pass(pass),
+RasterCommand::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
+                          std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
+    : pipeline(std::move(backend)), state(pipeline->rasterState), pass(requestedPass.value_or(RasterPass{})),
+      startsPass(requestedPass.has_value()),
       renderTargets(pipeline->renderTargets), resourceUses(uses)
 {
     if (!extent) {
@@ -396,7 +419,7 @@ RasterBatch::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::
         extent = legacyImageFromId(target.getImageID())->imageSize;
     }
     imageSize = *extent;
-    if (!imageSize.x || !imageSize.y) throw std::invalid_argument("Raster batch requires a nonzero extent");
+    if (!imageSize.x || !imageSize.y) throw std::invalid_argument("Raster draw requires a nonzero extent");
     if (!pipeline->explicitDepthImage) {
         const auto* depth = pipeline->depthImage ? legacyImageFromId(pipeline->depthImage.getImageID()) : nullptr;
         if (!depth || depth->imageSize != imageSize) {
@@ -415,20 +438,64 @@ RasterBatch::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::
     bindings = pipeline->bindings.snapshot();
 }
 
-void RasterBatch::Impl::prepareFramebuffer()
+bool RasterCommand::Impl::canMerge(const Impl& next) const
+{
+    if (pipeline != next.pipeline || state != next.state || uniformBytes != next.uniformBytes)
+        return false;
+    if (bindings != next.bindings && !std::ranges::equal(bindings->values, next.bindings->values,
+        [](const PipelineBinding& a, const PipelineBinding& b) {
+            return a.offset == b.offset && a.size == b.size && a.uniform == b.uniform &&
+                   a.fixedSlot == b.fixedSlot && a.sampled == b.sampled && sameResource(a.resource, b.resource);
+        })) return false;
+
+    // With equal read-only shader resources, each group's geometry, packets and parameters
+    // add only buffer reads. Storage writes and opaque bindless accesses need a pass boundary.
+    if (!pipeline->mergeWithoutUses && resourceUses.empty()) return false;
+    if (!std::ranges::equal(resourceUses, next.resourceUses, [](const ResourceUse& a, const ResourceUse& b) {
+        return a.access == ResourceAccess::Read && b.access == ResourceAccess::Read && sameResource(a.resource, b.resource);
+    })) return false;
+
+    const auto readsAttachment = [&](const PipelineResource& resource) {
+        const auto* image = std::get_if<HardwareImage>(&resource);
+        if (!image || !*image) return false;
+        const auto handle = legacyImageFromId(image->getImageID())->imageHandle;
+        const auto aliases = [handle](const HardwareImage& attachment) {
+            return attachment && legacyImageFromId(attachment.getImageID())->imageHandle == handle;
+        };
+        return aliases(depthImage) || std::ranges::any_of(renderTargets, aliases);
+    };
+    for (const auto& use : resourceUses)
+        if (!std::visit([](const auto& resource) { return bool(resource); }, use.resource) || readsAttachment(use.resource))
+            return false;
+    for (const auto& binding : bindings->values) {
+        if (readsAttachment(binding.resource)) return false;
+        if (pipeline->mergeWithoutUses || binding.sampled) continue;
+        if (const auto* image = std::get_if<HardwareImage>(&binding.resource);
+            image && *image && !(legacyImageFromId(image->getImageID())->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) continue;
+        if (!std::ranges::any_of(resourceUses, [&](const ResourceUse& use) {
+                return sameResource(binding.resource, use.resource);
+            })) return false;
+    }
+    return true;
+}
+
+bool RasterCommand::Impl::sameAttachments(const Impl& next) const
+{
+    return imageSize == next.imageSize && pipeline->multiviewCount == next.pipeline->multiviewCount &&
+           sameAttachment(depthImage, next.depthImage) &&
+           std::ranges::equal(renderTargets, next.renderTargets, sameAttachment);
+}
+
+void RasterCommand::Impl::prepareFramebuffer()
 {
     if (framebuffer) return;
-    const auto sameView = [](const HardwareImage& a, const HardwareImage& b) {
-        return a.getImageID() == b.getImageID() || (a && b &&
-            legacyImageFromId(a.getImageID())->imageView == legacyImageFromId(b.getImageID())->imageView);
-    };
     auto& lastFramebuffer = pipeline->lastFramebuffer;
     if (lastFramebuffer && lastFramebuffer->graphics->state == state &&
         lastFramebuffer->graphics->pass == pass &&
         lastFramebuffer->size.x == imageSize.x && lastFramebuffer->size.y == imageSize.y &&
-        sameView(lastFramebuffer->depth, depthImage) &&
+        sameAttachment(lastFramebuffer->depth, depthImage) &&
         std::equal(lastFramebuffer->targets.begin(), lastFramebuffer->targets.end(),
-                   renderTargets.begin(), renderTargets.end(), sameView)) {
+                   renderTargets.begin(), renderTargets.end(), sameAttachment)) {
         framebuffer = lastFramebuffer;
         return;
     }
@@ -531,7 +598,7 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 }
 
-void RasterBatch::Impl::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+void RasterCommand::Impl::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                        const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                                        std::optional<ScissorRect> scissor)
 {
@@ -551,8 +618,6 @@ void RasterBatch::Impl::appendIndirect(const HardwareBuffer& vertices, const Har
         if (right <= x || bottom <= y) return;
         clip = {{x, y}, {uint32_t(right - x), uint32_t(bottom - y)}};
     }
-    if (count > UINT32_MAX - drawCount) throw std::length_error("Raster batch exceeds the draw index range");
-
     IndirectGroup group{vertices, indices, packets, parameters, {}, clip, count, {}};
     auto& pool = pipeline->uploadPool;
     {
@@ -572,12 +637,12 @@ void RasterBatch::Impl::appendIndirect(const HardwareBuffer& vertices, const Har
     const auto geometryAddress = addressOf(*group.geometryUpload);
     // Use the reserved zero word as a valid base for shaders with no per-draw parameters.
     const auto parameterAddress = parameters ? addressOf(parameters) : geometryAddress + offsetof(GeometryEntry, reserved);
-    group.root = {addressOf(packets), geometryAddress, parameterAddress, 0, drawCount};
+    group.root = {addressOf(packets), geometryAddress, parameterAddress, 0, 0};
     groups.push_back(std::move(group));
-    drawCount += count;
+    drawCount = count;
 }
 
-void RasterBatch::Impl::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
+void RasterCommand::Impl::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
@@ -612,11 +677,16 @@ void RasterBatch::Impl::resolveResourceUses(std::span<const ResourceUse> declara
                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, range);
     }
-    resolveDeclaredUses(result, resourceUses, shaderStages);
-    resolveDeclaredUses(result, declarations, shaderStages);
+    if (declarations.empty()) {
+        resolveDeclaredUses(result, resourceUses, shaderStages);
+    } else {
+        auto uses = resourceUses;
+        uses.insert(uses.end(), declarations.begin(), declarations.end());
+        resolveDeclaredUses(result, uses, shaderStages);
+    }
 }
 
-void RasterBatch::Impl::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
+void RasterCommand::Impl::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
 {
     prepareFramebuffer();
     const auto& graphics = *framebuffer->graphics;
@@ -632,6 +702,7 @@ void RasterBatch::Impl::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
     info.clearValueCount = static_cast<uint32_t>(clearValues.size());
     info.pClearValues = clearValues.data();
     vkCmdBeginRenderPass(commandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
+    ++hardwareExecutor.recordedRasterPassCount;
     VkViewport viewport{0, 0, static_cast<float>(imageSize.x), static_cast<float>(imageSize.y), 0, 1};
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics.pipeline);
@@ -669,7 +740,6 @@ void RasterBatch::Impl::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
         range.layerCount = pipeline->multiviewCount;
         setImageSubresourceLayout(*image, range, graphics.finalLayouts[i]);
     }
-    // Batch owns draw resources, attachments and descriptor allocations until GPU completion.
 }
 
 std::shared_ptr<RasterizerPipelineVulkan> RasterizerPipelineVulkan::variant(

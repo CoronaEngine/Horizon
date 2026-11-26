@@ -290,7 +290,7 @@ helicon_compile_shaders(HorizonExamples RASTER_PAIRS
 
 两个阶段都可见时，即可用 `RasterizerPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterizerPipeline<VS, FS>&`，由函数模板推导阶段类型。
 
-`batch.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 执行命令缓冲中的前 `count` 条记录。同一个 batch 可以多次调用，按录入顺序在同一 render pass 中绘制。每次调用独立选择几何缓冲、参数和裁剪矩形。CPU 预先生成的命令可以与顶点和索引一起上传，并在后续帧中复用。
+`executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 将命令缓冲中的前 `count` 条绘制记录入队。每次调用独立选择几何缓冲、参数和裁剪矩形。执行器按入队顺序绘制，将兼容的相邻绘制合并到同一 render pass。CPU 预先生成的间接命令可以与顶点和索引一起上传，并在后续帧中复用。
 
 ```cpp
 HardwareExecutor executor;
@@ -302,15 +302,17 @@ executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer,
 const RasterIndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
 executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &packet, 1, sizeof(packet));
 
-auto batch = pipeline.beginBatch();
-batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
-executor << std::move(batch);
+executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
 executor.commit();
 ```
 
 `createDeviceLocal` 替换当前句柄指向的分配，并在返回前将源数据复制到暂存缓冲。返回的 `CopyCommand` 持有暂存缓冲和目标缓冲，调用方用 `executor <<` 将上传排在首次使用之前。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
 
-`beginBatch()` 根据绑定的颜色附件或显式深度附件推导尺寸，按需复用同尺寸的默认深度图，并捕获当前 EDSL 条件和绑定。需要渲染较小区域时传入宽高，需要共享深度图时使用 `setDepthImage()`。
+`drawIndirect()` 在调用时捕获当前管线、EDSL 变体、绑定和附件。渲染尺寸默认从颜色附件或显式深度附件推导，也可以通过最后一个参数 `extent` 指定。需要共享深度图时使用 `setDepthImage()`。
+
+首次绘制默认清除颜色和深度。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 scissor 之后显式传入 `RasterPass{}`。可分别设置 `loadColor` 和 `loadDepth`，例如 `RasterPass{.loadColor = true}` 保留颜色并清除深度。只清屏时写 `executor << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})`。拷贝、计算和提交都会结束当前逻辑 pass。
+
+执行器可以把管线状态和绑定相同的相邻绘制录入一个物理 pass。对于通过描述符索引采样的纹理，可用 `pipeline.uses({{texture, ResourceAccess::Read}})` 声明实际读取的资源。存在存储写入或无法确认资源访问时，执行器会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。
 
 将旧写法 `a << b << cmd` 改为 `b << cmd` 即可保留原有的入队行为。如果 `b` 的工作依赖 `a` 的提交，先调用 `a.commit()`，再用 `b.wait(a)` 让 `b` 的下一次提交等待 `a` 最近一次成功提交。
 
@@ -366,13 +368,13 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 
 | 数据 | 字节偏移与字段 | 大小 |
 | --- | --- | --- |
-| 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 表内起点 `groupBase`、28 批次内起点 `drawBase`（均为 `uint32`） | 32 字节 |
+| 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 表内起点 `groupBase`、28 逻辑 pass 内起点 `drawBase`（均为 `uint32`） | 32 字节 |
 | 命令表元素（`RasterIndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
 | 几何表元素 | 0 顶点地址、8 索引地址（均为 64 位设备地址），16 `strideWords`、20 `indexBytes`、24 `vertexCount`、28 保留（均为 `uint32`） | 32 字节 |
 
-- **定位 draw**。每次 `drawIndirect` 从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一 batch 内跨调用连续编号。零条命令和完全落在目标外的裁剪区域不占编号。
+- **定位 draw**。每次 `drawIndirect` 从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一逻辑 pass 内跨调用连续编号。即使后端为同步资源而拆分 render pass，后续绘制也会加载已有附件并接着编号。零条命令和完全落在目标外的裁剪区域不占编号。
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
-- **读取 draw 参数**。有逐 draw 参数时，使用 `batch.drawIndirect(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `BufferUsage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。batch 持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
+- **读取 draw 参数**。有逐 draw 参数时，使用 `executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `BufferUsage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。绘制命令持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
 - **首实例**。每个 packet 的 `firstInstance` 指定起始实例编号。设备未启用 `drawIndirectFirstInstance` 时，生成 packet 的 CPU 或 GPU 代码必须将该字段设为零。
 - **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。

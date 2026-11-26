@@ -14,7 +14,6 @@
 #include <filesystem>
 #include <map>
 #include <memory>
-#include <utility>
 #include <vector>
 
 BaselineSlang::BaselineSlang(void* native_window)
@@ -96,8 +95,6 @@ void BaselineSlang::run(float seconds)
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
     parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
-    auto batch = pipeline.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer);
-    render_executor << std::move(batch);
+    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer);
     display.present(render_executor, color);
 }

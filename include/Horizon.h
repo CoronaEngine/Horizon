@@ -182,7 +182,7 @@ private:
     static HardwareBuffer rasterUpload(uint32_t bytes);
     std::uintptr_t bufferID{0};
 
-    friend class RasterBatch;
+    friend class RasterCommand;
 };
 
 // ================= HardwareImage 参数结构体 =================
@@ -285,21 +285,15 @@ struct RasterIndirectPacket {
     uint32_t parameterWord{};
 };
 
-class RasterBatch {
+class RasterCommand {
 public:
-    RasterBatch(RasterBatch&&) noexcept = default;
-    RasterBatch& operator=(RasterBatch&&) noexcept = default;
-    // Append the first count packets in order, with one geometry pair and scissor for this call.
-    // Each packet uses geometryIndex = firstVertex = 0. parameterWord is an offset into parameters in 4-byte words.
-    // The batch retains its buffers until GPU completion. Omit parameters when the shader does not read them.
-    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, const HardwareBuffer& parameters = {},
-                      std::optional<ScissorRect> scissor = {});
+    RasterCommand(RasterCommand&&) noexcept = default;
+    RasterCommand& operator=(RasterCommand&&) noexcept = default;
 private:
     friend struct HardwareExecutor;
     friend struct RasterizerPipeline<>;
     struct Impl;
-    explicit RasterBatch(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    explicit RasterCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
     std::shared_ptr<Impl> impl_;
 };
 
@@ -393,7 +387,6 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
     RasterizerPipeline& bindRenderTarget(uint32_t location, void** resource);
-    RasterBatch capture(std::optional<ktm::uvec2> extent, RasterPass pass);
     struct Impl;
     Impl& state();
     std::unique_ptr<Impl> impl_;
@@ -416,11 +409,13 @@ public:
     void setDepthImage(HardwareImage& image);
     [[nodiscard]] HardwareImage getDepthImage();
 
-    [[nodiscard]] RasterBatch beginBatch(uint16_t width, uint16_t height, RasterPass pass = {})
-    {
-        return capture(ktm::uvec2(width, height), pass);
-    }
-    [[nodiscard]] RasterBatch beginBatch(RasterPass pass = {}) { return capture(std::nullopt, pass); }
+    // Capture the current bindings and draw the first count packets in order when enqueued.
+    // An explicit pass starts a new drawIndex sequence and applies its attachment load/clear operations,
+    // even with zero draws. Adjacent draws on the same attachments and extent otherwise continue the pass.
+    [[nodiscard]] RasterCommand drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                             const HardwareBuffer& packets, uint32_t count,
+                                             const HardwareBuffer& parameters = {}, std::optional<ScissorRect> scissor = {},
+                                             std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});
 
     RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources);
 
@@ -452,7 +447,7 @@ public:
         if constexpr (std::is_void_v<CS>) return enqueue(pipeline);
         else return enqueue(pipeline.pipeline_);
     }
-    HardwareExecutor& operator<<(RasterBatch&& batch);
+    HardwareExecutor& operator<<(RasterCommand&& draw);
     HardwareExecutor& operator<<(const CopyCommand& cmd);
 
     // Depend on the most recent successful submission of other at the time of this call.
