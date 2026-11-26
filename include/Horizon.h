@@ -308,15 +308,6 @@ struct ComputePipeline;
 template<class VS = void, class FS = void>
 struct RasterizerPipeline;
 
-namespace horizon::detail {
-struct EmptyShaderStage {
-    template<class P> struct Bindings { explicit Bindings(P*) {} };
-};
-
-template<class S>
-using PipelineStage = std::conditional_t<std::is_void_v<S>, EmptyShaderStage, S>;
-}
-
 struct ScissorRect
 {
     int32_t x { 0 };
@@ -399,98 +390,92 @@ private:
     void* displaySurface{nullptr};
 };
 
-namespace horizon::detail {
-class ComputePipelineState
+template<class CS>
+struct ComputePipeline
 {
-    template<class> friend struct ::ComputePipeline;
-    friend struct ::HardwareExecutor;
-    template<class> friend struct EmbeddedShader::BoundField;
+    static_assert(std::same_as<CS, void>, "A named compute stage must provide shader bindings");
 
-    ComputePipelineState();
-    ComputePipelineState(const std::string& source, const std::source_location& location);
-    ComputePipelineState(const EmbeddedShader::ShaderCodeModule& module, const std::source_location& location);
-    ComputePipelineState(EmbeddedShader::ComputePipelineObject shader, const std::source_location& location);
+private:
+    friend struct HardwareExecutor;
+    friend struct EmbeddedShader::BoundField<ComputePipeline>;
 
-    void dispatch(uint16_t x, uint16_t y, uint16_t z);
+    ComputePipeline(EmbeddedShader::ComputePipelineObject shader, const std::source_location& location);
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t = 0);
-    ComputePipelineVulkan& backend() const;
+    horizon::detail::ComputePipelineVulkan& backend() const;
 
-    std::shared_ptr<ComputePipelineVulkan> computePipeline_;
+    std::shared_ptr<horizon::detail::ComputePipelineVulkan> computePipeline_;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
     std::vector<ResourceUse> resourceUses_;
-};
-
-}
-
-template<class CS>
-struct ComputePipeline
-    : horizon::detail::PipelineStage<CS>::template Bindings<horizon::detail::ComputePipelineState>
-{
-private:
-    friend struct HardwareExecutor;
-    using State = horizon::detail::ComputePipelineState;
-    using Stage = horizon::detail::PipelineStage<CS>;
-    using Fields = typename Stage::template Bindings<State>;
-    State state_;
 
 public:
-    ComputePipeline() requires std::is_void_v<CS>
-        : Fields(&state_) {}
-
-    ComputePipeline(const std::string& source, const std::source_location& location = std::source_location::current())
-        requires std::is_void_v<CS>
-        : Fields(&state_), state_(source, location) {}
-
+    ComputePipeline();
+    ComputePipeline(const std::string& source, const std::source_location& location = std::source_location::current());
     ComputePipeline(const EmbeddedShader::ShaderCodeModule& module,
-                    const std::source_location& location = std::source_location::current())
-        requires std::is_void_v<CS>
-        : Fields(&state_), state_(module, location) {}
-
+                    const std::source_location& location = std::source_location::current());
     ComputePipeline(const std::vector<uint32_t>&, const std::source_location& = std::source_location::current()) = delete;
 
     template<class F>
-        requires std::is_void_v<CS> && std::invocable<F> && (!std::is_convertible_v<F, std::string>)
+        requires std::invocable<F> && (!std::is_convertible_v<F, std::string>)
     ComputePipeline(F&& shader, ktm::uvec3 numthreads = ktm::uvec3(1), EmbeddedShader::CompilerOption options = {},
                     const std::source_location& location = std::source_location::current())
-        : Fields(&state_), state_(EmbeddedShader::ComputePipelineObject::compile(
+        : ComputePipeline(EmbeddedShader::ComputePipelineObject::compile(
               std::forward<F>(shader), numthreads, options, location), location) {}
 
+    ComputePipeline(ComputePipeline&&) noexcept = default;
+    ComputePipeline& operator=(ComputePipeline&&) noexcept = default;
+
+    // Set workgroup counts and read proxy bindings. The executor snapshots them at enqueue.
+    ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
+
+    ComputePipeline& uses(std::span<const ResourceUse> resources)
+    {
+        resourceUses_.assign(resources.begin(), resources.end());
+        return *this;
+    }
+    ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
+};
+
+extern template struct ComputePipeline<void>;
+
+template<class CS> requires (!std::is_void_v<CS>)
+struct ComputePipeline<CS> : CS::template Bindings<ComputePipeline<>>
+{
+private:
+    friend struct HardwareExecutor;
+    using Fields = typename CS::template Bindings<ComputePipeline<>>;
+    ComputePipeline<> pipeline_;
+
+public:
     ComputePipeline(const std::source_location& location = std::source_location::current())
-        requires (!std::is_void_v<CS>)
-        : Fields(&state_), state_(horizon::detail::compileLegacyShaderModule(
+        : Fields(&pipeline_), pipeline_(horizon::detail::compileLegacyShaderModule(
               EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule), location) {}
 
-    ComputePipeline(const Stage&, const std::source_location& location = std::source_location::current())
-        requires (!std::is_void_v<CS>)
+    ComputePipeline(const CS&, const std::source_location& location = std::source_location::current())
         : ComputePipeline(location) {}
 
     ComputePipeline(ComputePipeline&& other) noexcept
-        : Fields(&state_), state_(std::move(other.state_)) {}
+        : Fields(&pipeline_), pipeline_(std::move(other.pipeline_)) {}
 
     ComputePipeline& operator=(ComputePipeline&& other) noexcept
     {
-        state_ = std::move(other.state_);
+        pipeline_ = std::move(other.pipeline_);
         return *this;
     }
 
-    // Set workgroup counts and read proxy bindings. The executor snapshots them at enqueue.
     ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
     {
-        state_.dispatch(x, y, z);
+        pipeline_(x, y, z);
         return *this;
     }
 
     ComputePipeline& uses(std::span<const ResourceUse> resources)
     {
-        state_.resourceUses_.assign(resources.begin(), resources.end());
+        pipeline_.uses(resources);
         return *this;
     }
-    ComputePipeline& uses(std::initializer_list<ResourceUse> resources)
-    {
-        return uses(std::span(resources));
-    }
+    ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
 };
 
 template<class CS> requires requires { CS::slangModule; }
@@ -600,7 +585,11 @@ public:
     HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
 
     template<class CS>
-    HardwareExecutor& operator<<(ComputePipeline<CS>& pipeline) { return enqueue(pipeline.state_); }
+    HardwareExecutor& operator<<(ComputePipeline<CS>& pipeline)
+    {
+        if constexpr (std::is_void_v<CS>) return enqueue(pipeline);
+        else return enqueue(pipeline.pipeline_);
+    }
     HardwareExecutor& operator<<(RasterBatch&& batch);
     HardwareExecutor& operator<<(const CopyCommand& cmd);
 
@@ -621,7 +610,7 @@ public:
     }
 
 private:
-    HardwareExecutor& enqueue(const horizon::detail::ComputePipelineState& state);
+    HardwareExecutor& enqueue(const ComputePipeline<>& pipeline);
     std::uintptr_t executorID{0};
 };
 

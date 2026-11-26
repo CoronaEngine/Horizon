@@ -54,6 +54,13 @@ struct ComputePipelineAdapter {
 };
 
 static_assert(std::same_as<decltype(ComputePipeline(ComputePipelineAdapter{})), ComputePipeline<>>);
+static_assert(requires(decltype([] {}) shader, const EmbeddedShader::ShaderCodeModule& module,
+                       const std::source_location& location) {
+    { ComputePipeline{} } -> std::same_as<ComputePipeline<>>;
+    { ComputePipeline(module, location) } -> std::same_as<ComputePipeline<>>;
+    { ComputePipeline(shader, {4, 2, 1}, {.enableMatrixColumnMajor = true}, location) }
+        -> std::same_as<ComputePipeline<>>;
+});
 
 static_assert(requires(RasterizerPipeline<>& pipeline, RasterPipelineAdapter adapter) {
     { RasterizerPipeline{} } -> std::same_as<RasterizerPipeline<>>;
@@ -89,6 +96,18 @@ static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const CopyComma
 void check_legacy_public_headers() {}
 
 #include "Codegen/ControlFlows.h"
+#include SLANG(compute_write.slang)
+
+using NamedCompute = ComputePipeline<compute_write_slang_t>;
+static_assert(std::is_nothrow_move_constructible_v<NamedCompute> && std::is_nothrow_move_assignable_v<NamedCompute>);
+static_assert(!std::is_copy_constructible_v<NamedCompute> && !std::is_copy_assignable_v<NamedCompute>);
+static_assert(requires(NamedCompute& pipeline, HardwareExecutor& executor, HardwareBuffer& buffer,
+                       std::span<const ResourceUse> resources, const std::source_location& location) {
+    { ComputePipeline(compute_write_slang, location) } -> std::same_as<NamedCompute>;
+    { pipeline.uses(resources)(1, 2, 3) } -> std::same_as<NamedCompute&>;
+    { executor << pipeline.uses({{buffer, ResourceAccess::Write}})(1) } -> std::same_as<HardwareExecutor&>;
+});
+
 #include SLANG(examples/Disney/Slang/disney_frag.slang)
 
 template<class Stage>

@@ -4,6 +4,7 @@
 #include "Codegen/TypeAlias.h"
 #include "Compiler/ShaderUtils.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
+#include SLANG(compute_write.slang)
 #include SLANG(examples/Baseline/Slang/baseline_vert.slang)
 #include SLANG(examples/Baseline/Slang/baseline_frag.slang)
 #include SLANG(examples/Disney/Slang/disney_vert.slang)
@@ -28,19 +29,6 @@ void expect(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
 }
-
-struct GeneratedComputeStage
-{
-    static inline EmbeddedShader::SlangModule slangModule;
-
-    template<class Pipeline>
-    struct Bindings
-    {
-        explicit Bindings(Pipeline* pipeline)
-            : output(pipeline, 0, sizeof(uint32_t), EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers, 0) {}
-        EmbeddedShader::BoundField<Pipeline> output;
-    };
-};
 
 void test_cpu()
 {
@@ -383,6 +371,37 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     }
 }
 
+void test_compute_dispatch_snapshots()
+{
+    std::array<uint32_t, 4> words{};
+    HardwareBuffer firstOutput(words, BufferUsage::StorageBuffer);
+    HardwareBuffer secondOutput(words, BufferUsage::StorageBuffer);
+    HardwareExecutor executor;
+    {
+        ComputePipeline original(compute_write_slang);
+        ComputePipeline other(compute_write_slang);
+        static_assert(std::same_as<decltype(original), ComputePipeline<compute_write_slang_t>>);
+        static_assert(!std::is_base_of_v<ComputePipeline<>, decltype(original)>);
+        auto moved = std::move(original);
+        moved.params.outputIndex = firstOutput;
+        moved.params.value = 10u;
+        other.params.outputIndex = secondOutput;
+        other.uses({{secondOutput, ResourceAccess::Write}})(2);
+        other.params.value = 20u; // Named bindings are captured when the pipeline is enqueued.
+        executor << moved.uses({{firstOutput, ResourceAccess::Write}})(3) << other;
+
+        other = std::move(moved);
+        other.params.outputIndex = secondOutput;
+        other.params.value = 30u;
+        executor << other.uses({{secondOutput, ResourceAccess::Write}})(1);
+    }
+    executor.commit().waitForDeferredResources();
+    expect(firstOutput.copyToData(words) && words == std::array{10u, 11u, 12u, 0u},
+           "first dispatch retains its buffer, scalar and group count after move and destruction");
+    expect(secondOutput.copyToData(words) && words == std::array{30u, 21u, 0u, 0u},
+           "second pipeline dispatch survives move assignment and only its first word is overwritten");
+}
+
 void test_compute_sampling()
 {
     using namespace EmbeddedShader;
@@ -425,10 +444,17 @@ void test_compute_sampling()
         auto xy = dispatchThreadID()->xy();
         dst[xy] = tex[xy];
     }, ktm::uvec3(2, 2, 1), options);
-    executor << load(1, 1, 1) << result.copyTo(readback);
+    load(1);
+    auto mipOne = input[1];
+    tex = mipOne;
+    executor << load << result.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == std::array<Pixel, 4>{},
-           "the same texture proxy can be used for storage reads in a later pipeline");
+           "compute reads the EDSL texture proxy when workgroups are set");
+    executor << load(1) << result.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == source,
+           "the next dispatch reads the rebound EDSL texture");
 
     HardwareImageCreateInfo cubeInfo(2, 2, ImageFormat::RGBA32_FLOAT);
     cubeInfo.cube = true;
@@ -590,34 +616,6 @@ void test_gpu()
     executor << edsl(1, 1, 1);
     executor.commit();
 
-    EmbeddedShader::SlangModuleCompileArgs moduleArgs;
-    std::cerr << "GPU: generated Slang module\n";
-    moduleArgs.moduleName = "legacy_test";
-    moduleArgs.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-    moduleArgs.shaderCode = R"(
-        struct Parameters { uint outputIndex; };
-        [[vk::push_constant]] ConstantBuffer<Parameters> params;
-        [[vk::binding(0, 1)]] RWStructuredBuffer<uint> outputs[];
-        [shader("compute")] [numthreads(1,1,1)]
-        void main() { outputs[params.outputIndex][0] = 47; }
-    )";
-    using Compute = GeneratedComputeStage;
-    Compute::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
-    ComputePipeline generated(Compute{});
-    static_assert(std::same_as<decltype(generated), ComputePipeline<Compute>>);
-    static_assert(!std::is_base_of_v<ComputePipeline<>, decltype(generated)>);
-    auto moved = std::move(generated);
-    moved.output = destination;
-    executor << moved(1);
-    generated = std::move(moved);
-    generated.output = source;
-    executor << generated(1);
-    executor.commit().waitForDeferredResources();
-    uint32_t afterConstruction{}, afterAssignment{};
-    expect(destination.copyToData(&afterConstruction, sizeof(afterConstruction)) && afterConstruction == 47 &&
-           source.copyToData(&afterAssignment, sizeof(afterAssignment)) && afterAssignment == 47,
-           "generated fields bind independent outputs after move construction and assignment");
-
     std::cerr << "GPU: generated raster fields after move\n";
     RasterizerPipeline raster(baseline_vert_slang, baseline_frag_slang);
     using Raster = RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
@@ -686,6 +684,7 @@ int main(int argc, char** argv)
             test_shared_vertex_stage();
             test_generated_packet_and_attachment_load(true);
             test_generated_packet_and_attachment_load(false);
+            test_compute_dispatch_snapshots();
             test_compute_sampling();
         }
         else
