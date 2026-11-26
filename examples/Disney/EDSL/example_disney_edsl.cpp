@@ -19,8 +19,8 @@ DisneyEdsl::DisneyEdsl(void* native_window)
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
     for (const auto& [filename, face_size, mip_count, cubemap] : {
-            std::tuple{"bolonga_lod.dds", 256u, 9u, &radiance_map},
-            std::tuple{"bolonga_irr.dds", 128u, 1u, &irradiance_map}}) {
+            std::tuple{"bolonga_lod.dds", 256u, 9u, &radiance_image},
+            std::tuple{"bolonga_irr.dds", 128u, 1u, &irradiance_image}}) {
         uint32_t texels_per_face = 0;
         for (uint32_t mip = 0; mip < mip_count; ++mip) {
             const uint32_t dim = face_size >> mip;
@@ -36,13 +36,13 @@ DisneyEdsl::DisneyEdsl(void* native_window)
         desc.cube = true;
         desc.linearFiltering = true;
         desc.mipLevels = static_cast<int>(mip_count);
-        cubemap->createResource(desc);
+        *cubemap = HardwareImage(desc);
         HardwareBuffer staging(texels, BufferUsage::StorageBuffer);
         uint64_t offset = 0;
         for (uint32_t face = 0; face < 6; ++face) {
             for (uint32_t mip = 0; mip < mip_count; ++mip) {
                 const uint32_t dim = face_size >> mip;
-                render_executor << staging.copyTo(cubemap->image(), offset, face, mip);
+                render_executor << staging.copyTo(*cubemap, offset, face, mip);
                 offset += static_cast<uint64_t>(dim) * dim * sizeof(uint64_t);
             }
         }
@@ -136,8 +136,8 @@ DisneyEdsl::DisneyEdsl(void* native_window)
     using EmbeddedShader::rasterDrawParameter;
     using EmbeddedShader::sqrt;
 
-    final_output.createResource(HardwareImageCreateInfo(width, height, ImageFormat::RGBA16_FLOAT));
-    final_output.image().setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
+    final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
     auto edsl_vertex = [&](Float3 pos) {
         auto per_model = rasterDrawParameter<ktm::fmat4x4>(offsetof(DrawParameters, model) / sizeof(uint32_t));
@@ -302,5 +302,5 @@ void DisneyEdsl::run(float)
     batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
 
     render_executor << std::move(batch);
-    display.present(render_executor, final_output.image());
+    display.present(render_executor, final_output_image);
 }

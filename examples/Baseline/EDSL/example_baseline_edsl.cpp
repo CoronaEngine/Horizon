@@ -67,15 +67,15 @@ BaselineEdsl::BaselineEdsl(void* native_window)
 
         HardwareImageCreateInfo texture_info(texture_width, texture_height, ImageFormat::RGBA8_SRGB);
         texture_info.linearFiltering = true;
-        albedo.createResource(texture_info);
-        render_executor << albedo.image().copyFrom(pixels.get());
+        albedo_image = HardwareImage(texture_info);
+        render_executor << albedo_image.copyFrom(pixels.get());
         render_executor.commit().waitForDeferredResources();
     }
 
     using EmbeddedShader::Float2, EmbeddedShader::Float4;
     using EmbeddedShader::mul;
 
-    color.createResource(HardwareImageCreateInfo(width, height, ImageFormat::RGBA16_FLOAT));
+    color_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
 
     auto vertex_shader = [&](EmbeddedShader::Aggregate<VertexInput> vertex) -> Float2 {
         EmbeddedShader::position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
@@ -106,5 +106,5 @@ void BaselineEdsl::run(float seconds)
     auto batch = rasterizer.beginBatch();
     batch.drawIndirect(vertex_buffer, index_buffer, commands, 1);
     render_executor << std::move(batch);
-    display.present(render_executor, color.image());
+    display.present(render_executor, color_image);
 }

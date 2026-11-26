@@ -484,6 +484,13 @@ void test_compute_sampling()
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && std::ranges::all_of(pixels, [&](Pixel p) { return p == source[0]; }),
            "explicit compute cube sampler reads the requested mip");
+
+    HardwareImage nextCube(cubeInfo);
+    cube = nextCube;
+    executor << upload.copyTo(nextCube, sizeof(Pixel), 0, 1) << sampleCube(1) << result.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)) && std::ranges::all_of(pixels, [&](Pixel p) { return p == source[1]; }),
+           "the next dispatch samples the rebound cubemap");
 }
 
 void test_gpu()
@@ -582,15 +589,6 @@ void test_gpu()
     imageInfo.mipLevels = 2;
     HardwareImage image(imageInfo);
     HardwareImage imageCopy(imageInfo);
-    EmbeddedShader::ParseHelper::beginNotInitNode();
-    EmbeddedShader::TextureCubeProxy<ktm::fvec4> cube;
-    EmbeddedShader::ParseHelper::endNotInitNode();
-    HardwareImageCreateInfo cubeInfo(4, 4);
-    cubeInfo.cube = true;
-    cubeInfo.arrayLayers = 6;
-    cube.createResource(cubeInfo);
-    expect(cube.resource() == &cube.image() && static_cast<bool>(cube.image()),
-           "cube proxy binds its owned Horizon image");
     {
         HardwareImage owner(imageInfo);
         auto view = owner[1];

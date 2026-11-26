@@ -19,7 +19,6 @@
 // Forward declarations for Level 2 resource binding (defined in Horizon.h)
 struct HardwareImage;
 struct HardwareBuffer;
-struct HardwareImageCreateInfo;
 
 namespace EmbeddedShader
 {
@@ -882,22 +881,14 @@ namespace EmbeddedShader
 			}
 		}
 
-		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in Horizon.h (after HardwareImage is complete).
-		void createResource(const ::HardwareImageCreateInfo& createInfo);
-
-		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
+		// The image must outlive its use through this proxy.
 		Texture2DProxy(::HardwareImage& img) : Texture2DProxy()
 		{
 			boundResource_ = &img;
 		}
 
-		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
-		Texture2DProxy(::HardwareImage&& img) : Texture2DProxy()
-		{
-			ownedResource_ = std::make_unique<::HardwareImage>(std::move(img));
-			boundResource_ = ownedResource_.get();
-		}
+		Texture2DProxy(Texture2DProxy&&) noexcept = default;
+		Texture2DProxy& operator=(Texture2DProxy&&) noexcept = default;
 
 		// Texture2DProxy(SamplerProxy&& sampler)
 		// {
@@ -1003,13 +994,9 @@ namespace EmbeddedShader
 			if (tex) tex->renderTargetLocation = static_cast<int32_t>(location);
 		}
 
-		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
-		::HardwareImage& image() const { return *static_cast<::HardwareImage*>(ownedResource_.get()); }
-
 		std::shared_ptr<Ast::Value> node;
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
-		std::unique_ptr<::HardwareImage> ownedResource_;
 	    size_t* dirtyVersion = nullptr;
 	};
 
@@ -1040,22 +1027,14 @@ namespace EmbeddedShader
 			}
 		}
 
-		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in Horizon.h (after HardwareImage is complete).
-		void createResource(const ::HardwareImageCreateInfo& createInfo);
-
-		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
+		// The image must outlive its use through this proxy.
 		TextureCubeProxy(::HardwareImage& img) : TextureCubeProxy()
 		{
 			boundResource_ = &img;
 		}
 
-		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
-		TextureCubeProxy(::HardwareImage&& img) : TextureCubeProxy()
-		{
-			ownedResource_ = std::make_unique<::HardwareImage>(std::move(img));
-			boundResource_ = ownedResource_.get();
-		}
+		TextureCubeProxy(TextureCubeProxy&&) noexcept = default;
+		TextureCubeProxy& operator=(TextureCubeProxy&&) noexcept = default;
 
 		// Texture2DProxy(SamplerProxy&& sampler)
 		// {
@@ -1155,13 +1134,9 @@ namespace EmbeddedShader
 			if (tex) tex->renderTargetLocation = static_cast<int32_t>(location);
 		}
 
-		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
-		::HardwareImage& image() const { return *static_cast<::HardwareImage*>(ownedResource_.get()); }
-
 		std::shared_ptr<Ast::Value> node;
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
-		std::unique_ptr<::HardwareImage> ownedResource_;
         size_t* dirtyVersion = nullptr;
 	};
 

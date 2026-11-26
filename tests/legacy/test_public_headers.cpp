@@ -16,11 +16,15 @@ static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uint
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);
 static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
 static_assert(std::is_aggregate_v<HardwareImageCreateInfo>);
+static_assert(!std::is_constructible_v<EmbeddedShader::Texture2DProxy<ktm::fvec4>, HardwareImage&&>);
+static_assert(!std::is_constructible_v<EmbeddedShader::TextureCubeProxy<ktm::fvec4>, HardwareImage&&>);
 
 template<class T>
 concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T> &&
                          !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T>;
 static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer> && MoveOnlyHandle<RasterizerPipeline<>>);
+static_assert(MoveOnlyHandle<EmbeddedShader::Texture2DProxy<ktm::fvec4>>);
+static_assert(MoveOnlyHandle<EmbeddedShader::TextureCubeProxy<ktm::fvec4>>);
 
 template<class Shader>
 concept RawPipelineInput = std::is_constructible_v<ComputePipeline<>, const Shader&> ||

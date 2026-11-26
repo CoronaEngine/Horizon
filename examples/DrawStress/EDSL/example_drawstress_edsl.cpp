@@ -55,8 +55,8 @@ DrawStressEdsl::DrawStressEdsl(void* native_window)
         translations[i] = view_projection * ktm::fvec4(base + i * step, 1.0f);
 
     using EmbeddedShader::Float, EmbeddedShader::Float3, EmbeddedShader::Float4, EmbeddedShader::Uint;
-    output.createResource(HardwareImageCreateInfo(width, height, ImageFormat::RGBA16_FLOAT));
-    output.image().setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
+    output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
+    output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
     const auto vertex_shader = []() {
         const auto corner = EmbeddedShader::vertexIndex();
         Float3 color(corner & Uint(1), (corner >> Uint(1)) & Uint(1), (corner >> Uint(2)) & Uint(1));
@@ -115,5 +115,5 @@ void DrawStressEdsl::run(float seconds)
     batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
 
     render_executor << std::move(batch);
-    display.present(render_executor, output.image());
+    display.present(render_executor, output_image);
 }

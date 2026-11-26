@@ -541,20 +541,3 @@ private:
     HardwareExecutor& enqueue(const ComputePipeline<>& pipeline);
     std::uintptr_t executorID{0};
 };
-
-namespace EmbeddedShader
-{
-    template <typename Type>
-    void Texture2DProxy<Type>::createResource(const ::HardwareImageCreateInfo& createInfo)
-    {
-        ownedResource_ = std::make_unique<::HardwareImage>(createInfo);
-        *this = *ownedResource_;
-    }
-
-    template <typename Type>
-    void TextureCubeProxy<Type>::createResource(const ::HardwareImageCreateInfo& createInfo)
-    {
-        ownedResource_ = std::make_unique<::HardwareImage>(createInfo);
-        *this = *ownedResource_;
-    }
-} // namespace EmbeddedShader
