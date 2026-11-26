@@ -647,7 +647,7 @@ core + entryPoint + type_header + dependency modules + 每个分支选中的 tru
 4. 条件不变时只做一次轻量比较，不重新链接。
 
 调用计算管线的 `pipeline(x, y, z)` 时会重新读取 EDSL 条件。条件发生变化时，管线切换
-着色器变体并更新自动绑定。返回的 `HardwareCommand` 记录本次变体、绑定与工作组数量，
+着色器变体并更新自动绑定。返回的 `HardwareExecutor::Command` 记录本次变体、绑定与工作组数量，
 可在后续调度改变这些状态后再入队。
 
 #### 3.7 限制与排查

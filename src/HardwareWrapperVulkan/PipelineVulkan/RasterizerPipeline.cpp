@@ -397,7 +397,7 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-HardwareCommand::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
+HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
                                   std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
     : pipeline(std::move(backend)), state(pipeline->rasterState), pass(requestedPass.value_or(RasterPass{})),
       startsPass(requestedPass.has_value()),
@@ -430,7 +430,7 @@ HardwareCommand::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> back
     bindings = pipeline->bindings.snapshot();
 }
 
-bool HardwareCommand::Impl::Draw::canMerge(const Draw& next) const
+bool HardwareExecutor::Command::Impl::Draw::canMerge(const Draw& next) const
 {
     if (pipeline != next.pipeline || state != next.state || uniformBytes != next.uniformBytes)
         return false;
@@ -471,14 +471,14 @@ bool HardwareCommand::Impl::Draw::canMerge(const Draw& next) const
     return true;
 }
 
-bool HardwareCommand::Impl::Draw::sameAttachments(const Draw& next) const
+bool HardwareExecutor::Command::Impl::Draw::sameAttachments(const Draw& next) const
 {
     return imageSize == next.imageSize && pipeline->multiviewCount == next.pipeline->multiviewCount &&
            sameAttachment(depthImage, next.depthImage) &&
            std::ranges::equal(renderTargets, next.renderTargets, sameAttachment);
 }
 
-void HardwareCommand::Impl::Draw::prepareFramebuffer()
+void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
 {
     if (framebuffer) return;
     auto& lastFramebuffer = pipeline->lastFramebuffer;
@@ -590,7 +590,7 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 }
 
-void HardwareCommand::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                                 const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                                                 std::optional<ScissorRect> scissor)
 {
@@ -634,7 +634,7 @@ void HardwareCommand::Impl::Draw::appendIndirect(const HardwareBuffer& vertices,
     drawCount = count;
 }
 
-void HardwareCommand::Impl::Draw::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
+void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
@@ -678,7 +678,7 @@ void HardwareCommand::Impl::Draw::resolveResourceUses(std::span<const ResourceUs
     }
 }
 
-void HardwareCommand::Impl::Draw::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
+void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
 {
     prepareFramebuffer();
     const auto& graphics = *framebuffer->graphics;

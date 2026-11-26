@@ -58,8 +58,8 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
     return buffer;
 }
 
-HardwareCommand HardwareBuffer::createDeviceLocal(BufferUsage usage, const void* data,
-                                                  size_t elementCount, size_t elementSize)
+HardwareExecutor::Command HardwareBuffer::createDeviceLocal(BufferUsage usage, const void* data,
+                                                            size_t elementCount, size_t elementSize)
 {
     if (elementSize == 0)
         throw std::invalid_argument("Device-local buffer element size must be nonzero");
@@ -78,7 +78,7 @@ HardwareCommand HardwareBuffer::createDeviceLocal(BufferUsage usage, const void*
     HardwareBuffer destination;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
     destination.impl_ = new Impl(manager.createBuffer(count, stride, convertBufferUsage(usage), false, true));
-    HardwareCommand upload(nullptr);
+    HardwareExecutor::Command upload(nullptr);
     if (count) {
         HardwareBuffer staging(count, stride, BufferUsage::StorageBuffer, data);
         upload = staging.copyTo(destination);

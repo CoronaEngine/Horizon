@@ -12,12 +12,12 @@ HardwareExecutor::HardwareExecutor(HardwareExecutor&&) noexcept = default;
 HardwareExecutor::~HardwareExecutor() = default;
 HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&&) noexcept = default;
 
-HardwareExecutor& HardwareExecutor::operator<<(HardwareCommand command)
+HardwareExecutor& HardwareExecutor::operator<<(Command command)
 {
     if (!command.impl_) return *this;
     auto& executor = HardwareBackendAccess::executor(*this);
     auto* record = command.impl_->getCommandRecord();
-    using Draw = HardwareCommand::Impl::Draw;
+    using Draw = Command::Impl::Draw;
     auto* draw = dynamic_cast<Draw*>(record);
     if (!draw) {
         executor.record(record, {}, std::move(command.impl_));

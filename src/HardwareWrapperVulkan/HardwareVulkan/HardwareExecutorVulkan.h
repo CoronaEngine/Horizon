@@ -35,7 +35,7 @@ struct CommandRecordVulkan
 
 using horizon::detail::CommandRecordVulkan;
 
-struct HardwareCommand::Impl
+struct HardwareExecutor::Command::Impl
 {
     struct Draw;
     struct Dispatch;

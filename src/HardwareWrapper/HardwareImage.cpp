@@ -261,10 +261,10 @@ void HardwareImage::setClearColor(float r, float g, float b, float a)
     if (impl_) impl_->clearValue.color = {{r, g, b, a}};
 }
 
-HardwareCommand HardwareImage::copyFrom(const void *inputData, uint32_t imageLayer, uint32_t imageMip) const
+HardwareExecutor::Command HardwareImage::copyFrom(const void *inputData, uint32_t imageLayer, uint32_t imageMip) const
 {
-    if (!inputData || !*this) return HardwareCommand(nullptr);
-    if (imageMip >= impl_->mipLevels) return HardwareCommand(nullptr);
+    if (!inputData || !*this) return HardwareExecutor::Command(nullptr);
+    if (imageMip >= impl_->mipLevels) return HardwareExecutor::Command(nullptr);
     HardwareBuffer stagingBuffer(uploadByteCount(*impl_, imageMip), BufferUsage::StorageBuffer, inputData);
     return stagingBuffer.copyTo(*this, 0, imageLayer, imageMip);
 }

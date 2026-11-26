@@ -24,7 +24,7 @@ struct ComputePipelineVulkan
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType);
 
 private:
-    friend class ::HardwareCommand;
+    friend class ::HardwareExecutor::Command;
     void createComputePipeline();
 
     VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
@@ -44,7 +44,7 @@ private:
 
 using horizon::detail::ComputePipelineVulkan;
 
-struct HardwareCommand::Impl::Dispatch final : HardwareCommand::Impl, CommandRecordVulkan
+struct HardwareExecutor::Command::Impl::Dispatch final : HardwareExecutor::Command::Impl, CommandRecordVulkan
 {
     Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
              const std::vector<ResourceUse>& resources);

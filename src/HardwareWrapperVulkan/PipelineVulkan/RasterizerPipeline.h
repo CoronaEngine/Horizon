@@ -80,7 +80,7 @@ struct RasterizerPipelineVulkan
         ~FramebufferState();
     };
   private:
-    friend class ::HardwareCommand;
+    friend class ::HardwareExecutor::Command;
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
     std::mutex uploadMutex;
     void initializeStageBindings(uint32_t viewCount);
@@ -118,7 +118,7 @@ struct RasterizerPipelineVulkan
 
 using horizon::detail::RasterizerPipelineVulkan;
 
-struct HardwareCommand::Impl::Draw final : HardwareCommand::Impl, CommandRecordVulkan
+struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::Impl, CommandRecordVulkan
 {
     struct GeometryEntry {
         VkDeviceAddress vertices, indices;

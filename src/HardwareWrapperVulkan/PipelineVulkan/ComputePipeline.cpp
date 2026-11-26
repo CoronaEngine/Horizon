@@ -142,20 +142,20 @@ void ComputePipelineVulkan::createComputePipeline()
     vkDestroyShaderModule(device, shaderModule, nullptr);
 }
 
-HardwareCommand::Impl::Dispatch::Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
+HardwareExecutor::Command::Impl::Dispatch::Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
                                           const std::vector<ResourceUse>& resources)
     : backend(std::move(pipeline)), groupCount(groups),
       pushConstant(copyParameterBytes(backend->pushConstant.get(), backend->shaderCode.shaderResources.pushConstantSize)),
       uniformBytes(copyParameterBytes(backend->tempUBO.get(), backend->uboSize)),
       bindings(backend->bindings.snapshot()), resourceUses(resources) {}
 
-void HardwareCommand::Impl::Dispatch::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
+void HardwareExecutor::Command::Impl::Dispatch::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
 {
     resolveShaderBindings(result, bindings->values, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     resolveDeclaredUses(result, resourceUses, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }
 
-void HardwareCommand::Impl::Dispatch::commitCommand(HardwareExecutorVulkan& executor)
+void HardwareExecutor::Command::Impl::Dispatch::commitCommand(HardwareExecutorVulkan& executor)
 {
     if (!backend->pipelineLayout || !backend->pipeline) backend->createComputePipeline();
     const auto commandBuffer = executor.currentRecordQueue->commandBuffer;
