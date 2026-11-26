@@ -36,8 +36,9 @@ namespace EmbeddedShader
 	public:
 		static ComputePipelineObject compile(auto&& computeShaderCode, ktm::uvec3 numthreads = ktm::uvec3(1), CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
 	    [[nodiscard]] static std::string getCombinedKey(const ShaderCodeCompiler::ConditionInfo& conditionInfo);
-	    void updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo);
+	    ShaderCodeModule updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo);
 		std::unique_ptr<ShaderCodeCompiler> compute;
+		ShaderCodeCompiler::ConditionInfo conditions;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
 		std::unordered_set<std::string> sampledTextures;
@@ -49,8 +50,9 @@ namespace EmbeddedShader
         return "compute" + ShaderCodeCompiler::getCombinedKey(conditionInfo);
     }
 
-    inline void ComputePipelineObject::updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
+    inline ShaderCodeModule ComputePipelineObject::updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
     {
+        auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, compConditionInfo);
         // 分支组合变化时重新反射；清空旧表，避免旧 offset 残留。
         autoBindEntries.clear();
 
@@ -58,7 +60,6 @@ namespace EmbeddedShader
         // Walk all globally-defined textures and check if they have a back-pointer
         // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
         {
-            auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, compConditionInfo);
             auto& globals = Ast::Parser::getGlobalStatements();
             for (auto& stmt : globals)
             {
@@ -127,6 +128,7 @@ namespace EmbeddedShader
                 }
             }
         }
+        return codeModule;
     }
 
     ComputePipelineObject ComputePipelineObject::compile(auto&& computeShaderCode, ktm::uvec3 numthreads,CompilerOption compilerOption,std::source_location sourceLocation)
@@ -143,20 +145,27 @@ namespace EmbeddedShader
 	    compilerOption.typeHeader = outputs[0].typeHeader;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, compilerOption, sourceLocation);
 
-		result.updateAutoBind(result.compute->getCurrentConditionInfo());
+		result.conditions = result.compute->getCurrentConditionInfo();
+		result.updateAutoBind(result.conditions);
 
 		return result;
 	}
 
 	std::vector<Ast::ParseOutput> ComputePipelineObject::parse(auto&& computeShaderCode)
 	{
-		auto csFunc = std::function(std::forward<decltype(computeShaderCode)>(computeShaderCode));
+		using Function = decltype(std::function{computeShaderCode});
+		auto shader = std::make_shared<Function>(std::forward<decltype(computeShaderCode)>(computeShaderCode));
+		Function csFunc = std::ref(*shader);
 
 		Ast::Parser::beginShaderParse(Ast::ShaderStage::Compute);
 		if (ParseHelper::hasReturnValue(csFunc))
 			throw std::logic_error("Compute shader function doesn't have return value");
 		auto csParams = ParseHelper::createParamTuple(csFunc);
 		ParseHelper::callLambda(csFunc,std::move(csParams));
-		return Ast::Parser::endPipelineParse(sampledTextures);
+		auto outputs = Ast::Parser::endPipelineParse(sampledTextures);
+		// Host condition callbacks can reference captures inside the shader lambda.
+		for (auto& branch : outputs.front().branches)
+			branch.conditionDetector = [shader, detect = std::move(branch.conditionDetector)] { return detect(); };
+		return outputs;
 	}
 }

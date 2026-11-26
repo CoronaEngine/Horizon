@@ -15,6 +15,7 @@
 #include <utility>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string_view>
 #include <spirv-tools/libspirv.hpp>
@@ -417,6 +418,42 @@ void test_compute_dispatch_snapshots()
            "second pipeline dispatch survives move assignment and only its first word is overwritten");
 }
 
+void test_compute_shader_variants()
+{
+    using namespace EmbeddedShader;
+    std::array<uint32_t, 3> words{};
+    HardwareBuffer outputBuffer(words, BufferUsage::StorageBuffer);
+    HardwareBuffer inputBuffer(std::array{42u}, BufferUsage::StorageBuffer);
+    HardwareExecutor executor;
+    {
+        ArrayProxy<uint32_t> input(inputBuffer), output(outputBuffer);
+        Uint slot;
+        auto flag = std::make_shared<bool>(false);
+        std::weak_ptr<bool> capturedFlag = flag;
+        ComputePipeline pipeline([&, useInput = std::move(flag)] {
+            Uint value;
+            value = Uint(10) + slot;
+            $IF(*useInput) { value = value + input[0]; };
+            output[slot] = value;
+        });
+
+        auto useInput = capturedFlag.lock();
+        expect(useInput != nullptr, "the EDSL condition retains its shader capture");
+        slot = 0u;
+        pipeline(1);
+        *useInput = true;
+        executor << pipeline; // The first dispatch was prepared with useInput false.
+        slot = 1u;
+        executor << pipeline(1);
+        *useInput = false;
+        slot = 2u;
+        executor << pipeline(1);
+    }
+    executor.commit().waitForDeferredResources();
+    expect(outputBuffer.copyToData(words) && words == std::array{10u, 53u, 12u},
+           "queued false/true/false dispatches retain their shader variant, buffer bindings and slot");
+}
+
 void test_compute_sampling()
 {
     using namespace EmbeddedShader;
@@ -694,6 +731,7 @@ int main(int argc, char** argv)
             test_generated_packet_and_attachment_load(true);
             test_generated_packet_and_attachment_load(false);
             test_compute_dispatch_snapshots();
+            test_compute_shader_variants();
             test_compute_sampling();
         }
         else

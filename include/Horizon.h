@@ -365,6 +365,7 @@ private:
     horizon::detail::ComputePipelineVulkan& backend() const;
 
     std::shared_ptr<horizon::detail::ComputePipelineVulkan> computePipeline_;
+    std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants_;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
     std::vector<ResourceUse> resourceUses_;
 
@@ -381,7 +382,7 @@ public:
     ComputePipeline(ComputePipeline&&) noexcept = default;
     ComputePipeline& operator=(ComputePipeline&&) noexcept = default;
 
-    // Set workgroup counts and read proxy bindings. The executor snapshots them at enqueue.
+    // Select the EDSL variant, read its proxy bindings and set the workgroup counts for enqueue.
     ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
 
     ComputePipeline& uses(std::span<const ResourceUse> resources)

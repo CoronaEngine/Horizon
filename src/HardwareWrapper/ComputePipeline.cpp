@@ -13,8 +13,13 @@ ComputePipeline<CS>::ComputePipeline(const EmbeddedShader::ShaderCodeModule& mod
 
 template<class CS>
 ComputePipeline<CS>::ComputePipeline(EmbeddedShader::ComputePipelineObject shader)
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>(shader.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV))),
-      autoBindEntries_(std::move(shader.autoBindEntries)) {}
+    : computePipeline_(std::make_shared<ComputePipelineVulkan>(
+          shader.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, shader.conditions))),
+      autoBindEntries_(std::move(shader.autoBindEntries))
+{
+    if (!shader.conditions.empty())
+        variants_ = std::make_unique<EmbeddedShader::ComputePipelineObject>(std::move(shader));
+}
 
 template<class CS>
 ComputePipelineVulkan& ComputePipeline<CS>::backend() const
@@ -46,6 +51,17 @@ void ComputePipeline<CS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSi
 template<class CS>
 ComputePipeline<CS>& ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
+    if (variants_)
+    {
+        auto conditions = variants_->compute->getCurrentConditionInfo();
+        if (conditions != variants_->conditions)
+        {
+            computePipeline_ = std::make_shared<ComputePipelineVulkan>(variants_->updateAutoBind(conditions));
+            autoBindEntries_ = std::move(variants_->autoBindEntries);
+            variants_->conditions = std::move(conditions);
+        }
+    }
+
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
     for (const auto& entry : autoBindEntries_)
     {
