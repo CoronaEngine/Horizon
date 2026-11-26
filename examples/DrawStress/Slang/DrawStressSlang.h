@@ -2,6 +2,9 @@
 
 #include "../../ExampleBase.h"
 #include "Horizon.h"
+#include "Codegen/ControlFlows.h"
+#include SLANG(DrawStress/Slang/drawstress_vert.slang)
+#include SLANG(DrawStress/Slang/drawstress_frag.slang)
 
 #include <array>
 #include <cstddef>
@@ -26,6 +29,6 @@ private:
     ktm::fvec4 axis_projection;
     std::array<ktm::fvec4, dim> translations;
     HardwareImage final_output_image;
-    RasterizerPipeline<> rasterizer;
+    RasterizerPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> pipeline;
     HardwareExecutor render_executor;
 };

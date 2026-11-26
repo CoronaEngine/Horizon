@@ -9,10 +9,6 @@
 #undef STB_IMAGE_STATIC
 #include <tiny_obj_loader.h>
 
-#include "Codegen/ControlFlows.h"
-#include SLANG(baseline_vert.slang)
-#include SLANG(baseline_frag.slang)
-
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -73,7 +69,6 @@ BaselineSlang::BaselineSlang(void* native_window)
         render_executor.commit().waitForDeferredResources();
     }
 
-    RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> pipeline;
     pipeline.setRasterState({.compare = RasterCompare::LessEqual});
     pipeline.outColor = color;
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
@@ -89,7 +84,6 @@ BaselineSlang::BaselineSlang(void* native_window)
     auto projection = ktm::frustum_rh(-right, right, top, -top, near_plane, far_plane);
     projection[1][1] *= -1.0f; // Vulkan clip-space Y.
     pipeline.vp.proj = projection;
-    rasterizer = std::move(pipeline);
 }
 
 void BaselineSlang::run(float seconds)
@@ -102,7 +96,7 @@ void BaselineSlang::run(float seconds)
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
     parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
-    auto batch = rasterizer.beginBatch();
+    auto batch = pipeline.beginBatch();
     batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer);
     render_executor << std::move(batch);
     display.present(render_executor, color);

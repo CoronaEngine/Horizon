@@ -1,9 +1,4 @@
 #include "DrawStressSlang.h"
-#include "Codegen/ControlFlows.h"
-
-#include SLANG(drawstress_vert.slang)
-#include SLANG(drawstress_frag.slang)
-
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -57,9 +52,7 @@ DrawStressSlang::DrawStressSlang(void* native_window)
         translations[i] = view_projection * ktm::fvec4(base + i * step, 1.0f);
 
     final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
-    RasterizerPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> pipeline;
     pipeline.outColor = final_output_image;
-    rasterizer = std::move(pipeline);
 }
 
 void DrawStressSlang::run(float seconds)
@@ -104,7 +97,7 @@ void DrawStressSlang::run(float seconds)
     }
     parameters.flushMapped();
 
-    auto batch = rasterizer.beginBatch();
+    auto batch = pipeline.beginBatch();
     batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
 
     render_executor << std::move(batch);

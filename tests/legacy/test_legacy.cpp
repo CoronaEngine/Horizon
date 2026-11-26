@@ -25,9 +25,11 @@ void expect(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
-struct GeneratedComputeStage
+template<EmbeddedShader::ShaderStage stage>
+struct GeneratedStage
 {
     static inline EmbeddedShader::SlangModule slangModule;
+    static constexpr size_t uniformBufferBlockSize = stage == EmbeddedShader::ShaderStage::FragmentShader ? sizeof(float) : 0;
 
     template<class Pipeline>
     struct Bindings
@@ -35,6 +37,22 @@ struct GeneratedComputeStage
         explicit Bindings(Pipeline* pipeline)
             : output(pipeline, 0, sizeof(uint32_t), EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers, 0) {}
         EmbeddedShader::BoundField<Pipeline> output;
+    };
+
+    template<class Pipeline>
+    struct ResourceBindings
+    {
+        struct { EmbeddedShader::BoundField<Pipeline> view; } vp;
+        explicit ResourceBindings(Pipeline* pipeline)
+            : vp{{pipeline, 0, sizeof(float), EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBufferMembers, 0}} {}
+    };
+
+    template<class Pipeline>
+    struct OutputBindings
+    {
+        EmbeddedShader::BoundField<Pipeline> outColor;
+        explicit OutputBindings(Pipeline* pipeline)
+            : outColor(pipeline, 0, 0, EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs, 0) {}
     };
 };
 
@@ -568,8 +586,11 @@ void test_gpu()
         [shader("compute")] [numthreads(1,1,1)]
         void main() { outputs[params.outputIndex][0] = 47; }
     )";
-    GeneratedComputeStage::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
-    ComputePipeline<GeneratedComputeStage> generated;
+    using Compute = GeneratedStage<EmbeddedShader::ShaderStage::ComputeShader>;
+    Compute::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
+    ComputePipeline generated(Compute{});
+    static_assert(std::same_as<decltype(generated), ComputePipeline<Compute>>);
+    static_assert(!std::is_base_of_v<ComputePipeline<>, decltype(generated)>);
     auto moved = std::move(generated);
     moved.output = destination;
     executor << moved(1);
@@ -581,6 +602,53 @@ void test_gpu()
     expect(destination.copyToData(&afterConstruction, sizeof(afterConstruction)) && afterConstruction == 47 &&
            source.copyToData(&afterAssignment, sizeof(afterAssignment)) && afterAssignment == 47,
            "generated fields bind independent outputs after move construction and assignment");
+
+    std::cerr << "GPU: generated raster fields after move\n";
+    using Vertex = GeneratedStage<EmbeddedShader::ShaderStage::VertexShader>;
+    using Fragment = GeneratedStage<EmbeddedShader::ShaderStage::FragmentShader>;
+    moduleArgs.moduleName = "legacy_vertex";
+    moduleArgs.shaderCode = R"(
+        [shader("vertex")] float4 main(uint id : SV_VertexID) : SV_Position {
+            return float4(float2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0, 1);
+        }
+    )";
+    Vertex::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
+    moduleArgs.moduleName = "legacy_fragment";
+    moduleArgs.shaderCode = R"(
+        struct Parameters { float view; };
+        [[vk::binding(0, 3)]] ConstantBuffer<Parameters> vp;
+        [shader("fragment")] void main(out float4 outColor : SV_Target0) {
+            outColor = float4(vp.view, 0, 0, 1);
+        }
+    )";
+    Fragment::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
+    RasterizerPipeline raster(Vertex{}, Fragment{});
+    static_assert(std::same_as<decltype(raster), RasterizerPipeline<Vertex, Fragment>>);
+    static_assert(!std::is_base_of_v<RasterizerPipeline<>, decltype(raster)>);
+    HardwareImage first(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareImage second(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareBuffer vertices(std::array<float, 3>{}, BufferUsage::VertexBuffer);
+    HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);
+    HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}}, BufferUsage::RasterIndirect);
+
+    auto movedRaster = std::move(raster);
+    movedRaster.outColor = first;
+    movedRaster.vp.view = 0.25f;
+    auto firstBatch = movedRaster.beginBatch();
+    firstBatch.drawIndirect(vertices, indices, packets, 1);
+    raster = std::move(movedRaster);
+    raster.outColor = second;
+    raster.vp.view = 0.75f;
+    auto secondBatch = raster.beginBatch();
+    secondBatch.drawIndirect(vertices, indices, packets, 1);
+    std::array<std::array<float, 4>, 2> pixels{};
+    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
+    executor << std::move(firstBatch) << std::move(secondBatch)
+             << first.copyTo(readback) << second.copyTo(readback, 0, 0, sizeof(pixels[0]));
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)) &&
+           pixels[0] == std::array{0.25f, 0.f, 0.f, 1.f} && pixels[1] == std::array{0.75f, 0.f, 0.f, 1.f},
+           "moved raster fields bind each attachment and snapshot its uniform value");
 }
 }
 

@@ -38,11 +38,11 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::operator<<(ComputePipeline<>& computePipeline)
+HardwareExecutor& HardwareExecutor::enqueue(const horizon::detail::ComputePipelineState& state)
 {
     auto* executor = execFromId(executorID);
-    if (const auto& pipeline = computePipeline.computePipeline_)
-        executor->recordOwned(pipeline->capture(), computePipeline.resourceUses_);
+    if (const auto& pipeline = state.computePipeline_)
+        executor->recordOwned(pipeline->capture(), state.resourceUses_);
     return *this;
 }
 

@@ -2,6 +2,9 @@
 
 #include "../../ExampleBase.h"
 #include "Horizon.h"
+#include "Codegen/ControlFlows.h"
+#include SLANG(Baseline/Slang/baseline_vert.slang)
+#include SLANG(Baseline/Slang/baseline_frag.slang)
 
 #include <array>
 #include <cstddef>
@@ -19,7 +22,7 @@ private:
     HardwareBuffer vertex_buffer, index_buffer, commands;
     HardwareImage texture_image;
     HardwareImage color;
-    RasterizerPipeline<> rasterizer;
+    RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> pipeline;
     struct DrawParameters {
         ktm::fmat4x4 model{};
         uint32_t texIndex{};

@@ -3,76 +3,72 @@
 #include "Horizon.h"
 #include <stdexcept>
 
-RasterizerPipeline<>::RasterizerPipeline()
-{
-    rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>();
-}
+using horizon::detail::RasterPipelineState;
 
-RasterizerPipeline<>::RasterizerPipeline(std::string vertex, std::string fragment,
+RasterPipelineState::RasterPipelineState()
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>()) {}
+
+RasterPipelineState::RasterPipelineState(std::string vertex, std::string fragment, uint32_t views,
+                                         const std::source_location& location)
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(std::move(vertex), std::move(fragment), views, location)) {}
+
+RasterPipelineState::RasterPipelineState(const EmbeddedShader::ShaderCodeModule& vertex,
+                                         const EmbeddedShader::ShaderCodeModule& fragment,
                                          uint32_t views, const std::source_location& location)
-    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(std::move(vertex), std::move(fragment), views, location))
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, views, location)) {}
+
+RasterPipelineState::RasterPipelineState(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views,
+                                         const std::source_location& location)
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(*shaders.vertex, *shaders.fragment, views, location)),
+      vertexConditions_(shaders.vertex->getCurrentConditionInfo()), fragmentConditions_(shaders.fragment->getCurrentConditionInfo()),
+      autoBindEntries_(std::move(shaders.autoBindEntries))
 {
+    if (!vertexConditions_.empty() || !fragmentConditions_.empty())
+        variants_ = std::make_unique<EmbeddedShader::RasterizedPipelineObject>(std::move(shaders));
 }
 
-RasterizerPipeline<>::RasterizerPipeline(const EmbeddedShader::ShaderCodeModule &vertexSpirV, const EmbeddedShader::ShaderCodeModule &fragmentSpirV, uint32_t multiviewCount, const std::source_location &src)
-{
-    rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vertexSpirV, fragmentSpirV, multiviewCount, src);
-}
-
-// 辅助函数：从已编译的 ShaderCodeCompiler 初始化 RasterizerPipeline
-void RasterizerPipeline<>::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& vertex,
-                                            EmbeddedShader::ShaderCodeCompiler& fragment,
-                                            uint32_t views, const std::source_location& src)
-{
-    rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, views, src);
-}
-
-RasterizerPipeline<>::RasterizerPipeline(RasterizerPipeline<>&&) noexcept = default;
-RasterizerPipeline<>::~RasterizerPipeline() = default;
-RasterizerPipeline<>& RasterizerPipeline<>::operator=(RasterizerPipeline<>&&) noexcept = default;
-
-RasterizerPipelineVulkan& RasterizerPipeline<>::backend() const
+RasterizerPipelineVulkan& RasterPipelineState::backend() const
 {
     if (!rasterizerPipeline_) throw std::logic_error("Empty raster pipeline handle");
     return *rasterizerPipeline_;
 }
 
-void RasterizerPipeline<>::setDepthImage(HardwareImage &depthImage)
+void RasterPipelineState::setDepthImage(HardwareImage &depthImage)
 {
     backend().setDepthImage(depthImage);
 }
 
-void RasterizerPipeline<>::setDepthEnabled(bool enabled)
+void RasterPipelineState::setDepthEnabled(bool enabled)
 {
     backend().setDepthEnabled(enabled);
 }
 
-void RasterizerPipeline<>::setRasterState(RasterState state)
+void RasterPipelineState::setRasterState(RasterState state)
 {
     backend().setRasterState(state);
 }
 
-HardwareImage RasterizerPipeline<>::getDepthImage()
+HardwareImage RasterPipelineState::getDepthImage()
 {
     return backend().getDepthImage();
 }
 
-void RasterizerPipeline<>::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
+void RasterPipelineState::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
     backend().setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
-void RasterizerPipeline<>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void RasterPipelineState::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
     backend().setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
-void RasterizerPipeline<>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
+void RasterPipelineState::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
 {
     backend().setResourceDirect(byteOffset, typeSize, image, bindType, location);
 }
 
-RasterBatch RasterizerPipeline<>::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
+RasterBatch RasterPipelineState::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
 {
     if (variants_) refreshShaderVariant();
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
@@ -104,7 +100,7 @@ void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuf
                                                                           parameters, scissor);
 }
 
-void RasterizerPipeline<>::refreshShaderVariant()
+void RasterPipelineState::refreshShaderVariant()
 {
     auto vertex = variants_->vertex->getCurrentConditionInfo();
     auto fragment = variants_->fragment->getCurrentConditionInfo();

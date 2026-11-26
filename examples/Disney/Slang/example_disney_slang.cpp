@@ -1,9 +1,4 @@
 #include "DisneySlang.h"
-#include "Codegen/ControlFlows.h"
-
-#include SLANG(disney_vert.slang)
-#include SLANG(disney_frag.slang)
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -123,7 +118,6 @@ DisneySlang::DisneySlang(void* native_window)
     render_executor.commit().waitForDeferredResources();
 
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
-    RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> pipeline;
     pipeline.outColor = final_output_image;
     pipeline.setRasterState({.topology = RasterTopology::TriangleStrip});
     pipeline.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
@@ -138,12 +132,11 @@ DisneySlang::DisneySlang(void* native_window)
     pipeline.vsp.lightDir = ktm::fvec4(ktm::normalize(ktm::fvec3(-0.35f, 0.55f, -0.75f)), 0.0f);
     pipeline.vsp.texCubeIndex = radiance;
     pipeline.vsp.texCubeIrrIndex = irradiance;
-    rasterizer = std::move(pipeline);
 }
 
 void DisneySlang::run(float)
 {
-    auto batch = rasterizer.beginBatch();
+    auto batch = pipeline.beginBatch();
     batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
 
     render_executor << std::move(batch);

@@ -49,6 +49,12 @@ struct RasterPipelineAdapter {
     operator RasterizerPipeline<>() const;
 };
 
+struct ComputePipelineAdapter {
+    operator ComputePipeline<>() const;
+};
+
+static_assert(std::same_as<decltype(ComputePipeline(ComputePipelineAdapter{})), ComputePipeline<>>);
+
 static_assert(requires(RasterizerPipeline<>& pipeline, RasterPipelineAdapter adapter) {
     { RasterizerPipeline{} } -> std::same_as<RasterizerPipeline<>>;
     { RasterizerPipeline(std::move(pipeline)) } -> std::same_as<RasterizerPipeline<>>;

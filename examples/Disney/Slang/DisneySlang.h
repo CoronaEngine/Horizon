@@ -2,6 +2,9 @@
 
 #include "../../ExampleBase.h"
 #include "Horizon.h"
+#include "Codegen/ControlFlows.h"
+#include SLANG(Disney/Slang/disney_vert.slang)
+#include SLANG(Disney/Slang/disney_frag.slang)
 
 #include <cstddef>
 #include <ktm/ktm.h>
@@ -32,6 +35,6 @@ private:
     HardwareImage radiance, irradiance;
     HardwareBuffer vertex_buffer, index_buffer, commands, parameter_buffer;
     HardwareImage final_output_image;
-    RasterizerPipeline<> rasterizer;
+    RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> pipeline;
     HardwareExecutor render_executor;
 };

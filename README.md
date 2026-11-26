@@ -267,7 +267,7 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 源码字符串由 Helicon 的 Slang 编译器处理。构造管线时使用 `ComputePipeline(source)` 或 `RasterizerPipeline(vertexSource, fragmentSource, multiviewCount)`，迁移旧调用时删去 `ShaderLanguage` 实参。
 
-需要接收任意计算或光栅管线的函数可以分别使用 `ComputePipeline<>&` 和 `RasterizerPipeline<>&`。这两个默认特化也直接支持 EDSL、Slang 源码和已编译模块。
+EDSL、Slang 源码和已编译模块共用 `ComputePipeline` 或 `RasterizerPipeline` 主模板。传入生成的 shader 对象时，管线会保留具名字段，例如 `RasterizerPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 支持 `pipeline.outColor` 和 `pipeline.vp.view`。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterizerPipeline<VS, FS>&`，由函数模板推导阶段类型。
 
 `batch.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 执行命令缓冲中的前 `count` 条记录。同一个 batch 可以多次调用，按录入顺序在同一 render pass 中绘制。每次调用独立选择几何缓冲、参数和裁剪矩形。CPU 预先生成的命令可以与顶点和索引一起上传，并在后续帧中复用。
 

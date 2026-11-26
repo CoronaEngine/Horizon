@@ -2,12 +2,15 @@ add_executable(HorizonExamples
     main.cpp
     Baseline/Tutorial/28_model_loading.cpp
     Baseline/EDSL/example_baseline_edsl.cpp
+    Baseline/Slang/BaselineSlang.h
     Baseline/Slang/example_baseline_slang.cpp
     Baseline/Ocarina/example_baseline_ocarina.cpp
     Disney/EDSL/example_disney_edsl.cpp
+    Disney/Slang/DisneySlang.h
     Disney/Slang/example_disney_slang.cpp
     Disney/Ocarina/example_disney_ocarina.cpp
     DrawStress/EDSL/example_drawstress_edsl.cpp
+    DrawStress/Slang/DrawStressSlang.h
     DrawStress/Slang/example_drawstress_slang.cpp
     DrawStress/Ocarina/example_drawstress_ocarina.cpp
 )

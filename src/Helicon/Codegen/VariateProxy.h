@@ -1284,8 +1284,6 @@ namespace EmbeddedShader
 
 	// Pipeline-bound field proxy for direct member access syntax:
 	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
-	// PipelineType is RasterizerPipeline or ComputePipeline.
-	// operator= implementation is supplied by Horizon.h.
 	template<typename PipelineType>
 	struct BoundField
 	{
@@ -1303,7 +1301,17 @@ namespace EmbeddedShader
 			  set(set_), binding(binding_) {}
 
 		template<typename T>
-		BoundField& operator=(const T& value);
+		BoundField& operator=(const T& value)
+		{
+			if (!pipeline_) return *this;
+			if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareImage>)
+				pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType, location);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer>)
+				pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType);
+			else
+				pipeline_->setPushConstantDirect(byteOffset, &value, sizeof(T), bindType);
+			return *this;
+		}
 	};
 
 	template<typename ElementType>
