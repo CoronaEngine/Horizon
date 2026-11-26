@@ -208,7 +208,7 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCo
 using ShaderResources = ShaderCodeModule::ShaderResources;
 
 // A stage binding group receives p in its constructor. A raster specialization
-// binds each direct member to its own pipeline state, including after a move.
+// binds each direct member to its own pipeline, including after a move.
 static void emitBoundField(std::ostream& out, const ShaderResources::ShaderBindInfo& field,
                            std::string_view stateType, std::vector<std::string>* ctorInits,
                            std::string_view indent = "    ")
@@ -224,7 +224,7 @@ static void emitBoundField(std::ostream& out, const ShaderResources::ShaderBindI
     if (ctorInits)
         ctorInits->push_back(field.variateName + "(p" + args.str() + ")");
     else
-        out << "{&pipeline_.state_" << args.str() << "}";
+        out << "{&pipeline_" << args.str() << "}";
     out << ";\n";
 }
 
@@ -252,7 +252,7 @@ static void emitResourceFields(std::ostream& out, const ShaderResources& resourc
         if (ctorInits)
             ctorInits->push_back(name + "(p)");
         else
-            out << "{&pipeline_.state_}";
+            out << "{&pipeline_}";
         out << ";\n";
     };
     emitBlock(resources.pushConstantName, ShaderResources::pushConstantMembers);
@@ -571,7 +571,6 @@ static int generateRasterPair(int argc, char** argv)
          << "#include \"" << fragmentHeader.generic_string() << "\"\n\n"
          << "template<> struct RasterizerPipeline<" << vertexType << ", " << fragmentType << "> {\n"
          << R"(private:
-    using State = horizon::detail::RasterPipelineState;
     ::RasterizerPipeline<> pipeline_;
 
 public:
@@ -616,8 +615,8 @@ public:
 
 )";
     const auto& resources = !vs.uniformBufferSize && fs.uniformBufferSize ? fs : vs;
-    emitResourceFields(code, resources, "State", nullptr);
-    emitOutputFields(code, fs, "State", nullptr);
+    emitResourceFields(code, resources, "::RasterizerPipeline<>", nullptr);
+    emitOutputFields(code, fs, "::RasterizerPipeline<>", nullptr);
     code << "};\n";
 
     std::ofstream header(output);
