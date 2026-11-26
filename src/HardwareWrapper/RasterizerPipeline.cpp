@@ -37,12 +37,6 @@ void RasterizerPipeline<VS, FS>::setDepthImage(HardwareImage& depthImage)
 }
 
 template<class VS, class FS>
-void RasterizerPipeline<VS, FS>::setDepthEnabled(bool enabled)
-{
-    backend().setDepthEnabled(enabled);
-}
-
-template<class VS, class FS>
 void RasterizerPipeline<VS, FS>::setRasterState(RasterState state)
 {
     backend().setRasterState(state);

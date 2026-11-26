@@ -177,7 +177,7 @@ void test_raster_batch(bool forceSingleDraw)
         };
         RasterizerPipeline pipeline(vs, fs);
         pipeline.bindRenderTarget(0, overrideColor);
-        pipeline.setDepthEnabled(false);
+        pipeline.setRasterState({.depthTest = false, .depthWrite = false});
         auto batch = pipeline.beginBatch(4, 2);
         // One triangle covers the screen, the other covers only the second pixel row.
         const std::array<std::array<float, 3>, 6> vertices{{
@@ -236,7 +236,7 @@ void test_raster_sampled_storage_image()
     auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
     auto fs = [&] { output << texture.sample(Float2(0.5f)); };
     RasterizerPipeline pipeline(vs, fs);
-    pipeline.setDepthEnabled(false);
+    pipeline.setRasterState({.depthTest = false, .depthWrite = false});
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
     HardwareBuffer vertexBuffer(vertices, BufferUsage::VertexBuffer);
     HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);

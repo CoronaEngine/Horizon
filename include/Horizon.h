@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +10,6 @@
 #include <span>
 #include <utility>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <variant>
@@ -24,14 +22,6 @@
 #include "Compiler/ShaderCodeCompiler.h"
 #include <ktm/ktm.h>
 
-// Forward declare platform-specific types instead of including platform headers
-#if defined(_WIN32)
-// Forward declare HANDLE without including Windows.h
-#if !defined(_WINDEF_)
-typedef void* HANDLE;
-#endif
-#endif
-
 namespace horizon::detail {
 struct CommandRecordVulkan;
 struct ComputePipelineVulkan;
@@ -40,7 +30,6 @@ struct CopyCommandImpl;
 }
 
 struct HardwareExecutor;
-struct HardwareBuffer;
 struct HardwareImage;
 
 // Transfers retain both resources. A zero buffer copy size uses the source remainder.
@@ -126,8 +115,8 @@ concept IsContainer = requires(T a) {
 
 struct ExternalHandle
 {
-#if _WIN32 || _WIN64
-    HANDLE handle = nullptr;
+#if defined(_WIN32)
+    void* handle = nullptr;
 #else
     int fd = -1;
 #endif
@@ -153,13 +142,6 @@ public:
     {
     }
 
-    // Stage initial data once for GPU reads. The returned allocation is not mapped.
-    template <horizon::detail::IsContainer Container>
-    [[nodiscard]] static HardwareBuffer uploadDeviceLocal(const Container& input, BufferUsage usage) {
-        static_assert(std::is_trivially_copyable_v<std::remove_cvref_t<decltype(input[0])>>);
-        return uploadDeviceLocal(input.size(), sizeof(input[0]), usage, input.data());
-    }
-
     // Replace this handle with a new device-local allocation and queue its initial upload.
     // The executor owns the staged bytes, so the caller may release data on return.
     void createDeviceLocal(HardwareExecutor& executor, BufferUsage usage, const void* data,
@@ -175,7 +157,6 @@ public:
     explicit operator bool() const;
 
     ExternalHandle exportBufferMemory();
-    // HardwareBuffer importBufferMemory(const ExternalHandle &memHandle);
 
     [[nodiscard]] uint32_t storeDescriptor() const;
 
@@ -211,13 +192,9 @@ public:
     }
 
 private:
-    static HardwareBuffer uploadDeviceLocal(size_t count, size_t stride, BufferUsage usage, const void* data);
-    static HardwareBuffer stageDeviceLocal(HardwareExecutor& upload, size_t count, size_t stride,
-                                           BufferUsage usage, const void* data);
     static HardwareBuffer rasterUpload(uint32_t bytes);
     std::uintptr_t bufferID{0};
 
-    friend class HardwareImage;
     friend struct horizon::detail::RasterizerPipelineVulkan;
 };
 
@@ -232,13 +209,6 @@ struct HardwareImageCreateInfo
     int mipLevels { 1 };
     bool cube{};
     bool linearFiltering{}; // Linear min/mag/mip filtering with supported anisotropy.
-    // void *initialData{nullptr};
-
-    HardwareImageCreateInfo() = default;
-    HardwareImageCreateInfo(uint32_t w, uint32_t h, ImageFormat fmt = ImageFormat::RGBA8_SRGB)
-        : width(w), height(h), format(fmt)
-    {
-    }
 };
 
 // ================= 对外封装：HardwareImage =================
@@ -277,13 +247,8 @@ public:
                                      uint32_t imageMip = 0, uint64_t bufferOffset = 0) const;
     [[nodiscard]] CopyCommand copyFrom(const void* inputData, uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
 
-    //[[nodiscard]] uint32_t getNumMipLevels() const;
-    //[[nodiscard]] uint32_t getArrayLayers() const;
-
 private:
     std::uintptr_t imageID{0};
-
-    friend class HardwareDisplayer;
 };
 
 enum class ResourceAccess : uint8_t
@@ -299,9 +264,6 @@ struct ResourceUse
     ResourceAccess access;
 };
 
-// Forward declarations
-template<class CS = void>
-struct ComputePipeline;
 template<class VS = void, class FS = void>
 struct RasterizerPipeline;
 
@@ -363,11 +325,9 @@ struct HardwareDisplayer
 public:
     explicit HardwareDisplayer(void* surface = nullptr,
                                PresentDevicePreference preference = PresentDevicePreference::AlternateDevice);
-    HardwareDisplayer(const HardwareDisplayer& other) = delete;
     HardwareDisplayer(HardwareDisplayer&& other) noexcept;
     ~HardwareDisplayer();
 
-    HardwareDisplayer& operator=(const HardwareDisplayer& other) = delete;
     HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept;
     HardwareDisplayer& operator<<(const HardwareImage& image);
     // Commit pending work and present its output. A skipped presentation still commits the work.
@@ -387,7 +347,7 @@ private:
     void* displaySurface{nullptr};
 };
 
-template<class CS>
+template<class CS = void>
 struct ComputePipeline
 {
     static_assert(std::same_as<CS, void>, "A named compute stage must provide shader bindings");
@@ -472,8 +432,6 @@ public:
 
 template<class CS> requires requires { CS::shaderModule; typename CS::template Bindings<ComputePipeline<>>; }
 ComputePipeline(const CS&) -> ComputePipeline<CS>;
-template<class T> requires std::constructible_from<ComputePipeline<>, T>
-ComputePipeline(T&&) -> ComputePipeline<>;
 
 template<class VS, class FS>
 struct RasterizerPipeline
@@ -513,10 +471,6 @@ public:
         : RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject::compile(
               std::forward<V>(vertex), std::forward<F>(fragment), options, location), views) {}
 
-    RasterizerPipeline(RasterizerPipeline&&) noexcept = default;
-    RasterizerPipeline& operator=(RasterizerPipeline&&) noexcept = default;
-
-    void setDepthEnabled(bool enabled);
     void setRasterState(RasterState state);
     void setDepthImage(HardwareImage& image);
     [[nodiscard]] HardwareImage getDepthImage();
@@ -548,19 +502,14 @@ extern template struct RasterizerPipeline<void, void>;
 template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
 RasterizerPipeline(const VS&, const FS&, uint32_t = 1) -> RasterizerPipeline<VS, FS>;
 
-template<class Arg> requires std::constructible_from<RasterizerPipeline<>, Arg>
-RasterizerPipeline(Arg&&) -> RasterizerPipeline<>;
-
 // ================= 对外封装：HardwareExecutor =================
 struct HardwareExecutor
 {
 public:
     HardwareExecutor();
-    HardwareExecutor(const HardwareExecutor& other) = delete;
     HardwareExecutor(HardwareExecutor&& other) noexcept;
     ~HardwareExecutor();
 
-    HardwareExecutor& operator=(const HardwareExecutor& other) = delete;
     HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
 
     template<class CS>

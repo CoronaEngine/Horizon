@@ -196,16 +196,12 @@ static void emitOutputFields(std::ostream& out, const ShaderResources& resources
 
 static void generateComputeBindings(std::ostream& out, const ShaderResources& resources)
 {
-    out << "template<typename P>\nstruct ResourceBindings {\n";
+    out << "template<typename P>\nstruct Bindings {\n";
     std::vector<std::string> inits;
     emitResourceFields(out, resources, "P", &inits);
-    emitBindingConstructor(out, "ResourceBindings", "P", inits);
-    out << "};\ntemplate<typename P>\nstruct OutputBindings {\n";
-    inits.clear();
     emitOutputFields(out, resources, "P", &inits);
-    emitBindingConstructor(out, "OutputBindings", "P", inits);
-    out << "};\ntemplate<typename P>\nstruct Bindings : ResourceBindings<P>, OutputBindings<P> {\n"
-        << "Bindings(P* p) : ResourceBindings<P>(p), OutputBindings<P>(p) {}\n};\n";
+    emitBindingConstructor(out, "Bindings", "P", inits);
+    out << "};\n";
 }
 
 std::string procType(slang::TypeReflection* reflection);
@@ -543,7 +539,6 @@ public:
         return *this;
     }
 
-    void setDepthEnabled(bool enabled) { pipeline_.setDepthEnabled(enabled); }
     void setRasterState(RasterState state) { pipeline_.setRasterState(state); }
     void setDepthImage(HardwareImage& image) { pipeline_.setDepthImage(image); }
     [[nodiscard]] HardwareImage getDepthImage() { return pipeline_.getDepthImage(); }

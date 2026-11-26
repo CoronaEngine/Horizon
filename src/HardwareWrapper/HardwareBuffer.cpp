@@ -1,7 +1,5 @@
 #include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 
 #include <stdexcept>
@@ -62,14 +60,6 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
     return buffer;
 }
 
-HardwareBuffer HardwareBuffer::uploadDeviceLocal(size_t count, size_t stride, BufferUsage usage, const void* data)
-{
-    HardwareExecutor upload;
-    auto destination = stageDeviceLocal(upload, count, stride, usage, data);
-    upload.commit().waitForDeferredResources();
-    return destination;
-}
-
 void HardwareBuffer::createDeviceLocal(HardwareExecutor& executor, BufferUsage usage, const void* data,
                                        size_t elementCount, size_t elementSize)
 {
@@ -84,26 +74,20 @@ void HardwareBuffer::createDeviceLocal(HardwareExecutor& executor, BufferUsage u
     if (elementCount && !executor.getExecutorID())
         throw std::invalid_argument("Buffer upload requires a valid executor");
 
-    *this = stageDeviceLocal(executor, elementCount, elementSize, usage, data);
-}
-
-HardwareBuffer HardwareBuffer::stageDeviceLocal(HardwareExecutor& upload, size_t count, size_t stride,
-                                                BufferUsage usage, const void* data)
-{
-    if (count > UINT32_MAX || stride > UINT32_MAX)
+    if (elementCount > UINT32_MAX || elementSize > UINT32_MAX)
         throw std::length_error("Device-local buffer dimensions exceed the supported range");
-    const auto elementCount = static_cast<uint32_t>(count);
-    const auto elementSize = static_cast<uint32_t>(stride);
+
+    const auto count = static_cast<uint32_t>(elementCount);
+    const auto stride = static_cast<uint32_t>(elementSize);
     HardwareBuffer destination;
-    auto resource = std::make_unique<ResourceManager::BufferHardwareWrap>();
-    *resource = getHardwareContext().getMainDevice()->resourceManager.createBuffer(
-        elementCount, elementSize, convertBufferUsage(usage), false, true);
-    destination.bufferID = reinterpret_cast<uintptr_t>(resource.release());
-    if (elementCount) {
-        HardwareBuffer staging(elementCount, elementSize, BufferUsage::StorageBuffer, data);
-        upload << staging.copyTo(destination);
+    auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    destination.bufferID = reinterpret_cast<uintptr_t>(new ResourceManager::BufferHardwareWrap(
+        manager.createBuffer(count, stride, convertBufferUsage(usage), false, true)));
+    if (count) {
+        HardwareBuffer staging(count, stride, BufferUsage::StorageBuffer, data);
+        executor << staging.copyTo(destination);
     }
-    return destination;
+    *this = std::move(destination);
 }
 
 HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, BufferUsage usage, const void* data, bool useDedicated)

@@ -15,6 +15,13 @@ static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image)
 static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uintptr_t>);
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);
 static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
+static_assert(std::is_aggregate_v<HardwareImageCreateInfo>);
+
+template<class T>
+concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T> &&
+                         !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T>;
+static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer> && MoveOnlyHandle<RasterizerPipeline<>>);
+
 static_assert(std::is_assignable_v<EmbeddedShader::BindingKey&, HardwareBuffer&>);
 template<class Shader>
 concept RawPipelineInput = std::is_constructible_v<ComputePipeline<>, const Shader&> ||
@@ -50,9 +57,13 @@ struct ComputePipelineAdapter {
     operator ComputePipeline<>() const;
 };
 
-static_assert(std::same_as<decltype(ComputePipeline(ComputePipelineAdapter{})), ComputePipeline<>>);
+template<class T>
+concept DeducesPipeline = requires(T value) { ComputePipeline(value); } || requires(T value) { RasterizerPipeline(value); };
+static_assert(!DeducesPipeline<ComputePipelineAdapter> && !DeducesPipeline<RasterPipelineAdapter>);
+static_assert(std::same_as<decltype(ComputePipeline<>(ComputePipelineAdapter{})), ComputePipeline<>>);
 static_assert(requires(decltype([] {}) shader, const std::source_location& location) {
     { ComputePipeline{} } -> std::same_as<ComputePipeline<>>;
+    { ComputePipeline(shader) } -> std::same_as<ComputePipeline<>>;
     { ComputePipeline(shader, {4, 2, 1}, {.enableMatrixColumnMajor = true}, location) }
         -> std::same_as<ComputePipeline<>>;
 });
@@ -60,7 +71,7 @@ static_assert(requires(decltype([] {}) shader, const std::source_location& locat
 static_assert(requires(RasterizerPipeline<>& pipeline, RasterPipelineAdapter adapter) {
     { RasterizerPipeline{} } -> std::same_as<RasterizerPipeline<>>;
     { RasterizerPipeline(std::move(pipeline)) } -> std::same_as<RasterizerPipeline<>>;
-    { RasterizerPipeline(adapter) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline<>(adapter) } -> std::same_as<RasterizerPipeline<>>;
 });
 
 using ShaderVector = EmbeddedShader::VariateProxy<ktm::fvec4>;
@@ -85,8 +96,7 @@ void check_legacy_public_headers() {}
 #include SLANG(compute_write.slang)
 
 using NamedCompute = ComputePipeline<compute_write_slang_t>;
-static_assert(std::is_nothrow_move_constructible_v<NamedCompute> && std::is_nothrow_move_assignable_v<NamedCompute>);
-static_assert(!std::is_copy_constructible_v<NamedCompute> && !std::is_copy_assignable_v<NamedCompute>);
+static_assert(MoveOnlyHandle<NamedCompute>);
 static_assert(requires(NamedCompute& pipeline, HardwareExecutor& executor, HardwareBuffer& buffer,
                        std::span<const ResourceUse> resources) {
     { NamedCompute{} } -> std::same_as<NamedCompute>;
