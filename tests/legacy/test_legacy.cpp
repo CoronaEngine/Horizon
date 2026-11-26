@@ -264,7 +264,7 @@ void test_raster_sampled_storage_image()
 
 void test_shared_vertex_stage()
 {
-    const std::array<std::array<float, 3>, 3> positions{{{-1, -1, 0}, {3, -1, 0}, {-1, 3, 0}}};
+    const float positions[][3] = {{-1, -1, 0}, {3, -1, 0}, {-1, 3, 0}};
     HardwareBuffer vertices(positions, BufferUsage::VertexBuffer);
     // The Disney VS fetches two packed 16-bit indices per word.
     HardwareBuffer indices(std::array<uint16_t, 4>{0, 1, 2, 0}, BufferUsage::IndexBuffer);

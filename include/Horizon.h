@@ -98,15 +98,6 @@ enum class BufferUsage : uint32_t
     RasterIndirect = 16,
 };
 
-namespace horizon::detail {
-template <typename T>
-concept IsContainer = requires(T a) {
-    { a.size() } -> std::convertible_to<size_t>;
-    { a.data() };
-    { a[0] };
-};
-}
-
 struct ExternalHandle
 {
 #if defined(_WIN32)
@@ -130,9 +121,12 @@ public:
     {
     }
 
-    template <horizon::detail::IsContainer Container>
-    HardwareBuffer(const Container& input, BufferUsage usage, bool useDedicated = true)
-        : HardwareBuffer(input.size(), sizeof(input[0]), usage, input.data(), useDedicated)
+    template <class R>
+        requires std::ranges::contiguous_range<const R> && std::ranges::sized_range<const R> &&
+                 std::is_trivially_copyable_v<std::ranges::range_value_t<const R>>
+    HardwareBuffer(const R& input, BufferUsage usage, bool useDedicated = true)
+        : HardwareBuffer(std::ranges::size(input), sizeof(std::ranges::range_value_t<const R>),
+                         usage, std::ranges::data(input), useDedicated)
     {
     }
 

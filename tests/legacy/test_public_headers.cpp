@@ -14,6 +14,9 @@ static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image)
 
 static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uintptr_t>);
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);
+static_assert(std::is_constructible_v<HardwareBuffer, const uint16_t(&)[3], BufferUsage>);
+static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<bool>, BufferUsage>);
+static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<std::string>, BufferUsage>);
 static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
 static_assert(std::is_aggregate_v<HardwareImageCreateInfo>);
 static_assert(!std::is_constructible_v<EmbeddedShader::Texture2DProxy<ktm::fvec4>, HardwareImage&&>);
