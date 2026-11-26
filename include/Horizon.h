@@ -24,7 +24,6 @@
 
 namespace horizon::detail {
 struct CommandRecordVulkan;
-struct ComputePipelineVulkan;
 struct RasterizerPipelineVulkan;
 struct CopyCommandImpl;
 }
@@ -362,12 +361,9 @@ private:
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t = 0);
-    horizon::detail::ComputePipelineVulkan& backend() const;
-
-    std::shared_ptr<horizon::detail::ComputePipelineVulkan> computePipeline_;
-    std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants_;
-    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
-    std::vector<ResourceUse> resourceUses_;
+    struct Impl;
+    Impl& state();
+    std::unique_ptr<Impl> impl_;
 
 public:
     ComputePipeline();
@@ -379,17 +375,14 @@ public:
         : ComputePipeline(EmbeddedShader::ComputePipelineObject::compile(
               std::forward<F>(shader), numthreads, options, location)) {}
 
-    ComputePipeline(ComputePipeline&&) noexcept = default;
-    ComputePipeline& operator=(ComputePipeline&&) noexcept = default;
+    ~ComputePipeline();
+    ComputePipeline(ComputePipeline&&) noexcept;
+    ComputePipeline& operator=(ComputePipeline&&) noexcept;
 
     // Select the EDSL variant, read its proxy bindings and set the workgroup counts for enqueue.
     ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
 
-    ComputePipeline& uses(std::span<const ResourceUse> resources)
-    {
-        resourceUses_.assign(resources.begin(), resources.end());
-        return *this;
-    }
+    ComputePipeline& uses(std::span<const ResourceUse> resources);
     ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
 };
 
@@ -412,16 +405,11 @@ private:
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
-    void refreshShaderVariant();
+    RasterizerPipeline& bindRenderTarget(uint32_t location, void** resource);
     RasterBatch capture(std::optional<ktm::uvec2> extent, RasterPass pass);
-    horizon::detail::RasterizerPipelineVulkan& backend() const;
-
-    std::shared_ptr<horizon::detail::RasterizerPipelineVulkan> rasterizerPipeline_;
-    std::unique_ptr<EmbeddedShader::RasterizedPipelineObject> variants_;
-    EmbeddedShader::ShaderCodeCompiler::ConditionInfo vertexConditions_, fragmentConditions_;
-    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
-    size_t explicitTargetCount_{}; // The last entries override reflected outputs.
-    std::vector<ResourceUse> resourceUses_;
+    struct Impl;
+    Impl& state();
+    std::unique_ptr<Impl> impl_;
 
 public:
     RasterizerPipeline();
@@ -433,6 +421,10 @@ public:
         : RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject::compile(
               std::forward<V>(vertex), std::forward<F>(fragment), options, location), views) {}
 
+    ~RasterizerPipeline();
+    RasterizerPipeline(RasterizerPipeline&&) noexcept;
+    RasterizerPipeline& operator=(RasterizerPipeline&&) noexcept;
+
     void setRasterState(RasterState state);
     void setDepthImage(HardwareImage& image);
     [[nodiscard]] HardwareImage getDepthImage();
@@ -443,19 +435,12 @@ public:
     }
     [[nodiscard]] RasterBatch beginBatch(RasterPass pass = {}) { return capture(std::nullopt, pass); }
 
-    RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources)
-    {
-        resourceUses_.assign(resources.begin(), resources.end());
-        return *this;
-    }
+    RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources);
 
     template<class T>
     RasterizerPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
     {
-        autoBindEntries_.push_back({ &proxy.boundResource_, 0, 0,
-            static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs), location });
-        ++explicitTargetCount_;
-        return *this;
+        return bindRenderTarget(location, &proxy.boundResource_);
     }
 };
 

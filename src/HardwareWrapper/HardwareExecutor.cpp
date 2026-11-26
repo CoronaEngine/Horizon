@@ -1,7 +1,6 @@
 #include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
-#include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 #include <stdexcept>
 
 namespace {
@@ -41,8 +40,8 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
 HardwareExecutor& HardwareExecutor::enqueue(const ComputePipeline<>& pipeline)
 {
     auto* executor = execFromId(executorID);
-    if (const auto& backend = pipeline.computePipeline_)
-        executor->recordOwned(backend->capture(), pipeline.resourceUses_);
+    if (const auto& impl = pipeline.impl_; impl && impl->backend)
+        executor->recordOwned(impl->backend->capture(), impl->resourceUses);
     return *this;
 }
 

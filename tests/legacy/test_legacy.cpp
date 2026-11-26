@@ -161,7 +161,7 @@ void test_raster_batch(bool forceSingleDraw)
     HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
     {
         HardwareImage reflectedTarget(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
-        Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = target;
+        Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = reflectedTarget;
         bool useDrawColor = true;
         auto vs = [&](Float2 pos, Float scale) {
             Float w;
@@ -178,6 +178,7 @@ void test_raster_batch(bool forceSingleDraw)
         };
         RasterizerPipeline pipeline(vs, fs);
         pipeline.bindRenderTarget(0, overrideColor);
+        overrideColor = target;
         pipeline.setRasterState({.depthTest = false, .depthWrite = false});
         auto batch = pipeline.beginBatch(4, 2);
         // One triangle covers the screen, the other covers only the second pixel row.

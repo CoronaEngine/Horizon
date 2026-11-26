@@ -10,9 +10,8 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "PipelineSnapshot.h"
 
-using horizon::detail::ComputePipelineVulkan;
-
-struct horizon::detail::ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulkan>
+namespace horizon::detail {
+struct ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulkan>
 {
   public:
     ComputePipelineVulkan();
@@ -59,4 +58,16 @@ struct horizon::detail::ComputePipelineVulkan : std::enable_shared_from_this<Com
     void commitCommand(HardwareExecutorVulkan& executor, Dispatch& dispatch);
 
     ktm::uvec3 groupCount = {0, 0, 0};
+};
+} // namespace horizon::detail
+
+using horizon::detail::ComputePipelineVulkan;
+
+template<class CS>
+struct ComputePipeline<CS>::Impl
+{
+    std::shared_ptr<ComputePipelineVulkan> backend;
+    std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants;
+    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
+    std::vector<ResourceUse> resourceUses;
 };

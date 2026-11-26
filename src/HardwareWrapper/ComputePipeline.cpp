@@ -5,80 +5,98 @@
 
 template<class CS>
 ComputePipeline<CS>::ComputePipeline()
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>()) {}
+    : impl_(std::make_unique<Impl>(std::make_shared<ComputePipelineVulkan>())) {}
 
 template<class CS>
 ComputePipeline<CS>::ComputePipeline(const EmbeddedShader::ShaderCodeModule& module)
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>(module)) {}
+    : impl_(std::make_unique<Impl>(std::make_shared<ComputePipelineVulkan>(module))) {}
 
 template<class CS>
 ComputePipeline<CS>::ComputePipeline(EmbeddedShader::ComputePipelineObject shader)
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>(
-          shader.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, shader.conditions))),
-      autoBindEntries_(std::move(shader.autoBindEntries))
+    : ComputePipeline(shader.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, shader.conditions))
 {
+    impl_->autoBindEntries = std::move(shader.autoBindEntries);
     if (!shader.conditions.empty())
-        variants_ = std::make_unique<EmbeddedShader::ComputePipelineObject>(std::move(shader));
+        impl_->variants = std::make_unique<EmbeddedShader::ComputePipelineObject>(std::move(shader));
 }
 
 template<class CS>
-ComputePipelineVulkan& ComputePipeline<CS>::backend() const
+ComputePipeline<CS>::~ComputePipeline() = default;
+
+template<class CS>
+ComputePipeline<CS>::ComputePipeline(ComputePipeline&&) noexcept = default;
+
+template<class CS>
+ComputePipeline<CS>& ComputePipeline<CS>::operator=(ComputePipeline&&) noexcept = default;
+
+template<class CS>
+auto ComputePipeline<CS>::state() -> Impl&
 {
-    if (!computePipeline_) throw std::runtime_error("Empty ComputePipeline<> handle");
-    return *computePipeline_;
+    if (!impl_ || !impl_->backend) throw std::runtime_error("Empty ComputePipeline<> handle");
+    return *impl_;
 }
 
 template<class CS>
 void ComputePipeline<CS>::setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType)
 {
-    backend().setPushConstantDirect(byteOffset, data, size, bindType);
+    state().backend->setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
 template<class CS>
 void ComputePipeline<CS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize,
                                            const HardwareBuffer& buffer, int32_t bindType)
 {
-    backend().setResourceDirect(byteOffset, typeSize, buffer, bindType);
+    state().backend->setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
 template<class CS>
 void ComputePipeline<CS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize,
                                            const HardwareImage& image, int32_t bindType, uint32_t)
 {
-    backend().setResourceDirect(byteOffset, typeSize, image, bindType);
+    state().backend->setResourceDirect(byteOffset, typeSize, image, bindType);
+}
+
+template<class CS>
+ComputePipeline<CS>& ComputePipeline<CS>::uses(std::span<const ResourceUse> resources)
+{
+    if (!impl_) impl_ = std::make_unique<Impl>();
+    impl_->resourceUses.assign(resources.begin(), resources.end());
+    return *this;
 }
 
 template<class CS>
 ComputePipeline<CS>& ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
-    if (variants_)
+    auto& impl = state();
+    if (auto& variants = impl.variants)
     {
-        auto conditions = variants_->compute->getCurrentConditionInfo();
-        if (conditions != variants_->conditions)
+        auto conditions = variants->compute->getCurrentConditionInfo();
+        if (conditions != variants->conditions)
         {
-            computePipeline_ = std::make_shared<ComputePipelineVulkan>(variants_->updateAutoBind(conditions));
-            autoBindEntries_ = std::move(variants_->autoBindEntries);
-            variants_->conditions = std::move(conditions);
+            impl.backend = std::make_shared<ComputePipelineVulkan>(variants->updateAutoBind(conditions));
+            impl.autoBindEntries = std::move(variants->autoBindEntries);
+            variants->conditions = std::move(conditions);
         }
     }
 
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
-    for (const auto& entry : autoBindEntries_)
+    auto& backend = *impl.backend;
+    for (const auto& entry : impl.autoBindEntries)
     {
         if (entry.boundValueRef)
         {
-            setPushConstantDirect(entry.byteOffset, entry.boundValueRef, entry.boundValueSize, entry.bindType);
+            backend.setPushConstantDirect(entry.byteOffset, entry.boundValueRef, entry.boundValueSize, entry.bindType);
         }
         else if (entry.boundResourceRef && *entry.boundResourceRef)
         {
             void* res = *entry.boundResourceRef;
             if (entry.boundResourceIsBuffer)
-                setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareBuffer*>(res), entry.bindType);
+                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareBuffer*>(res), entry.bindType);
             else
-                setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType);
+                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType);
         }
     }
-    backend()(x, y, z);
+    backend(x, y, z);
     return *this;
 }
 
