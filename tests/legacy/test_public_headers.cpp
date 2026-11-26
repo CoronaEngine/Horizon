@@ -22,7 +22,6 @@ concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_noth
                          !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T>;
 static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer> && MoveOnlyHandle<RasterizerPipeline<>>);
 
-static_assert(std::is_assignable_v<EmbeddedShader::BindingKey&, HardwareBuffer&>);
 template<class Shader>
 concept RawPipelineInput = std::is_constructible_v<ComputePipeline<>, const Shader&> ||
                            std::is_constructible_v<RasterizerPipeline<>, const Shader&, const Shader&>;
@@ -96,11 +95,15 @@ void check_legacy_public_headers() {}
 #include SLANG(compute_write.slang)
 
 using NamedCompute = ComputePipeline<compute_write_slang_t>;
+template<class T>
+concept HasOutputs = requires(T& value) { value.outputs; };
+static_assert(!HasOutputs<compute_write_slang_t>);
 static_assert(MoveOnlyHandle<NamedCompute>);
 static_assert(requires(NamedCompute& pipeline, HardwareExecutor& executor, HardwareBuffer& buffer,
                        std::span<const ResourceUse> resources) {
     { NamedCompute{} } -> std::same_as<NamedCompute>;
     { ComputePipeline(compute_write_slang) } -> std::same_as<NamedCompute>;
+    pipeline.outputs = buffer;
     { pipeline.uses(resources)(1, 2, 3) } -> std::same_as<NamedCompute&>;
     { executor << pipeline.uses({{buffer, ResourceAccess::Write}})(1) } -> std::same_as<HardwareExecutor&>;
 });
@@ -121,11 +124,13 @@ static_assert(!CompleteStage<disney_vert_slang_t>);
 
 using DisneyRaster = RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t>;
 using SharedVertexRaster = decltype(RasterizerPipeline(disney_vert_slang, drawstress_frag_slang));
+template<class T>
+concept HasOutColor = requires(T& value) { value.outColor; };
+static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
 static_assert(requires(DisneyRaster& pipeline) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
     { RasterizerPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
-    pipeline.outColor;
 });
 static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
 static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);

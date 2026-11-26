@@ -7,7 +7,6 @@
 #include <array>
 #include <iterator>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -60,73 +59,6 @@ static bool isPushConstantBlockRecord(const ShaderCodeModule::ShaderResources::S
 	       info.variateName == resources.pushConstantName &&
 	       info.byteOffset == 0 &&
 	       info.typeSize == resources.pushConstantSize;
-}
-
-std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCodeModule::ShaderResources& resources)
-{
-	std::set<std::string> bindingBlockNames;
-
-	// Push constant block -> struct with static inline BindingKey members
-	if (!resources.pushConstantName.empty())
-	{
-		bindingBlockNames.insert(resources.pushConstantName);
-		out << "struct " << resources.pushConstantName << "\n{\n";
-		for (auto& info : resources.bindInfoPool)
-		{
-			if (info.bindType == ShaderCodeModule::ShaderResources::pushConstantMembers &&
-			    !isPushConstantBlockRecord(info, resources))
-				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
-				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
-		}
-		out << "};\n";
-	}
-
-	// UBO block -> struct with static inline BindingKey members
-	if (!resources.uniformBufferName.empty())
-	{
-		bindingBlockNames.insert(resources.uniformBufferName);
-		out << "struct " << resources.uniformBufferName << "\n{\n";
-		for (auto& info : resources.bindInfoPool)
-		{
-			if (info.bindType == ShaderCodeModule::ShaderResources::uniformBufferMembers)
-				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
-				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-				    << ", " << info.set << ", " << info.binding << "};\n";
-		}
-		out << "};\n";
-	}
-
-	// Stage inputs
-	for (auto& info : resources.bindInfoPool)
-	{
-		if (info.bindType == ShaderCodeModule::ShaderResources::stageInputs)
-			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
-			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
-	}
-
-	// Stage outputs
-	for (auto& info : resources.bindInfoPool)
-	{
-		if (info.bindType == ShaderCodeModule::ShaderResources::stageOutputs)
-			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
-			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
-	}
-
-	// Descriptor resources (sampled/storage/buffer/sampler) for direct key binding.
-	for (auto& info : resources.bindInfoPool)
-	{
-		if (isDirectResourceBindType(info.bindType))
-			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
-			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding
-			    << ", " << info.set << ", " << info.binding << "};\n";
-	}
-
-	return bindingBlockNames;
 }
 
 using ShaderResources = ShaderCodeModule::ShaderResources;
@@ -806,27 +738,29 @@ int main(int argc, char** argv) try
         prepareBindingNames(resources);
     }
 
-    // Generate BindingKey struct declarations first, collect binding block names
-	std::cout << "INFO:Generate binding keys for struct '" << nsTypeName << "'...\n";
-	auto bindingBlockNames = generateBindingKeys(out, resources);
-
+    using Kind = slang::DeclReflection::Kind;
     std::stringstream functions;
     for (auto child : declarations->getChildren())
     {
-        switch (child->getKind())
+        const auto kind = child->getKind();
+        if (kind == Kind::Struct || kind == Kind::Variable)
         {
-            case slang::DeclReflection::Kind::Struct:
-                if (bindingBlockNames.contains(child->getName())) break;
-                procStruct(out,child);
+            const std::string_view name = child->getName();
+            if (!name.empty() && (name == resources.pushConstantName || name == resources.uniformBufferName))
+                continue;
+        }
+        switch (kind)
+        {
+            case Kind::Struct:
+                procStruct(out, child);
                 out << "\n";
                 break;
-            case slang::DeclReflection::Kind::Func:
+            case Kind::Func:
                 if (moduleOnly || std::string_view(child->getName()) != "main")
                     procFunc(functions, child->asFunction());
                 break;
-            case slang::DeclReflection::Kind::Variable:
-                if (bindingBlockNames.contains(child->getName())) break;
-                procStructInstance(out,child);
+            case Kind::Variable:
+                procStructInstance(out, child);
                 break;
             default:
                 break;

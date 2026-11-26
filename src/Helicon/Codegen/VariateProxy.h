@@ -1260,28 +1260,6 @@ namespace EmbeddedShader
 	    SlangModule* sourceModule = nullptr;
 	};
 
-	struct BindingKey
-	{
-		// Direct-access metadata (populated by generated .hpp at compile time)
-		uint64_t byteOffset = ~0ULL;
-		uint32_t typeSize = 0;
-		int32_t  bindType = -1;   // mirrors ShaderResources::BindType; -1 = no metadata
-		uint32_t location = 0;
-		uint32_t set = 0;
-		uint32_t binding = 0;
-
-		bool hasMetadata() const { return bindType >= 0; }
-
-		// --- Level 2: Resource binding ---
-		BindingKey& operator=(::HardwareImage& img) { boundImage_ = &img; boundBuffer_ = nullptr; return *this; }
-		BindingKey& operator=(::HardwareBuffer& buf) { boundBuffer_ = &buf; boundImage_ = nullptr; return *this; }
-		::HardwareImage* boundImage() const { return boundImage_; }
-		::HardwareBuffer* boundBuffer() const { return boundBuffer_; }
-
-		::HardwareImage* boundImage_ = nullptr;
-		::HardwareBuffer* boundBuffer_ = nullptr;
-	};
-
 	// Pipeline-bound field proxy for direct member access syntax:
 	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
 	template<typename PipelineType>
