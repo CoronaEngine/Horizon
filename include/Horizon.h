@@ -17,7 +17,7 @@
 
 #include "Codegen/ComputePipelineObject.h"
 #include "Codegen/CustomLibrary.h"
-#include "Codegen/RasterizedPipelineObject.h"
+#include "Codegen/RasterPipelineObject.h"
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include <ktm/ktm.h>
@@ -334,7 +334,7 @@ private:
 
     RasterPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
                    const EmbeddedShader::ShaderCodeModule& fragment, uint32_t views);
-    RasterPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views);
+    RasterPipeline(EmbeddedShader::RasterPipelineObject shaders, uint32_t views);
 
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
@@ -351,7 +351,7 @@ public:
         requires requires(V& vertex, F& fragment) { std::function{vertex}; std::function{fragment}; }
     RasterPipeline(V&& vertex, F&& fragment, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
                    std::source_location location = std::source_location::current())
-        : RasterPipeline(EmbeddedShader::RasterizedPipelineObject::compile(
+        : RasterPipeline(EmbeddedShader::RasterPipelineObject::compile(
               std::forward<V>(vertex), std::forward<F>(fragment), options, location), views) {}
 
     ~RasterPipeline();

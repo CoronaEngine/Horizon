@@ -58,7 +58,7 @@ void test_cpu()
     int vertexParses = 0, fragmentParses = 0, computeParses = 0;
     auto vertex = [&](Float3 pos) { ++vertexParses; position() = Float4(pos, Float(1)); };
     auto fragment = [&] { ++fragmentParses; return Float4(1, 0, 0, 1); };
-    auto stages = RasterizedPipelineObject::compile(vertex, fragment);
+    auto stages = RasterPipelineObject::compile(vertex, fragment);
     Texture2D<ktm::fvec4> target;
     auto compute = ComputePipelineObject::compile([&] {
         ++computeParses;
@@ -86,7 +86,7 @@ void test_cpu()
         $IF(drawColor) { color = rasterDrawParameter<ktm::fvec4>(0); };
         return color;
     };
-    auto variants = RasterizedPipelineObject::compile(vertexWithDraw, conditionalColor);
+    auto variants = RasterPipelineObject::compile(vertexWithDraw, conditionalColor);
     for (bool reads : {false, true, false}) {
         drawColor = reads;
         auto vs = variants.vertex->getShaderCode(ShaderLanguage::SpirV);

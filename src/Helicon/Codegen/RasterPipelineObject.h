@@ -10,11 +10,11 @@
 
 namespace EmbeddedShader
 {
-	class RasterizedPipelineObject final
+	class RasterPipelineObject final
 	{
-		RasterizedPipelineObject() = default;
+		RasterPipelineObject() = default;
 	public:
-		static RasterizedPipelineObject compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
+		static RasterPipelineObject compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
 	    void updateAutoBind(ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo);
 	    [[nodiscard]] static std::string getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
 		std::unique_ptr<ShaderCodeCompiler> vertex;
@@ -26,7 +26,7 @@ namespace EmbeddedShader
 		std::vector<Ast::ParseOutput> parse(auto&& vertexShaderCode, auto&& fragmentShaderCode);
 	};
 
-    inline void RasterizedPipelineObject::updateAutoBind(ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
+    inline void RasterPipelineObject::updateAutoBind(ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
     {
         // 每次分支组合变化都会重新反射并重建这张表；先清空，避免旧变体的
         // offset/bindType 残留（否则切回旧条件时 bind_auto_resources 会写两套）。
@@ -119,18 +119,18 @@ namespace EmbeddedShader
 		}
     }
 
-    inline std::string RasterizedPipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
+    inline std::string RasterPipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
     {
         return "vertex" + ShaderCodeCompiler::getCombinedKey(vertConditionInfo) + "fragment" + ShaderCodeCompiler::getCombinedKey(fragConditionInfo);
     }
 
-    RasterizedPipelineObject RasterizedPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)
+    RasterPipelineObject RasterPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)
 	{
 		// Indirect raster shaders read draw packets through Vulkan device addresses.
 		compilerOption.compileSpirV = true;
 		compilerOption.compileGLSL = compilerOption.compileHLSL = false;
 		compilerOption.compileDXIL = compilerOption.compileDXBC = false;
-		RasterizedPipelineObject result;
+		RasterPipelineObject result;
 		auto outputs = result.parse(std::forward<decltype(vertexShaderCode)>(vertexShaderCode),
 		                            std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode));
 
@@ -204,7 +204,7 @@ namespace EmbeddedShader
 		}
 	}
 
-	std::vector<Ast::ParseOutput> RasterizedPipelineObject::parse(auto&& vertexShaderCode, auto&& fragmentShaderCode)
+	std::vector<Ast::ParseOutput> RasterPipelineObject::parse(auto&& vertexShaderCode, auto&& fragmentShaderCode)
 	{
 		auto vsFunc = std::function(std::forward<decltype(vertexShaderCode)>(vertexShaderCode));
 		auto fsFunc = std::function(std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode));

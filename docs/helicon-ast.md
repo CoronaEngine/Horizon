@@ -29,7 +29,7 @@ src/Helicon/
 │   ├── ControlFlows.h                     # $IF/$ELSE/$WHILE/$DO/$FOR/$DISCARD 与 include 宏
 │   ├── TypeAlias.h                        # Float/Float4/Texture2D/Array/Aggregate 等别名
 │   ├── ParseHelper.h / .cpp               # lambda 调用、参数输入、聚合展开状态
-│   ├── RasterizedPipelineObject.h         # 光栅管线入口：VS/FS 解析、bindless 变体、auto-bind
+│   ├── RasterPipelineObject.h             # 光栅管线入口：VS/FS 解析、bindless 变体、auto-bind
 │   └── ComputePipelineObject.h            # 计算管线入口
 ├── Compiler/
 │   ├── ShaderCommon.h                     # ShaderLanguage/ShaderStage 等公共类型
@@ -74,7 +74,7 @@ Ocarina AST 是**带 Function 上下文的类型化 AST**：节点由 `Function`
 | C++ EDSL | `TypeAlias.h`、`VariateProxy.h`、`CustomLibrary.h` | 提供可重载运算符的 shader 值类型、资源代理和函数代理 |
 | AST | `Ast::AST`、`Ast::Parser`、`Node.hpp` | 构造 `Value`/`Statement`/`Type` 节点，维护当前作用域和解析状态 |
 | 生成器 | `Generator::SlangGenerator` | 把节点树展开为 Slang 源码，并产出 branch 模块和 type header |
-| 管线入口 | `RasterizedPipelineObject`、`ComputePipelineObject` | 调用 shader lambda、处理 VS/FS 衔接、bindless 变体、auto-bind |
+| 管线入口 | `RasterPipelineObject`、`ComputePipelineObject` | 调用 shader lambda、处理 VS/FS 衔接、bindless 变体、auto-bind |
 | 编译器 | `ShaderCodeCompiler`、`ShaderLanguageConverter` | Slang session、模块加载、compose/link、反射和结果缓存 |
 | 构建期 | `HeliconShaderCompile.cmake`、`ShaderCompileScripts` | 扫描 `#include HLSL/GLSL/SLANG(...)`，生成 C++ shader 头 |
 
@@ -111,7 +111,7 @@ AST 状态，不会互相覆盖。
 
 #### 1.1 从 lambda 到两段 stage
 
-光栅管线的入口是 `RasterizedPipelineObject::compile()`：
+光栅管线的入口是 `RasterPipelineObject::compile()`：
 
 ```cpp
 auto vs = [&](Aggregate<VsIn> in) {
@@ -128,7 +128,7 @@ auto fs = [&](Aggregate<VsOut> in) {
 RasterPipeline pipeline(vs, fs);
 ```
 
-`RasterizedPipelineObject::compile()` 的实际流程：
+`RasterPipelineObject::compile()` 的实际流程：
 
 1. 先 `Ast::Parser::setBindless(false)`，解析一次非 bindless 变体。
 2. `parse()` 用 `static_assert` 检查 VS 返回类型和 FS 输入参数匹配。
@@ -290,7 +290,7 @@ SlangStageModules bindlessStageModules;
 
 #### 1.6 反射与 auto-bind
 
-编译完成后，`RasterizedPipelineObject::updateAutoBind()` /
+编译完成后，`RasterPipelineObject::updateAutoBind()` /
 `ComputePipelineObject::updateAutoBind()` 会遍历全局 statement，把代理侧记录的
 资源指针和反射表对应起来：
 
@@ -841,7 +841,7 @@ hardcode 的启用条件：
 
 这里只扩展 AST 层。Helicon 的 C++ EDSL 前端（`VariateProxy`、`ParseHelper`、
 `TypeAlias`、`BuiltinVariate`、`CustomLibrary`、`$IF/$ELSE/$WHILE` 宏、
-`RasterizedPipelineObject`、`ComputePipelineObject`）不迁移；它们只是
+`RasterPipelineObject`、`ComputePipelineObject`）不迁移；它们只是
 Helicon AST 的构造者和使用示例。扩展内容是：节点语义、类型/变量/使用标记、
 分支剪枝所需的 AST 元数据和分析、以及 AST 到 Slang 的生成契约。
 
@@ -1129,7 +1129,7 @@ Ocarina AST 目前是 compute/raytracing AST：
 因此：
 
 - 如果目标只是 Ocarina compute/RT：**不要迁移** Helicon 的 `ShaderStage`、
-  `EmbeddedShaderStructure` 的 input/output 分区、`RasterizedPipelineObject`、
+  `EmbeddedShaderStructure` 的 input/output 分区、`RasterPipelineObject`、
   `position()`、`SV_TARGET`、`discard`。这些在 Ocarina AST 里没有对应语义，
   强行塞进 `Function` 会让 codegen 和 ABI 都变复杂。
 - 如果目标必须包含光栅 stage：需要单独设计 `EntryPoint`/stage/IO 元数据，

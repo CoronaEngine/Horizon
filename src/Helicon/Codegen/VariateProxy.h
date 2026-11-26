@@ -135,7 +135,7 @@ namespace EmbeddedShader
 		friend struct GPU_ELSE_BRANCH;
 
 	    friend VariateProxy<ktm::fvec4> position();
-		friend class RasterizedPipelineObject;
+		friend class RasterPipelineObject;
 		friend class Generator::SlangGenerator;
 		using value_type = Type;
 

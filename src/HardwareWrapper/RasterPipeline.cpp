@@ -7,7 +7,7 @@ template<class VS, class FS>
 struct RasterPipeline<VS, FS>::Impl
 {
     std::shared_ptr<RasterPipelineVulkan> backend;
-    std::unique_ptr<EmbeddedShader::RasterizedPipelineObject> variants;
+    std::unique_ptr<EmbeddedShader::RasterPipelineObject> variants;
     EmbeddedShader::ShaderCodeCompiler::ConditionInfo vertexConditions, fragmentConditions;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
     size_t explicitTargetCount{}; // The last entries override reflected outputs.
@@ -27,14 +27,14 @@ RasterPipeline<VS, FS>::RasterPipeline(const EmbeddedShader::ShaderCodeModule& v
     : impl_(std::make_unique<Impl>(std::make_shared<RasterPipelineVulkan>(vertex, fragment, views))) {}
 
 template<class VS, class FS>
-RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views)
+RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::RasterPipelineObject shaders, uint32_t views)
     : impl_(std::make_unique<Impl>(std::make_shared<RasterPipelineVulkan>(*shaders.vertex, *shaders.fragment, views)))
 {
     impl_->vertexConditions = shaders.vertex->getCurrentConditionInfo();
     impl_->fragmentConditions = shaders.fragment->getCurrentConditionInfo();
     impl_->autoBindEntries = std::move(shaders.autoBindEntries);
     if (!impl_->vertexConditions.empty() || !impl_->fragmentConditions.empty())
-        impl_->variants = std::make_unique<EmbeddedShader::RasterizedPipelineObject>(std::move(shaders));
+        impl_->variants = std::make_unique<EmbeddedShader::RasterPipelineObject>(std::move(shaders));
 }
 
 template<class VS, class FS>
