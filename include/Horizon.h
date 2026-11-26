@@ -32,7 +32,7 @@ public:
         friend struct HardwareBuffer;
         friend struct HardwareImage;
         template<class> friend struct ComputePipeline;
-        template<class, class> friend struct RasterizerPipeline;
+        template<class, class> friend struct RasterPipeline;
 
         struct Impl;
         explicit Command(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -194,7 +194,7 @@ public:
     [[nodiscard]] uint32_t storeDescriptor() const;
     [[nodiscard]] uint32_t storeSampledDescriptor() const;
 
-    /// Set the clear color used by the RasterizerPipeline render pass (LOAD_OP_CLEAR).
+    /// Set the clear color used by the RasterPipeline render pass (LOAD_OP_CLEAR).
     /// Default is (0, 0, 0, 1).  For transparent render targets, use (0, 0, 0, 0).
     void setClearColor(float r, float g, float b, float a);
 
@@ -323,40 +323,40 @@ public:
 extern template struct ComputePipeline<void>;
 
 template<class VS = void, class FS = void>
-struct RasterizerPipeline
+struct RasterPipeline
 {
     static_assert(std::same_as<VS, void> && std::same_as<FS, void>,
                   "Register this VS/FS pair in RASTER_PAIRS and include both stage headers or the generated pipeline header");
 
 private:
-    template<class, class> friend struct RasterizerPipeline;
-    friend struct EmbeddedShader::BoundField<RasterizerPipeline>;
+    template<class, class> friend struct RasterPipeline;
+    friend struct EmbeddedShader::BoundField<RasterPipeline>;
 
-    RasterizerPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
-                       const EmbeddedShader::ShaderCodeModule& fragment, uint32_t views);
-    RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views);
+    RasterPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
+                   const EmbeddedShader::ShaderCodeModule& fragment, uint32_t views);
+    RasterPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views);
 
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
-    RasterizerPipeline& bindRenderTarget(uint32_t location, void** resource);
+    RasterPipeline& bindRenderTarget(uint32_t location, void** resource);
     struct Impl;
     Impl& state();
     std::unique_ptr<Impl> impl_;
 
 public:
-    RasterizerPipeline();
+    RasterPipeline();
 
     template<class V, class F>
         requires requires(V& vertex, F& fragment) { std::function{vertex}; std::function{fragment}; }
-    RasterizerPipeline(V&& vertex, F&& fragment, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
-                       std::source_location location = std::source_location::current())
-        : RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject::compile(
+    RasterPipeline(V&& vertex, F&& fragment, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
+                   std::source_location location = std::source_location::current())
+        : RasterPipeline(EmbeddedShader::RasterizedPipelineObject::compile(
               std::forward<V>(vertex), std::forward<F>(fragment), options, location), views) {}
 
-    ~RasterizerPipeline();
-    RasterizerPipeline(RasterizerPipeline&&) noexcept;
-    RasterizerPipeline& operator=(RasterizerPipeline&&) noexcept;
+    ~RasterPipeline();
+    RasterPipeline(RasterPipeline&&) noexcept;
+    RasterPipeline& operator=(RasterPipeline&&) noexcept;
 
     void setRasterState(RasterState state);
     void setDepthImage(HardwareImage& image);
@@ -370,16 +370,16 @@ public:
         const HardwareBuffer& parameters = {}, std::optional<ScissorRect> scissor = {},
         std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});
 
-    RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources);
+    RasterPipeline& uses(std::initializer_list<ResourceUse> resources);
 
     template<class T>
-    RasterizerPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
+    RasterPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
     {
         return bindRenderTarget(location, &proxy.boundResource_);
     }
 };
 
-extern template struct RasterizerPipeline<void, void>;
+extern template struct RasterPipeline<void, void>;
 
 template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
-RasterizerPipeline(const VS&, const FS&, uint32_t = 1) -> RasterizerPipeline<VS, FS>;
+RasterPipeline(const VS&, const FS&, uint32_t = 1) -> RasterPipeline<VS, FS>;

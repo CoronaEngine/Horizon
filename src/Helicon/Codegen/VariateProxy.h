@@ -1236,7 +1236,7 @@ namespace EmbeddedShader
 	};
 
 	// Pipeline-bound field proxy for direct member access syntax:
-	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
+	//   raster.GlobalUniformParam.globalTime = currentTime;
 	template<typename PipelineType>
 	struct BoundField
 	{

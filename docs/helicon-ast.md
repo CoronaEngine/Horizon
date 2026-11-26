@@ -125,7 +125,7 @@ auto fs = [&](Aggregate<VsOut> in) {
     output_color << Float4(normalize(in->normal), 1.0f);
 };
 
-horizon::RasterizerPipeline pipeline(vs, fs);
+RasterPipeline pipeline(vs, fs);
 ```
 
 `RasterizedPipelineObject::compile()` 的实际流程：
@@ -385,7 +385,7 @@ auto fs = [&](Aggregate<Varyings> in) {
 };
 ```
 
-把生成的阶段对象传给 `ComputePipeline(cs)` 或 `RasterizerPipeline(vs, fs)` 即可使用其
+把生成的阶段对象传给 `ComputePipeline(cs)` 或 `RasterPipeline(vs, fs)` 即可使用其
 `main` 入口。构造函数直接使用构建时生成的 SPIR-V 和反射。
 
 #### 2.2 生成头里的模块和绑定代理
@@ -393,7 +393,7 @@ auto fs = [&](Aggregate<Varyings> in) {
 带入口点的单阶段头提供编译好的 `shaderModule` 和反射得到的绑定信息。
 已登记配对的阶段头在声明阶段对象后标记自身可见，并逐一检查配对的另一阶段是否已经可见。
 因此按任意顺序包含 VS 和 FS，第二个阶段都会引入对应的配对头。配对头也可以直接包含，
-它会引入两个阶段头并定义对应的 `RasterizerPipeline<VS, FS>` 特化。
+它会引入两个阶段头并定义对应的 `RasterPipeline<VS, FS>` 特化。
 颜色输出字段来自片元着色器。资源字段默认来自顶点着色器，只有片元着色器有 UBO
 而顶点着色器没有时才改取片元阶段。两阶段都有 UBO 时，生成器检查两者的总字节数一致。
 这些具名字段都是特化的直接成员，每个实例将它们绑定到自己的管线状态。
@@ -636,15 +636,9 @@ core + entryPoint + type_header + dependency modules + 每个分支选中的 tru
 
 #### 3.6 运行时切换
 
-光栅管线的 `RasterizerPipelineBase` 在 `clear_records()` 和
-`record_indirect()` 开头调用 `sync_shader_conditions()`：
-
-1. 从当前 pipeline 读取 shader 条件；
-2. 与上次的 `vert_condition_info_` / `frag_condition_info_` 比较；
-3. 变化时对 VS/FS 调用 `getShaderCode(..., conditionInfo)`，更新
-   `autoBindEntries`，并用 `getCombinedKey()` 在 `pipeline_pool_` 中查找或创建
-   新的 Vulkan 管线；
-4. 条件不变时只做一次轻量比较，不重新链接。
+调用 `RasterPipeline::drawIndirect()` 创建绘制命令时，EDSL 管线会比较 VS、FS
+当前的条件和上次记录的条件。条件变化时，管线取出对应的着色器变体并更新自动绑定。
+绘制命令捕获当次管线和绑定，可在后续条件变化后再入队。
 
 调用计算管线的 `pipeline(x, y, z)` 时会重新读取 EDSL 条件。条件发生变化时，管线切换
 着色器变体并更新自动绑定。返回的 `HardwareExecutor::Command` 记录本次变体、绑定与工作组数量，

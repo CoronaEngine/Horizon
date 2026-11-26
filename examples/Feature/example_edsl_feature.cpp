@@ -44,7 +44,7 @@ EdslFeature::EdslFeature(void* native_window)
         albedo << Float4(edsl_feature_geometry_glsl.boxAlbedo(normal), 1.0f);
         normals << Float4(normal, 1.0f);
     };
-    geometry = RasterizerPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
+    geometry = RasterPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
     geometry.setRasterState({.blend = RasterBlend::Opaque});
     albedo_image.setClearColor(0, 0, 0, 0);
     normal_image.setClearColor(0, 0, 0, 0);

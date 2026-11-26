@@ -174,7 +174,7 @@ void test_indirect_draws(bool forceSingleDraw)
             $IF(useDrawColor) { value = rasterDrawParameter<ktm::fvec4>(0); };
             color << value + drawColorOffset;
         };
-        RasterizerPipeline pipeline(vs, fs);
+        RasterPipeline pipeline(vs, fs);
         pipeline.bindRenderTarget(0, overrideColor);
         overrideColor = target;
         pipeline.setRasterState({.depthTest = false, .depthWrite = false});
@@ -252,7 +252,7 @@ void test_raster_sampled_storage_image()
     Texture2D<ktm::fvec4> texture = input, output = target;
     auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
     auto fs = [&] { output << texture.sample(Float2(0.5f)); };
-    RasterizerPipeline pipeline(vs, fs);
+    RasterPipeline pipeline(vs, fs);
     pipeline.setRasterState({.depthTest = false, .depthWrite = false});
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
     HardwareBuffer vertexBuffer(vertices, HardwareBuffer::Usage::VertexBuffer);
@@ -286,7 +286,7 @@ void test_raster_sampled_storage_image()
     if (features.fragmentStoresAndAtomics) {
         HardwareBuffer counter(std::array{0.f}, HardwareBuffer::Usage::StorageBuffer);
         ArrayProxy<float> values(counter);
-        RasterizerPipeline increment(vs, [&] {
+        RasterPipeline increment(vs, [&] {
             Float next;
             next = values[0] + Float(1.f);
             values[0] = next;
@@ -336,7 +336,7 @@ void test_shared_vertex_stage()
     HardwareBuffer parameters(sizeof(model), HardwareBuffer::Usage::StorageBuffer, &model);
 
     HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
-    RasterizerPipeline raster(disney_vert_slang, drawstress_frag_slang);
+    RasterPipeline raster(disney_vert_slang, drawstress_frag_slang);
     raster.outColor = target;
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
@@ -365,7 +365,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
         return Float4(0, 0, instanceIndex(), 0);
     };
     auto fs = [&](Float4 instanceColor) { output << rasterDrawParameter<ktm::fvec4>(0) + instanceColor; };
-    RasterizerPipeline pipeline(vs, fs);
+    RasterPipeline pipeline(vs, fs);
     if (explicitDepth) pipeline.setDepthImage(depth);
     pipeline.setRasterState({true, true, RasterCompare::Less, RasterBlend::Opaque});
 
@@ -785,12 +785,12 @@ void test_gpu()
            "an EDSL resource read only by an imported helper is bound at dispatch");
 
     std::cerr << "GPU: generated raster fields after move\n";
-    RasterizerPipeline raster(baseline_vert_slang, baseline_frag_slang);
-    using Raster = RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
+    RasterPipeline raster(baseline_vert_slang, baseline_frag_slang);
+    using Raster = RasterPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
     static_assert(std::same_as<decltype(raster), Raster>);
     static_assert(std::same_as<decltype(&Raster::vp), decltype(raster.vp) Raster::*>);
     static_assert(std::same_as<decltype(&Raster::outColor), decltype(raster.outColor) Raster::*>);
-    static_assert(!std::is_base_of_v<RasterizerPipeline<>, Raster>);
+    static_assert(!std::is_base_of_v<RasterPipeline<>, Raster>);
     HardwareImage first(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     HardwareImage second(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     second.setClearColor(0.75f, 0.f, 0.f, 1.f);

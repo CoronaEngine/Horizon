@@ -22,7 +22,7 @@ private:
     HardwareBuffer vertex_buffer, index_buffer, commands;
     HardwareImage texture_image;
     HardwareImage color;
-    RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> pipeline;
+    RasterPipeline<baseline_vert_slang_t, baseline_frag_slang_t> pipeline;
     struct DrawParameters {
         ktm::fmat4x4 model{};
         uint32_t texIndex{};

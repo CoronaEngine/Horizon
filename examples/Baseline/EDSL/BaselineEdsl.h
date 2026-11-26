@@ -21,6 +21,6 @@ private:
     HardwareImage albedo_image, color_image;
     EmbeddedShader::Texture2D<ktm::fvec4> albedo{albedo_image}, color{color_image};
     EmbeddedShader::Float4x4 model, view, proj;
-    RasterizerPipeline<> rasterizer;
+    RasterPipeline<> raster;
     HardwareExecutor render_executor;
 };

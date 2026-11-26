@@ -34,6 +34,6 @@ private:
     EmbeddedShader::Float4x4 proj_view;
     EmbeddedShader::Float4 camPos, lightDir;
     EmbeddedShader::Texture2D<ktm::fvec4> final_output{final_output_image};
-    RasterizerPipeline<> rasterizer;
+    RasterPipeline<> raster;
     HardwareExecutor render_executor;
 };

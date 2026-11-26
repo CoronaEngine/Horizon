@@ -35,6 +35,6 @@ private:
     HardwareImage radiance, irradiance;
     HardwareBuffer vertex_buffer, index_buffer, commands, parameter_buffer;
     HardwareImage final_output_image;
-    RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> pipeline;
+    RasterPipeline<disney_vert_slang_t, disney_frag_slang_t> pipeline;
     HardwareExecutor render_executor;
 };

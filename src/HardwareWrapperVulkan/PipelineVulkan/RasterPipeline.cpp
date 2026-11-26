@@ -1,4 +1,4 @@
-#include "RasterizerPipeline.h"
+#include "RasterPipeline.h"
 
 #include <algorithm>
 #include <atomic>
@@ -49,12 +49,12 @@ void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResource
     }
 }
 
-RasterizerPipelineVulkan::RasterizerPipelineVulkan() = default;
+RasterPipelineVulkan::RasterPipelineVulkan() = default;
 
-RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
-                                                   EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                                                   uint32_t multiviewCount)
-    : RasterizerPipelineVulkan()
+RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
+                                           EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
+                                           uint32_t multiviewCount)
+    : RasterPipelineVulkan()
 {
     // 直接从已编译的 ShaderCodeCompiler 获取 SPIR-V 代码
     vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
@@ -63,17 +63,17 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCom
     initializeStageBindings(multiviewCount);
 }
 
-RasterizerPipelineVulkan::RasterizerPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
-                                                   const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
-                                                   uint32_t multiviewCount)
-    : RasterizerPipelineVulkan()
+RasterPipelineVulkan::RasterPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
+                                           const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
+                                           uint32_t multiviewCount)
+    : RasterPipelineVulkan()
 {
     vertShaderCode = vertexSpirV;
     fragShaderCode = fragmentSpirV;
     initializeStageBindings(multiviewCount);
 }
 
-void RasterizerPipelineVulkan::initializeStageBindings(uint32_t viewCount)
+void RasterPipelineVulkan::initializeStageBindings(uint32_t viewCount)
 {
     if (viewCount == 0 || viewCount > 32) throw std::invalid_argument("Invalid multiview count");
     const auto& vertex = vertShaderCode.shaderResources;
@@ -88,26 +88,26 @@ void RasterizerPipelineVulkan::initializeStageBindings(uint32_t viewCount)
     if (uboSize) tempUBO = std::make_unique<uint8_t[]>(uboSize);
 }
 
-RasterizerPipelineVulkan::GraphicsState::~GraphicsState()
+RasterPipelineVulkan::GraphicsState::~GraphicsState()
 {
     if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
     if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
     if (renderPass) vkDestroyRenderPass(device, renderPass, nullptr);
 }
 
-RasterizerPipelineVulkan::FramebufferState::~FramebufferState()
+RasterPipelineVulkan::FramebufferState::~FramebufferState()
 {
     if (framebuffer) vkDestroyFramebuffer(device, framebuffer, nullptr);
 }
 
-RasterizerPipelineVulkan::~RasterizerPipelineVulkan()
+RasterPipelineVulkan::~RasterPipelineVulkan()
 {
     if (uboDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice(),
                                      uboDescriptorSetLayout, nullptr);
 }
 
-void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
+void RasterPipelineVulkan::createRenderPass(GraphicsState& state)
 {
     auto& renderPass = state.renderPass;
     const auto mainDevice = getHardwareContext().getMainDevice();
@@ -206,7 +206,7 @@ void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
     coronaHardwareCheck(vkCreateRenderPass(mainDevice->deviceManager.getLogicalDevice(), &renderPassInfo, nullptr, &renderPass));
 }
 
-void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
+void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 {
     auto& graphicsPipeline = state.pipeline;
     auto& pipelineLayout = state.layout;
@@ -264,15 +264,15 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     viewportState.scissorCount = 1;
 
     // 配置光栅化
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    VkPipelineRasterizationStateCreateInfo rasterInfo{};
+    rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterInfo.depthClampEnable = VK_FALSE;
+    rasterInfo.rasterizerDiscardEnable = VK_FALSE;
+    rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterInfo.lineWidth = 1.0f;
+    rasterInfo.cullMode = VK_CULL_MODE_NONE;
+    rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterInfo.depthBiasEnable = VK_FALSE;
 
     // 配置多重采样
     VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -281,7 +281,7 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     // 配置深度模板
-    // RasterizerPipeline 默认用于 3D 几何绘制，因此开启深度测试与深度写入。
+    // RasterPipeline 默认用于 3D 几何绘制，因此开启深度测试与深度写入。
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = raster.depthTest ? VK_TRUE : VK_FALSE;
@@ -375,7 +375,7 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     pipelineInfo.pVertexInputState = &vertexInputInfo;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
     pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pRasterizationState = &rasterInfo;
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
@@ -397,7 +397,7 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
+HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
                                   std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
     : pipeline(std::move(backend)), state(pipeline->rasterState), pass(requestedPass.value_or(RasterPass{})),
       startsPass(requestedPass.has_value()),
@@ -498,7 +498,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     const auto checkExtent = [&](const auto* image) {
         if (image->imageSize.x < imageSize.x || image->imageSize.y < imageSize.y ||
             image->arrayLayers < static_cast<uint32_t>(pipeline->multiviewCount))
-            throw std::runtime_error("Rasterizer attachment is smaller than the invocation extent or view count");
+            throw std::runtime_error("Raster attachment is smaller than the invocation extent or view count");
     };
     const auto attachmentView = [](auto* image) {
         if (image->mipLevels == 1 && !image->cube) return image->imageView;
@@ -506,7 +506,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     };
     for (const auto& target : renderTargets)
     {
-        if (!target) throw std::runtime_error("Rasterizer invocation has an unbound color attachment");
+        if (!target) throw std::runtime_error("Raster invocation has an unbound color attachment");
         auto* image = ResourceManager::get(target);
         checkExtent(image);
         formats.push_back(image->imageFormat);
@@ -515,7 +515,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     }
     checkExtent(depth);
     views.push_back(attachmentView(depth));
-    std::shared_ptr<RasterizerPipelineVulkan::GraphicsState> graphics;
+    std::shared_ptr<RasterPipelineVulkan::GraphicsState> graphics;
     for (const auto& cached : pipeline->graphicsStates)
         if (cached->colorFormats == formats && cached->finalLayouts == finalLayouts &&
             cached->depthFormat == depth->imageFormat && cached->state == state && cached->pass == pass)
@@ -523,7 +523,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     const auto device = getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice();
     if (!graphics)
     {
-        graphics = std::make_shared<RasterizerPipelineVulkan::GraphicsState>();
+        graphics = std::make_shared<RasterPipelineVulkan::GraphicsState>();
         graphics->device = device;
         graphics->colorFormats = std::move(formats);
         graphics->finalLayouts = std::move(finalLayouts);
@@ -534,7 +534,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
         pipeline->createGraphicsPipeline(*graphics);
         pipeline->graphicsStates.push_back(graphics);
     }
-    auto next = std::make_shared<RasterizerPipelineVulkan::FramebufferState>();
+    auto next = std::make_shared<RasterPipelineVulkan::FramebufferState>();
     next->device = device;
     next->graphics = graphics;
     next->targets = renderTargets;
@@ -551,19 +551,19 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     framebuffer = lastFramebuffer = std::move(next);
 }
 
-void RasterizerPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
+void RasterPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
     bindings.writeValue({}, {tempUBO.get(), uboSize},
                         bindType, byteOffset, data, size);
 }
 
-void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
     bindings.writeResource({}, {tempUBO.get(), uboSize},
                            bindType, byteOffset, typeSize, buffer);
 }
 
-void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
+void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
 {
     if (bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
     {
@@ -734,11 +734,11 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
     }
 }
 
-std::shared_ptr<RasterizerPipelineVulkan> RasterizerPipelineVulkan::variant(
+std::shared_ptr<RasterPipelineVulkan> RasterPipelineVulkan::variant(
     EmbeddedShader::ShaderCodeModule vertex, EmbeddedShader::ShaderCodeModule fragment) const
 {
     EmbeddedShader::linkRasterDrawParameter(vertex, fragment);
-    auto next = std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, multiviewCount);
+    auto next = std::make_shared<RasterPipelineVulkan>(vertex, fragment, multiviewCount);
     if (next->renderTargets.size() == renderTargets.size()) next->renderTargets = renderTargets;
     next->rasterState = rasterState;
     next->depthImage = depthImage;

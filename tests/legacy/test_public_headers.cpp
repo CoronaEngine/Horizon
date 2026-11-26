@@ -42,13 +42,13 @@ concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_noth
 static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer>);
 static_assert(std::copyable<HardwareExecutor::Command> && !std::default_initializable<HardwareExecutor::Command> &&
               !std::is_constructible_v<bool, HardwareExecutor::Command>);
-static_assert(MoveOnlyHandle<ComputePipeline<>> && MoveOnlyHandle<RasterizerPipeline<>>);
+static_assert(MoveOnlyHandle<ComputePipeline<>> && MoveOnlyHandle<RasterPipeline<>>);
 static_assert(MoveOnlyHandle<EmbeddedShader::Texture2DProxy<ktm::fvec4>>);
 static_assert(MoveOnlyHandle<EmbeddedShader::TextureCubeProxy<ktm::fvec4>>);
 
 template<class Shader>
 concept RawPipelineInput = std::is_constructible_v<ComputePipeline<>, const Shader&> ||
-                           std::is_constructible_v<RasterizerPipeline<>, const Shader&, const Shader&>;
+                           std::is_constructible_v<RasterPipeline<>, const Shader&, const Shader&>;
 static_assert(!RawPipelineInput<std::string>);
 static_assert(!RawPipelineInput<std::vector<uint32_t>>);
 static_assert(!RawPipelineInput<EmbeddedShader::ShaderCodeModule>);
@@ -65,7 +65,7 @@ static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<st
               !CanReadBackInto<std::vector<uint16_t>>);
 
 template<class... Args>
-concept CanDrawIndirect = requires(RasterizerPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
+concept CanDrawIndirect = requires(RasterPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
     { pipeline.drawIndirect(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<HardwareExecutor::Command>;
 };
 static_assert(CanDrawIndirect<> && CanDrawIndirect<const HardwareBuffer&>);
@@ -73,7 +73,7 @@ static_assert(!CanDrawIndirect<std::span<const float>>);
 static_assert(!CanDrawIndirect<std::size_t, void (*)(std::span<std::byte>)>);
 
 struct RasterPipelineAdapter {
-    operator RasterizerPipeline<>() const;
+    operator RasterPipeline<>() const;
 };
 
 struct ComputePipelineAdapter {
@@ -81,7 +81,7 @@ struct ComputePipelineAdapter {
 };
 
 template<class T>
-concept DeducesPipeline = requires(T value) { ComputePipeline(value); } || requires(T value) { RasterizerPipeline(value); };
+concept DeducesPipeline = requires(T value) { ComputePipeline(value); } || requires(T value) { RasterPipeline(value); };
 static_assert(!DeducesPipeline<ComputePipelineAdapter> && !DeducesPipeline<RasterPipelineAdapter>);
 static_assert(std::same_as<decltype(ComputePipeline<>(ComputePipelineAdapter{})), ComputePipeline<>>);
 static_assert(requires(decltype([] {}) shader, const std::source_location& location) {
@@ -91,19 +91,19 @@ static_assert(requires(decltype([] {}) shader, const std::source_location& locat
         -> std::same_as<ComputePipeline<>>;
 });
 
-static_assert(requires(RasterizerPipeline<>& pipeline, RasterPipelineAdapter adapter) {
-    { RasterizerPipeline{} } -> std::same_as<RasterizerPipeline<>>;
-    { RasterizerPipeline(std::move(pipeline)) } -> std::same_as<RasterizerPipeline<>>;
-    { RasterizerPipeline<>(adapter) } -> std::same_as<RasterizerPipeline<>>;
+static_assert(requires(RasterPipeline<>& pipeline, RasterPipelineAdapter adapter) {
+    { RasterPipeline{} } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(std::move(pipeline)) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline<>(adapter) } -> std::same_as<RasterPipeline<>>;
 });
 
 using ShaderVector = EmbeddedShader::VariateProxy<ktm::fvec4>;
 static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
                        decltype([](ShaderVector) {}) fragment, EmbeddedShader::CompilerOption options,
                        const std::source_location& location) {
-    { RasterizerPipeline(vertex, fragment, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterizerPipeline<>>;
-    { RasterizerPipeline(vertex, fragment, options) } -> std::same_as<RasterizerPipeline<>>;
-    { RasterizerPipeline(vertex, fragment, {}, 2, location) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterPipeline(vertex, fragment, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, options) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {}, 2, location) } -> std::same_as<RasterPipeline<>>;
 });
 
 template<class T>
@@ -158,14 +158,14 @@ static_assert(!CompleteStage<disney_vert_slang_t>);
 #include SLANG(examples/Disney/Slang/disney_vert.slang)
 
 static_assert(!DeducesPipeline<disney_vert_slang_t> && !DeducesPipeline<disney_frag_slang_t>);
-using DisneyRaster = RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t>;
-using SharedVertexRaster = decltype(RasterizerPipeline(disney_vert_slang, drawstress_frag_slang));
+using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
+using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang));
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
 static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
-    { RasterizerPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
+    { RasterPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
     { pipeline.drawIndirect(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
     { executor << pipeline.drawIndirect(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor&>;

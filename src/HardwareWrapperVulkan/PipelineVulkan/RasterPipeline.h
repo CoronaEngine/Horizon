@@ -13,19 +13,19 @@
 #include "PipelineSnapshot.h"
 
 namespace horizon::detail {
-struct RasterizerPipelineVulkan
+struct RasterPipelineVulkan
 {
   public:
-    RasterizerPipelineVulkan();
-    ~RasterizerPipelineVulkan();
+    RasterPipelineVulkan();
+    ~RasterPipelineVulkan();
 
-    RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
-                             EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                             uint32_t multiviewCount);
+    RasterPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
+                         EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
+                         uint32_t multiviewCount);
 
-    RasterizerPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
-                             const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
-                             uint32_t multiviewCount);
+    RasterPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
+                         const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
+                         uint32_t multiviewCount);
 
     void setDepthImage(HardwareImage &depthImage)
     {
@@ -34,8 +34,8 @@ struct RasterizerPipelineVulkan
     }
 
     void setRasterState(RasterState state) { rasterState = state; }
-    std::shared_ptr<RasterizerPipelineVulkan> variant(EmbeddedShader::ShaderCodeModule vertex,
-                                                      EmbeddedShader::ShaderCodeModule fragment) const;
+    std::shared_ptr<RasterPipelineVulkan> variant(EmbeddedShader::ShaderCodeModule vertex,
+                                                  EmbeddedShader::ShaderCodeModule fragment) const;
 
     [[nodiscard]] HardwareImage &getDepthImage()
     {
@@ -116,7 +116,7 @@ struct RasterizerPipelineVulkan
 };
 } // namespace horizon::detail
 
-using horizon::detail::RasterizerPipelineVulkan;
+using horizon::detail::RasterPipelineVulkan;
 
 struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::Impl, CommandRecordVulkan
 {
@@ -130,10 +130,10 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
         std::shared_ptr<HardwareBuffer> geometryUpload;
         VkRect2D scissor;
         uint32_t count;
-        RasterizerPipelineVulkan::Root root;
+        RasterPipelineVulkan::Root root;
     };
 
-    std::shared_ptr<RasterizerPipelineVulkan> pipeline;
+    std::shared_ptr<RasterPipelineVulkan> pipeline;
     ktm::uvec2 imageSize{};
     RasterState state;
     RasterPass pass;
@@ -147,9 +147,9 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
     std::vector<uint8_t> uniformBytes;
     std::shared_ptr<BindingSnapshot> bindings;
     std::shared_ptr<UniformSnapshot> uniform;
-    std::shared_ptr<RasterizerPipelineVulkan::FramebufferState> framebuffer;
+    std::shared_ptr<RasterPipelineVulkan::FramebufferState> framebuffer;
 
-    Draw(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent, std::optional<RasterPass> pass,
+    Draw(std::shared_ptr<RasterPipelineVulkan> backend, std::optional<ktm::uvec2> extent, std::optional<RasterPass> pass,
          const std::vector<ResourceUse>& uses);
     bool sameAttachments(const Draw& next) const;
     bool canMerge(const Draw& next) const;

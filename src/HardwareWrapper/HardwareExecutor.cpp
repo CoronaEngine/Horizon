@@ -1,6 +1,6 @@
 #include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
+#include "HardwareWrapperVulkan/PipelineVulkan/RasterPipeline.h"
 #include <stdexcept>
 
 HardwareExecutor::HardwareExecutor()

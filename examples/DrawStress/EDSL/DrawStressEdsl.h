@@ -27,6 +27,6 @@ private:
     std::array<ktm::fvec4, dim> translations;
     HardwareImage output_image;
     EmbeddedShader::Texture2D<ktm::fvec4> output{output_image};
-    RasterizerPipeline<> rasterizer;
+    RasterPipeline<> raster;
     HardwareExecutor render_executor;
 };

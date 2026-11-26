@@ -475,21 +475,21 @@ static int generateRasterPair(int argc, char** argv)
     code << "#pragma once\n#include \"Horizon.h\"\n"
          << "#include \"" << vertexHeader.generic_string() << "\"\n"
          << "#include \"" << fragmentHeader.generic_string() << "\"\n\n"
-         << "template<> struct RasterizerPipeline<" << vertexType << ", " << fragmentType << "> {\n"
+         << "template<> struct RasterPipeline<" << vertexType << ", " << fragmentType << "> {\n"
          << R"(private:
-    ::RasterizerPipeline<> pipeline_;
+    ::RasterPipeline<> pipeline_;
 
 public:
 )"
-         << "    RasterizerPipeline(uint32_t views = 1)\n"
+         << "    RasterPipeline(uint32_t views = 1)\n"
          << "        : pipeline_(" << vertexType << "::shaderModule, " << fragmentType << "::shaderModule, views) {}\n"
-         << "    RasterizerPipeline(const " << vertexType << "&, const " << fragmentType
+         << "    RasterPipeline(const " << vertexType << "&, const " << fragmentType
          << "&, uint32_t views = 1)\n"
-         << R"(        : RasterizerPipeline(views) {}
+         << R"(        : RasterPipeline(views) {}
 
-    RasterizerPipeline(RasterizerPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
+    RasterPipeline(RasterPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
 
-    RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept
+    RasterPipeline& operator=(RasterPipeline&& other) noexcept
     {
         pipeline_ = std::move(other.pipeline_);
         return *this;
@@ -508,14 +508,14 @@ public:
         return pipeline_.drawIndirect(vertices, indices, packets, count, parameters, scissor, pass, extent);
     }
 
-    RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources)
+    RasterPipeline& uses(std::initializer_list<ResourceUse> resources)
     {
         pipeline_.uses(resources);
         return *this;
     }
 
     template<class T>
-    RasterizerPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
+    RasterPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
     {
         pipeline_.bindRenderTarget(location, proxy);
         return *this;
@@ -523,8 +523,8 @@ public:
 
 )";
     const auto& resources = !vs.uniformBufferSize && fs.uniformBufferSize ? fs : vs;
-    emitResourceFields(code, resources, "::RasterizerPipeline<>");
-    emitOutputFields(code, fs, "::RasterizerPipeline<>");
+    emitResourceFields(code, resources, "::RasterPipeline<>");
+    emitOutputFields(code, fs, "::RasterPipeline<>");
     code << "};\n";
 
     std::ofstream header(output);

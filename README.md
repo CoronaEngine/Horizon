@@ -295,7 +295,7 @@ helicon_compile_shaders(HorizonExamples RASTER_PAIRS
 #include SLANG(Baseline/Slang/baseline_frag.slang)
 ```
 
-两个阶段都可见时，即可用 `RasterizerPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterizerPipeline<VS, FS>&`，由函数模板推导阶段类型。
+两个阶段都可见时，即可用 `RasterPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterPipeline<VS, FS>&`，由函数模板推导阶段类型。
 
 `executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 将命令缓冲中的前 `count` 条绘制记录入队。每次调用独立选择几何缓冲、参数和裁剪矩形。执行器按入队顺序绘制，将兼容的相邻绘制合并到同一 render pass。CPU 预先生成的间接命令可以与顶点和索引一起上传，并在后续帧中复用。
 

@@ -65,7 +65,7 @@ DrawStressEdsl::DrawStressEdsl(void* native_window)
         return color;
     };
     const auto fragment_shader = [&](Float3 color) { output << Float4(color, Float(1)); };
-    rasterizer = RasterizerPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
+    raster = RasterPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
 }
 
 void DrawStressEdsl::run(float seconds)
@@ -110,6 +110,6 @@ void DrawStressEdsl::run(float seconds)
     }
     parameters.flushMapped();
 
-    render_executor << rasterizer.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
+    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
     display.present(render_executor, output_image);
 }

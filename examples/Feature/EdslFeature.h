@@ -22,7 +22,7 @@ private:
     HardwareImage shaded_image{width, height, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage};
     EmbeddedShader::Texture2D<ktm::fvec4> albedo{albedo_image}, normals{normal_image}, shaded{shaded_image};
     EmbeddedShader::Float4x4 view_projection;
-    RasterizerPipeline<> geometry;
+    RasterPipeline<> geometry;
     ComputePipeline<> lighting;
     HardwareExecutor executor;
     HardwareDisplayer display;
