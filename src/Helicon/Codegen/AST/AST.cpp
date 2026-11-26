@@ -293,6 +293,7 @@ void EmbeddedShader::Ast::AST::addLocalUniversalStatement(
 std::shared_ptr<EmbeddedShader::Ast::CallFunc> EmbeddedShader::Ast::AST::callFunc(std::string funcName,
 	std::shared_ptr<Type> returnType, std::vector<std::shared_ptr<Value>> args)
 {
+	Node::accessAll(args, AccessPermissions::ReadOnly);
 	auto func = std::make_shared<CallFunc>();
 	func->type = std::move(returnType);
 	func->args = std::move(args);

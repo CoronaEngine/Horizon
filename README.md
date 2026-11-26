@@ -119,8 +119,11 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 | 场景和阅读重点 | EDSL 实现 | Slang 实现 |
 | --- | --- | --- |
 | Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) |
+| EDSL Feature · G-buffer 与计算着色 | [example_edsl_feature.cpp](examples/Feature/example_edsl_feature.cpp) | — |
 | Disney · 复用球体几何，逐球传入材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
 | DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
+
+运行 `HorizonExamples edsl_feature` 可查看 EDSL 如何调用外部着色器函数。片元入口调用 GLSL 函数计算立方体的表面颜色，将颜色和法线写入 G-buffer。计算入口逐像素读取这两张图像，调用 HLSL 函数计算光照并输出到窗口。[GLSL 辅助函数](examples/Feature/edsl_feature_geometry.glsl) · [HLSL 辅助函数](examples/Feature/edsl_feature_lighting.hlsl)
 
 每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
@@ -145,7 +148,7 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 | `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。三个 Disney 模式都使用同一束方向光，并从两张 DDS 环境贴图采样漫反射和镜面光照。相机固定在材质球阵列前。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
 | `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。三个 DrawStress 示例各自的类头文件中都有 `dim` 常量，可将网格边长设为 2 到 40。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
 
-九个模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
+各模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
 窗口标题每帧显示模式、实时帧率和本帧实际耗时，例如 `baseline_slang | 125.0 FPS | 8.00 ms`。Baseline 和 DrawStress 的动画从首帧零秒开始。将主循环中的 `fixed_dt` 设为正数可指定动画每帧推进的秒数，帧率和耗时仍按实际时间计算。[主循环](examples/main.cpp)
 

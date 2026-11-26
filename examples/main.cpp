@@ -8,6 +8,7 @@
 #include "DrawStress/EDSL/DrawStressEdsl.h"
 #include "DrawStress/Ocarina/DrawStressOcarina.h"
 #include "DrawStress/Slang/DrawStressSlang.h"
+#include "Feature/EdslFeature.h"
 
 #include <format>
 #include <memory>
@@ -54,6 +55,7 @@ int main(int argc, char** argv)
             else if (mode == "disney_slang") example = std::make_unique<DisneySlang>(native_window);
             else if (mode == "drawstress_edsl") example = std::make_unique<DrawStressEdsl>(native_window);
             else if (mode == "drawstress_slang") example = std::make_unique<DrawStressSlang>(native_window);
+            else if (mode == "edsl_feature") example = std::make_unique<EdslFeature>(native_window);
             else if (mode == "baseline_ocarina") example = std::make_unique<BaselineOcarina>(native_window);
             else if (mode == "disney_ocarina") example = std::make_unique<DisneyOcarina>(native_window);
             else if (mode == "drawstress_ocarina") example = std::make_unique<DrawStressOcarina>(native_window);

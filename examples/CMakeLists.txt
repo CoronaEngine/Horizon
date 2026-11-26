@@ -13,6 +13,7 @@ add_executable(HorizonExamples
     DrawStress/Slang/DrawStressSlang.h
     DrawStress/Slang/example_drawstress_slang.cpp
     DrawStress/Ocarina/example_drawstress_ocarina.cpp
+    Feature/example_edsl_feature.cpp
 )
 find_program(TUTORIAL_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 set(baseline_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Tutorial")

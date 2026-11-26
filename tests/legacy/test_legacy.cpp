@@ -617,15 +617,15 @@ void test_gpu()
     EmbeddedShader::CompilerOption options;
     options.compileGLSL = false;
     options.compileHLSL = false;
-    EmbeddedShader::ArrayProxy<uint32_t> importedOutput(destination);
+    EmbeddedShader::ArrayProxy<uint32_t> importedInput(source), importedOutput(destination);
     ComputePipeline edsl([&] {
         EmbeddedShader::Uint index = EmbeddedShader::dispatchThreadID()->x;
-        importedOutput[index] = compute_write_slang.addIndex(EmbeddedShader::Uint(40), index);
+        importedOutput[index] = compute_write_slang.addIndex(importedInput[index], index);
     }, ktm::uvec3(1), options);
-    executor << edsl.uses({{destination, ResourceAccess::Write}})(8);
+    executor << edsl.uses({{source, ResourceAccess::Read}, {destination, ResourceAccess::Write}})(8);
     executor.commit().waitForDeferredResources();
-    expect(destination.copyToData(output) && output == std::array{40u, 41u, 42u, 43u, 44u, 45u, 46u, 47u},
-           "EDSL can import a helper from a Slang module that also defines a compute entry point");
+    expect(destination.copyToData(output) && output == std::array{10u, 21u, 32u, 43u, 54u, 65u, 76u, 87u},
+           "an EDSL resource read only by an imported helper is bound at dispatch");
 
     std::cerr << "GPU: generated raster fields after move\n";
     RasterizerPipeline raster(baseline_vert_slang, baseline_frag_slang);
