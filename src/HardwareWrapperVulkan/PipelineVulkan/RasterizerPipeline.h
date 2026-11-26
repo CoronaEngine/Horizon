@@ -20,22 +20,13 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
     RasterizerPipelineVulkan();
     ~RasterizerPipelineVulkan();
 
-    RasterizerPipelineVulkan(std::string vertexShaderCode,
-                             std::string fragmentShaderCode,
-                             uint32_t multiviewCount = 1,
-                             const std::source_location &sourceLocation = std::source_location::current());
-
-    // 从已编译的 ShaderCodeCompiler 构造
     RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
                              EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                             uint32_t multiviewCount = 1,
-                             const std::source_location &sourceLocation = std::source_location::current());
+                             uint32_t multiviewCount);
 
-    // 从 SPIR-V + Slang 反射构造
     RasterizerPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
                              const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
-                             uint32_t multiviewCount = 1,
-                             const std::source_location &sourceLocation = std::source_location::current());
+                             uint32_t multiviewCount);
 
     void setDepthImage(HardwareImage &depthImage)
     {

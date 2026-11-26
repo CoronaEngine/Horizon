@@ -8,16 +8,12 @@ ComputePipeline<CS>::ComputePipeline()
     : computePipeline_(std::make_shared<ComputePipelineVulkan>()) {}
 
 template<class CS>
-ComputePipeline<CS>::ComputePipeline(const std::string& source, const std::source_location& location)
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>(source, location)) {}
+ComputePipeline<CS>::ComputePipeline(const EmbeddedShader::ShaderCodeModule& module)
+    : computePipeline_(std::make_shared<ComputePipelineVulkan>(module)) {}
 
 template<class CS>
-ComputePipeline<CS>::ComputePipeline(const EmbeddedShader::ShaderCodeModule& module, const std::source_location& location)
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>(module, location)) {}
-
-template<class CS>
-ComputePipeline<CS>::ComputePipeline(EmbeddedShader::ComputePipelineObject shader, const std::source_location& location)
-    : computePipeline_(std::make_shared<ComputePipelineVulkan>(*shader.compute, location)),
+ComputePipeline<CS>::ComputePipeline(EmbeddedShader::ComputePipelineObject shader)
+    : computePipeline_(std::make_shared<ComputePipelineVulkan>(shader.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV))),
       autoBindEntries_(std::move(shader.autoBindEntries)) {}
 
 template<class CS>

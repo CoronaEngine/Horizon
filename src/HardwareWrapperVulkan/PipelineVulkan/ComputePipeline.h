@@ -18,13 +18,7 @@ struct horizon::detail::ComputePipelineVulkan : std::enable_shared_from_this<Com
     ComputePipelineVulkan();
     ~ComputePipelineVulkan();
 
-    ComputePipelineVulkan(std::string source, const std::source_location& location);
-
-    // 新构造函数：接受已编译的 ShaderCodeCompiler，避免重复编译
-    ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler &compiler, const std::source_location &sourceLocation = std::source_location::current());
-
-    // 从 SPIR-V + Slang 反射构造
-    ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &sourceLocation = std::source_location::current());
+    explicit ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &module);
 
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);

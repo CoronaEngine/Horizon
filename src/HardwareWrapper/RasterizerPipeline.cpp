@@ -8,28 +8,14 @@ RasterizerPipeline<VS, FS>::RasterizerPipeline()
     : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>()) {}
 
 template<class VS, class FS>
-RasterizerPipeline<VS, FS>::RasterizerPipeline(std::string vertex, std::string fragment, uint32_t views,
-                                               const std::source_location& location)
-    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(std::move(vertex), std::move(fragment), views, location)) {}
-
-template<class VS, class FS>
 RasterizerPipeline<VS, FS>::RasterizerPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
                                                const EmbeddedShader::ShaderCodeModule& fragment,
-                                               uint32_t views, const std::source_location& location)
-    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, views, location)) {}
+                                               uint32_t views)
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, views)) {}
 
 template<class VS, class FS>
-RasterizerPipeline<VS, FS>::RasterizerPipeline(const EmbeddedShader::SlangModule& vertex,
-                                               const EmbeddedShader::SlangModule& fragment,
-                                               uint32_t views, const std::source_location& location)
-    : RasterizerPipeline(horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, vertex),
-                         horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, fragment),
-                         views, location) {}
-
-template<class VS, class FS>
-RasterizerPipeline<VS, FS>::RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views,
-                                               const std::source_location& location)
-    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(*shaders.vertex, *shaders.fragment, views, location)),
+RasterizerPipeline<VS, FS>::RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views)
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(*shaders.vertex, *shaders.fragment, views)),
       vertexConditions_(shaders.vertex->getCurrentConditionInfo()), fragmentConditions_(shaders.fragment->getCurrentConditionInfo()),
       autoBindEntries_(std::move(shaders.autoBindEntries))
 {

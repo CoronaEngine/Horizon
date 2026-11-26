@@ -4,8 +4,9 @@
 #include <sstream>
 #include <fstream>
 #include <algorithm>
+#include <array>
 #include <iterator>
-#include <regex>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -16,92 +17,15 @@
 #include "Compiler/ShaderCodeCompiler.h"
 using namespace EmbeddedShader;
 
-void generateBinary(std::stringstream& out, std::string_view name, const std::vector<uint32_t>& shaderCode)
+void generateSlangModule(std::ostream& out, const SlangModule& slangModule)
 {
-	out << "static inline std::vector<uint32_t> " << name <<" {";
-	emitSpirVLiteral(out, shaderCode);
-	out << "};\n";
-}
-
-void generateBinary(std::stringstream& out, std::string_view name, const SlangModule& slangModule)
-{
-    out << "static inline ::EmbeddedShader::SlangModule " << name << " {{";
+    out << "static inline ::EmbeddedShader::SlangModule slangModule {{";
     emitCppStringLiteral(out, slangModule.name);
     out << "}, {";
     emitCppStringLiteral(out, slangModule.path);
     out << "}, {";
     emitSlangModuleLiteral(out, slangModule.binData);
     out << "}};\n";
-}
-
-void buildFunctionParameter(FunctionSignature& signature, std::stringstream& out)
-{
-	out << "(";
-	if (!signature.parameters.empty())
-	{
-		auto& param0 = signature.parameters[0];
-		out << emitCppParamType(param0.typeName) << " " << param0.name;
-		for (size_t i = 1; i < signature.parameters.size(); ++i)
-		{
-			auto& param = signature.parameters[i];
-			out << ", " << emitCppParamType(param.typeName) << " " << param.name;
-		}
-	}
-	out << ")";
-}
-
-void buildFunctionSignature(FunctionSignature &signature, std::stringstream &out, std::string_view sourceSpv)
-{
-	out << "static inline ::EmbeddedShader::FunctionProxy<";
-	if (signature.returnTypeName == "void")
-	{
-		out << "void";
-		buildFunctionParameter(signature,out);
-	}
-	else
-	{
-		auto retCppType = typeNameToCpp(signature.returnTypeName);
-		if (isOpaqueProxyType(retCppType))
-		{
-			// Opaque type: emit as full proxy type directly (e.g. Texture2DProxy<fvec4>)
-			out << "::EmbeddedShader::" << retCppType.substr(1);
-		}
-		else
-		{
-			out << "::EmbeddedShader::VariateProxy<" << retCppType;
-		}
-		buildFunctionParameter(signature,out);
-		if (!isOpaqueProxyType(retCppType))
-			out << ">";
-	}
-	out << "> " << signature.name << "{";
-	out << "\""<< signature.name << "\",\""<< typeNameToSlang(signature.returnTypeName) << "\",{";
-	for (auto element: signature.parameters)
-	{
-	    out << "{\"" << typeNameToSlang(element.typeName) << "\",\"" << element.name << "\"},";
-	}
-	out<< "},&" << sourceSpv << "};";
-}
-
-void buildStruct(const StructInfo& structInfo, std::stringstream& out)
-{
-	out << "struct " << structInfo.name << "\n{\n";
-	for (auto& member : structInfo.members)
-	{
-		out << "\t" << emitCppParamType(member.typeName) << " " << member.name << ";\n";
-	}
-	out << "};";
-}
-
-std::string sanitizeToIdentifier(const std::filesystem::path& p)
-{
-	return sanitizeFilename(p);
-}
-
-bool hasShaderEntryPoint(const std::string& code)
-{
-    static const std::regex mainPattern(R"(\bmain\s*\()");
-    return std::regex_search(code, mainPattern) || code.find("[shader") != std::string::npos;
 }
 
 std::string extractMemberName(const std::string& qualifiedKey)
@@ -430,7 +354,7 @@ static bool containsDevicePointer(slang::TypeReflection* type)
     return false;
 }
 
-void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection,std::string sourceModule)
+void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection)
 {
     if (containsDevicePointer(reflection->getReturnType())) return;
     for (unsigned i = 0; i < reflection->getParameterCount(); ++i)
@@ -466,7 +390,7 @@ void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection,std::
         auto child = reflection->getParameterByIndex(i);
         ss << "{\"" << typeNameToSlang(procType(child->getType())) << "\",\"" << child->getName() << "\"},";
     }
-    ss << "},&" << sourceModule << "};";
+    ss << "},&slangModule};\n";
 }
 
 void procStruct(std::stringstream& ss, slang::DeclReflection* reflection)
@@ -506,14 +430,42 @@ void procStructInstance(std::stringstream& ss, slang::DeclReflection* reflection
     ss << "};\n";
 }
 
-static ShaderResources reflectBindings(const SlangModule& module, ShaderStage stage)
+static Slang::ComPtr<slang::ISession> createShaderSession()
 {
-    SlangModuleReflectShaderResourceArgs args;
-    args.module = &module;
-    args.stage = stage;
-    auto resources = ShaderLanguageConverter::slangModuleReflectShaderResource(args);
+    auto globalSession = ShaderLanguageConverter::getGlobalSession();
+    slang::TargetDesc target{};
+    target.format = SLANG_SPIRV;
+    target.profile = globalSession->findProfile("spirv_1_6");
+    std::array targets{target};
+    std::array options{slang::CompilerOptionEntry{
+        slang::CompilerOptionName::EmitSpirvDirectly,
+        {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+    }};
+    return ShaderLanguageConverter::createSession(globalSession, targets, options);
+}
+
+static Slang::ComPtr<slang::IComponentType> linkStage(const Slang::ComPtr<slang::ISession>& session,
+                                                       const Slang::ComPtr<slang::IModule>& module,
+                                                       std::optional<ShaderStage> expectedStage)
+{
+    // For an unannotated main, Slang needs the stage supplied by the build.
+    auto entry = ShaderLanguageConverter::tryFindEntryPoint(module, "main", expectedStage.value_or(ShaderStage::VertexShader));
+    if (!entry)
+        throw std::runtime_error("Shader lacks a main entry point: " + std::string(module->getFilePath()));
+    std::array<slang::IComponentType*, 2> components{module.get(), entry.get()};
+    auto program = ShaderLanguageConverter::link(session, components);
+    auto stage = program->getLayout()->getEntryPointByIndex(0)->getStage();
+    if (stage != SLANG_STAGE_VERTEX && stage != SLANG_STAGE_FRAGMENT && stage != SLANG_STAGE_COMPUTE)
+        throw std::runtime_error("Unsupported shader stage: " + std::string(module->getFilePath()));
+    if (expectedStage && slangStageToShaderStage(stage) != *expectedStage)
+        throw std::runtime_error("Shader main does not match its registered stage: " + std::string(module->getFilePath()));
+    return program;
+}
+
+static void prepareBindingNames(ShaderResources& resources)
+{
     // The raster recorder owns the push constant root.
-    if (stage != ShaderStage::ComputeShader)
+    if (resources.entryPointInfoPool.front().stage != ShaderStage::ComputeShader)
         resources.pushConstantName.clear();
     for (auto& field : resources.bindInfoPool)
     {
@@ -521,7 +473,6 @@ static ShaderResources reflectBindings(const SlangModule& module, ShaderStage st
         if (field.variateName == "return")
             field.variateName = "RETURN";
     }
-    return resources;
 }
 
 static int generateRasterPair(int argc, char** argv)
@@ -552,10 +503,13 @@ static int generateRasterPair(int argc, char** argv)
         module.binData.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
         if (module.binData.empty() || input.bad())
             throw std::runtime_error("Cannot read Slang IR from " + ir.string());
-        auto resources = reflectBindings(module, stage);
-        if (std::none_of(resources.entryPointInfoPool.begin(), resources.entryPointInfoPool.end(),
-                         [stage](const auto& entry) { return entry.stage == stage && entry.name == "main"; }))
-            throw std::runtime_error("Shader lacks a main entry point for its registered stage: " + shader.string());
+        auto session = createShaderSession();
+        auto loaded = ShaderLanguageConverter::loadModule(session, module);
+        if (!loaded)
+            throw std::runtime_error("Cannot load Slang IR from " + ir.string());
+        auto program = linkStage(session, loaded, stage);
+        auto resources = ShaderLanguageConverter::slangReflection(program->getLayout());
+        prepareBindingNames(resources);
         return resources;
     };
     const auto vs = loadBindings(vertex, vertexIR, ShaderStage::VertexShader);
@@ -563,8 +517,8 @@ static int generateRasterPair(int argc, char** argv)
     if (vs.uniformBufferSize && fs.uniformBufferSize && vs.uniformBufferSize != fs.uniformBufferSize)
         throw std::runtime_error("Uniform buffer block sizes differ in " + vertex.string() + " and " + fragment.string());
 
-    const auto vertexType = sanitizeToIdentifier(vertex) + "_t";
-    const auto fragmentType = sanitizeToIdentifier(fragment) + "_t";
+    const auto vertexType = sanitizeFilename(vertex) + "_t";
+    const auto fragmentType = sanitizeFilename(fragment) + "_t";
     std::ostringstream code;
     code << "#pragma once\n#include \"Horizon.h\"\n"
          << "#include \"" << vertexHeader.generic_string() << "\"\n"
@@ -575,11 +529,11 @@ static int generateRasterPair(int argc, char** argv)
 
 public:
 )"
-         << "    RasterizerPipeline(uint32_t views = 1, const std::source_location& location = std::source_location::current())\n"
-         << "        : pipeline_(" << vertexType << "::slangModule, " << fragmentType << "::slangModule, views, location) {}\n"
+         << "    RasterizerPipeline(uint32_t views = 1)\n"
+         << "        : pipeline_(" << vertexType << "::shaderModule, " << fragmentType << "::shaderModule, views) {}\n"
          << "    RasterizerPipeline(const " << vertexType << "&, const " << fragmentType
-         << "&, uint32_t views = 1, const std::source_location& location = std::source_location::current())\n"
-         << R"(        : RasterizerPipeline(views, location) {}
+         << "&, uint32_t views = 1)\n"
+         << R"(        : RasterizerPipeline(views) {}
 
     RasterizerPipeline(RasterizerPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
 
@@ -626,7 +580,7 @@ public:
     return 0;
 }
 
-int main(int argc, char** argv)
+int main(int argc, char** argv) try
 {
 	std::cout << "Helicon Shader Compile Scripts\n";
 	if (argc < 2)
@@ -635,14 +589,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
     if (std::string_view(argv[1]) == "-raster-pair")
-    {
-        try { return generateRasterPair(argc, argv); }
-        catch (const std::exception& error)
-        {
-            std::cerr << "ERROR: " << error.what() << '\n';
-            return 1;
-        }
-    }
+        return generateRasterPair(argc, argv);
 	std::filesystem::path path = "";
 	std::filesystem::path outPath = "";
     std::filesystem::path moduleOutput;
@@ -816,12 +763,6 @@ int main(int argc, char** argv)
 			std::cout << "INFO:Auto-detected shader stage: " << static_cast<int>(inputStage) << "\n";
 	}
 
-    const bool moduleOnly = !stageDetected && !hasShaderEntryPoint(code);
-    if (moduleOnly)
-    {
-        std::cout << "INFO:No shader entry point detected; generating Slang module wrapper only.\n";
-    }
-
     SlangModuleCompileArgs args;
     args.moduleName = path.stem().string();
     args.modulePath = path.string();
@@ -829,88 +770,82 @@ int main(int argc, char** argv)
     args.sourceLanguage = inputLanguage;
     auto slangModule = ShaderLanguageConverter::slangModuleCompiler(args);
 
-    auto resources = moduleOnly ? ShaderResources{} : reflectBindings(slangModule, inputStage);
-
-    if (moduleOnly)
-        std::cout << "SUCCESS:Generated Slang module reflection.\n";
-    else
-	    std::cout << "SUCCESS:Obtained shader reflection information through Slang.\n";
+    auto session = createShaderSession();
+    auto module = ShaderLanguageConverter::loadModule(session, slangModule);
+    if (!module)
+        throw std::runtime_error("Cannot load Slang IR from " + path.string());
+    auto declarations = module->getModuleReflection();
+    bool moduleOnly = true;
+    for (auto function : declarations->getChildrenOfKind<slang::DeclReflection::Kind::Func>())
+    {
+        if (std::string_view(function->getName()) == "main")
+        {
+            moduleOnly = false;
+            break;
+        }
+    }
+    if (moduleOnly && !rasterReady.empty())
+        throw std::runtime_error("Raster shader lacks a main entry point: " + path.string());
 
 	std::cout << "INFO:Generate the final C++ shader...\n";
 	std::stringstream out;
 	out << "#pragma once\n#include <Codegen/VariateProxy.h>\n";
 
     // Wrap everything in a per-shader type and expose an object with the shader name.
-    auto nsName = sanitizeToIdentifier(path);
+    auto nsName = sanitizeFilename(path);
     auto nsTypeName = nsName + "_t";
     out << "struct " << nsTypeName << " {\n";
 
-    auto smName = "slang_module_" + sanitizePath(path);
-
-	generateBinary(out, smName, slangModule);
-
-    // 稳定别名：用户可通过 xxx_glsl::slangModule 引用预编译 shader。
-    out << "static inline auto& slangModule = " << smName << ";\n";
+    ShaderResources resources;
+    if (!moduleOnly)
+    {
+        auto program = linkStage(session, module, stageDetected ? std::optional{inputStage} : std::nullopt);
+        SlangCompileResult result;
+        ShaderLanguageConverter::fillCompileResult(result, program, 0, SLANG_SPIRV, true);
+        resources = std::move(result.reflections.at(ShaderLanguage::SpirV));
+        for (auto& field : resources.bindInfoPool)
+            field.variateName = extractMemberName(field.variateName);
+        out << "static inline const ::EmbeddedShader::ShaderCodeModule shaderModule{std::vector<uint32_t>{";
+        emitSpirVLiteral(out, result.binaryTargets.at(ShaderLanguage::SpirV));
+        out << "}, " << serializeShaderResources(resources) << "};\n";
+        prepareBindingNames(resources);
+    }
 
     // Generate BindingKey struct declarations first, collect binding block names
 	std::cout << "INFO:Generate binding keys for struct '" << nsTypeName << "'...\n";
 	auto bindingBlockNames = generateBindingKeys(out, resources);
 
-    SlangModuleReflectionArgs reflectionArgs;
-    reflectionArgs.stage = inputStage;
-    reflectionArgs.module = &slangModule;
-    reflectionArgs.layoutCallback = [&](slang::ProgramLayout*) {};
-    reflectionArgs.reflectionCallback = [&](slang::DeclReflection* reflection) {
-        for (int i = 0; i < reflection->getChildren().count; ++i)
+    std::stringstream functions;
+    for (auto child : declarations->getChildren())
+    {
+        switch (child->getKind())
         {
-            auto child = reflection->getChild(i);
-            switch (child->getKind())
-            {
-            case slang::DeclReflection::Kind::Unsupported:
-                break;
             case slang::DeclReflection::Kind::Struct:
-                if (bindingBlockNames.contains(reflection->getName())) break;
+                if (bindingBlockNames.contains(child->getName())) break;
                 procStruct(out,child);
                 out << "\n";
                 break;
             case slang::DeclReflection::Kind::Func:
-            {
-                bool isEntryPoint = false;
-                for (const auto& ep : resources.entryPointInfoPool)
-                {
-                    if (ep.name == child->getName())
-                    {
-                        isEntryPoint = true;
-                        break;
-                    }
-                }
-                if (isEntryPoint) break;
-                procFunc(out, child->asFunction(), smName);
-                out << "\n";
-            }
-                break;
-            case slang::DeclReflection::Kind::Module:
-                break;
-            case slang::DeclReflection::Kind::Generic:
+                if (moduleOnly || std::string_view(child->getName()) != "main")
+                    procFunc(functions, child->asFunction());
                 break;
             case slang::DeclReflection::Kind::Variable:
                 if (bindingBlockNames.contains(child->getName())) break;
                 procStructInstance(out,child);
                 break;
-            case slang::DeclReflection::Kind::Namespace:
+            default:
                 break;
-            case slang::DeclReflection::Kind::Enum:
-                break;
-            }
         }
-    };
-    ShaderLanguageConverter::slangModuleReflection(reflectionArgs);
+    }
+    if (moduleOnly || !functions.view().empty())
+    {
+        generateSlangModule(out, slangModule);
+        out << functions.view();
+    }
 
     out << "static constexpr size_t pushConstantBlockSize = " << resources.pushConstantSize << ";\n"
         << "static constexpr size_t uniformBufferBlockSize = " << resources.uniformBufferSize << ";\n";
-    if (inputStage == ShaderStage::ComputeShader ||
-        std::any_of(resources.entryPointInfoPool.begin(), resources.entryPointInfoPool.end(),
-                    [](const auto& entry) { return entry.stage == ShaderStage::ComputeShader; }))
+    if (!moduleOnly && resources.entryPointInfoPool.front().stage == ShaderStage::ComputeShader)
         generateComputeBindings(out, resources);
 
 	out << "}; // struct " << nsTypeName << "\n";
@@ -949,4 +884,9 @@ int main(int argc, char** argv)
 	std::cout << "SUCCESS:The C++ shader has been output to the following directory:\n\t" << outFilePath.string();
 
 	return 0;
+}
+catch (const std::exception& error)
+{
+    std::cerr << "ERROR: " << error.what() << '\n';
+    return 1;
 }

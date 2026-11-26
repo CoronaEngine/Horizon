@@ -138,25 +138,27 @@ namespace EmbeddedShader
 	std::string serializeShaderResources(const ShaderCodeModule::ShaderResources& shaderResources)
 	{
 		std::stringstream result;
-		result << "ShaderCodeModule::ShaderResources{";
+		result << "::EmbeddedShader::ShaderCodeModule::ShaderResources{";
 		result << shaderResources.pushConstantSize << ",";
-		result << "\"" << shaderResources.pushConstantName << "\",";
-		result << shaderResources.uniformBufferSize << ",";
-		result << "\"" << shaderResources.uniformBufferName << "\",";
-		result << "{";
+		emitCppStringLiteral(result, shaderResources.pushConstantName);
+		result << "," << shaderResources.uniformBufferSize << ",";
+		emitCppStringLiteral(result, shaderResources.uniformBufferName);
+		result << ",{";
 		for (const auto& bindInfo : shaderResources.bindInfoPool)
 		{
 			result << "{";
 			result << bindInfo.set << ",";
 			result << bindInfo.binding << ",";
 			result << bindInfo.location << ",";
-			result << "\"" << bindInfo.semantic << "\",";
-			result << "\"" << bindInfo.variateName << "\",";
-			result << "\"" << bindInfo.typeName << "\",";
-			result << bindInfo.elementCount << ",";
+			emitCppStringLiteral(result, bindInfo.semantic);
+			result << ",";
+			emitCppStringLiteral(result, bindInfo.variateName);
+			result << ",";
+			emitCppStringLiteral(result, bindInfo.typeName);
+			result << "," << bindInfo.elementCount << ",";
 			result << bindInfo.typeSize << ",";
 			result << bindInfo.byteOffset << ",";
-			result << "static_cast<EmbeddedShader::ShaderCodeModule::ShaderResources::BindType>(" << bindInfo.bindType << ")";
+			result << "static_cast<::EmbeddedShader::ShaderCodeModule::ShaderResources::BindType>(" << bindInfo.bindType << ")";
 			result << "},";
 		}
 		result << "}";
@@ -166,9 +168,9 @@ namespace EmbeddedShader
 		for (const auto& entryPoint : shaderResources.entryPointInfoPool)
 		{
 			result << "{";
-			result << "\"" << entryPoint.name << "\",";
-			result << "static_cast<EmbeddedShader::ShaderStage>(" << static_cast<uint32_t>(entryPoint.stage) << "),";
-			result << "ktm::uvec3(" << entryPoint.numthreads.x << "," << entryPoint.numthreads.y << "," << entryPoint.numthreads.z << ")";
+			emitCppStringLiteral(result, entryPoint.name);
+			result << ",static_cast<::EmbeddedShader::ShaderStage>(" << static_cast<uint32_t>(entryPoint.stage) << "),";
+			result << "::ktm::uvec3(" << entryPoint.numthreads.x << "," << entryPoint.numthreads.y << "," << entryPoint.numthreads.z << ")";
 			result << "},";
 		}
 		result << "}";

@@ -9,7 +9,6 @@
 #include <ranges>
 #include <source_location>
 #include <span>
-#include <string>
 #include <utility>
 #include <memory>
 #include <mutex>
@@ -38,8 +37,6 @@ struct CommandRecordVulkan;
 struct ComputePipelineVulkan;
 struct RasterizerPipelineVulkan;
 struct CopyCommandImpl;
-EmbeddedShader::ShaderCodeModule compileLegacyShaderModule(
-    EmbeddedShader::ShaderStage stage, const EmbeddedShader::SlangModule& module);
 }
 
 struct HardwareExecutor;
@@ -396,10 +393,12 @@ struct ComputePipeline
     static_assert(std::same_as<CS, void>, "A named compute stage must provide shader bindings");
 
 private:
+    template<class> friend struct ComputePipeline;
     friend struct HardwareExecutor;
     friend struct EmbeddedShader::BoundField<ComputePipeline>;
 
-    ComputePipeline(EmbeddedShader::ComputePipelineObject shader, const std::source_location& location);
+    explicit ComputePipeline(const EmbeddedShader::ShaderCodeModule& module);
+    explicit ComputePipeline(EmbeddedShader::ComputePipelineObject shader);
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t = 0);
@@ -411,17 +410,13 @@ private:
 
 public:
     ComputePipeline();
-    ComputePipeline(const std::string& source, const std::source_location& location = std::source_location::current());
-    ComputePipeline(const EmbeddedShader::ShaderCodeModule& module,
-                    const std::source_location& location = std::source_location::current());
-    ComputePipeline(const std::vector<uint32_t>&, const std::source_location& = std::source_location::current()) = delete;
 
     template<class F>
-        requires std::invocable<F> && (!std::is_convertible_v<F, std::string>)
+        requires std::invocable<F>
     ComputePipeline(F&& shader, ktm::uvec3 numthreads = ktm::uvec3(1), EmbeddedShader::CompilerOption options = {},
                     const std::source_location& location = std::source_location::current())
         : ComputePipeline(EmbeddedShader::ComputePipelineObject::compile(
-              std::forward<F>(shader), numthreads, options, location), location) {}
+              std::forward<F>(shader), numthreads, options, location)) {}
 
     ComputePipeline(ComputePipeline&&) noexcept = default;
     ComputePipeline& operator=(ComputePipeline&&) noexcept = default;
@@ -448,12 +443,9 @@ private:
     ComputePipeline<> pipeline_;
 
 public:
-    ComputePipeline(const std::source_location& location = std::source_location::current())
-        : Fields(&pipeline_), pipeline_(horizon::detail::compileLegacyShaderModule(
-              EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule), location) {}
+    ComputePipeline() : Fields(&pipeline_), pipeline_(CS::shaderModule) {}
 
-    ComputePipeline(const CS&, const std::source_location& location = std::source_location::current())
-        : ComputePipeline(location) {}
+    ComputePipeline(const CS&) : ComputePipeline() {}
 
     ComputePipeline(ComputePipeline&& other) noexcept
         : Fields(&pipeline_), pipeline_(std::move(other.pipeline_)) {}
@@ -478,8 +470,8 @@ public:
     ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
 };
 
-template<class CS> requires requires { CS::slangModule; }
-ComputePipeline(const CS&, const std::source_location& = std::source_location::current()) -> ComputePipeline<CS>;
+template<class CS> requires requires { CS::shaderModule; typename CS::template Bindings<ComputePipeline<>>; }
+ComputePipeline(const CS&) -> ComputePipeline<CS>;
 template<class T> requires std::constructible_from<ComputePipeline<>, T>
 ComputePipeline(T&&) -> ComputePipeline<>;
 
@@ -493,10 +485,9 @@ private:
     template<class, class> friend struct RasterizerPipeline;
     friend struct EmbeddedShader::BoundField<RasterizerPipeline>;
 
-    RasterizerPipeline(const EmbeddedShader::SlangModule& vertex, const EmbeddedShader::SlangModule& fragment,
-                       uint32_t views, const std::source_location& location);
-    RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views,
-                       const std::source_location& location);
+    RasterizerPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
+                       const EmbeddedShader::ShaderCodeModule& fragment, uint32_t views);
+    RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject shaders, uint32_t views);
 
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
@@ -515,23 +506,12 @@ private:
 public:
     RasterizerPipeline();
 
-    RasterizerPipeline(std::string vertex, std::string fragment, uint32_t views = 1,
-                       const std::source_location& location = std::source_location::current());
-
-    RasterizerPipeline(const EmbeddedShader::ShaderCodeModule& vertex, const EmbeddedShader::ShaderCodeModule& fragment,
-                       uint32_t views = 1, const std::source_location& location = std::source_location::current());
-
-    // Raw binaries lack the reflection needed to bind their resources.
-    RasterizerPipeline(const std::vector<uint32_t>&, const std::vector<uint32_t>&, uint32_t = 1,
-                       const std::source_location& = std::source_location::current()) = delete;
-
     template<class V, class F>
-        requires (!std::is_convertible_v<V, std::string> && !std::is_convertible_v<F, std::string>) &&
-                 requires(V& vertex, F& fragment) { std::function{vertex}; std::function{fragment}; }
+        requires requires(V& vertex, F& fragment) { std::function{vertex}; std::function{fragment}; }
     RasterizerPipeline(V&& vertex, F&& fragment, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
                        std::source_location location = std::source_location::current())
         : RasterizerPipeline(EmbeddedShader::RasterizedPipelineObject::compile(
-              std::forward<V>(vertex), std::forward<F>(fragment), options, location), views, location) {}
+              std::forward<V>(vertex), std::forward<F>(fragment), options, location), views) {}
 
     RasterizerPipeline(RasterizerPipeline&&) noexcept = default;
     RasterizerPipeline& operator=(RasterizerPipeline&&) noexcept = default;
@@ -565,9 +545,8 @@ public:
 
 extern template struct RasterizerPipeline<void, void>;
 
-template<class VS, class FS> requires requires { VS::slangModule; FS::slangModule; }
-RasterizerPipeline(const VS&, const FS&, uint32_t = 1, const std::source_location& = std::source_location::current())
-    -> RasterizerPipeline<VS, FS>;
+template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
+RasterizerPipeline(const VS&, const FS&, uint32_t = 1) -> RasterizerPipeline<VS, FS>;
 
 template<class Arg> requires std::constructible_from<RasterizerPipeline<>, Arg>
 RasterizerPipeline(Arg&&) -> RasterizerPipeline<>;

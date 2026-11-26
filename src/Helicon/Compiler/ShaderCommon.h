@@ -1,7 +1,4 @@
 #pragma once
-#include "slang.h"
-
-#include <functional>
 #include <optional>
 #include <string>
 #include <variant>
@@ -79,24 +76,6 @@ namespace EmbeddedShader
         std::string shaderCode;
         ShaderLanguage sourceLanguage;
         std::vector<SlangModule*> deps;
-    };
-
-    struct SlangModuleReflectionArgs0
-    {
-        const SlangModule* module = nullptr;
-        std::string entrypointName = "main";
-        ShaderStage stage{};
-    };
-
-    struct SlangModuleReflectionArgs : SlangModuleReflectionArgs0
-    {
-        std::function<void(slang::DeclReflection*)> reflectionCallback = [](slang::DeclReflection*){};
-        std::function<void(slang::ShaderReflection*)> layoutCallback = [](slang::ProgramLayout*){};
-    };
-
-    struct SlangModuleReflectShaderResourceArgs : SlangModuleReflectionArgs0
-    {
-
     };
 
 }

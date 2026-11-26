@@ -6,7 +6,6 @@
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
-#include "Compiler/ShaderLanguageConverter.h"
 #include "Compiler/ShaderUtils.h"
 
 namespace {
@@ -40,34 +39,9 @@ void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResource
 
 RasterizerPipelineVulkan::RasterizerPipelineVulkan() = default;
 
-RasterizerPipelineVulkan::RasterizerPipelineVulkan(std::string vertexShaderCode,
-                                                   std::string fragmentShaderCode,
-                                                   uint32_t multiviewCount,
-                                                   const std::source_location &sourceLocation)
-    : RasterizerPipelineVulkan()
-{
-    EmbeddedShader::CompilerOption options;
-    options.compileHLSL = false;
-    EmbeddedShader::ShaderCodeCompiler vertexCompiler(vertexShaderCode,
-                                                      EmbeddedShader::ShaderStage::VertexShader,
-                                                      options,
-                                                      sourceLocation);
-
-    EmbeddedShader::ShaderCodeCompiler fragmentCompiler(fragmentShaderCode,
-                                                        EmbeddedShader::ShaderStage::FragmentShader,
-                                                        options,
-                                                        sourceLocation);
-
-    // 获取 SPIR-V 代码
-    vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-    fragShaderCode = fragmentCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-    initializeStageBindings(multiviewCount);
-}
-
 RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
                                                    EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                                                   uint32_t multiviewCount,
-                                                   const std::source_location &sourceLocation)
+                                                   uint32_t multiviewCount)
     : RasterizerPipelineVulkan()
 {
     // 直接从已编译的 ShaderCodeCompiler 获取 SPIR-V 代码
@@ -79,8 +53,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCom
 
 RasterizerPipelineVulkan::RasterizerPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
                                                    const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
-                                                   uint32_t multiviewCount,
-                                                   const std::source_location &sourceLocation)
+                                                   uint32_t multiviewCount)
     : RasterizerPipelineVulkan()
 {
     vertShaderCode = vertexSpirV;

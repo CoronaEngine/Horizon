@@ -367,19 +367,12 @@ Helicon 里有两条不同的“包含”路径，理解 AST 行为时要区分�
 
 1. 读取 `.glsl/.hlsl/.slang`，若没有显式 `-t`，按扩展名、文件名关键字、源码
    特征推断 stage；
-2. 若源码没有入口点，按 module-only 处理：仍然生成模块和声明级 C++ 包装，但
-   不生成 `ShaderResources` 反射；
-3. `ShaderLanguageConverter::slangModuleCompiler()` 用 `SLANG_CPP_SOURCE` target
-   加载源码，打开 `NoMangle`、`IncompleteLibrary`，按 `GLSL/HLSL/Slang` 设置
-   `Language` option，并把源码序列化成 `SlangModule`；
-4. 无论是否有入口点，都会用 `slangModuleReflection()` 遍历声明生成 C++ 包装；
-   有入口点时额外用 `slangModuleReflectShaderResource()` 得到 `ShaderResources`。
-   生成内容包括：
-   - `static inline ::EmbeddedShader::SlangModule slang_module_<name>`；
-   - `static inline auto& slangModule` 别名；
-   - 非入口函数的 `FunctionProxy<...>`；
-   - 资源的 `BindingKey`，以及计算着色器的 `Bindings<P>`；
-5. 输出 C++ 头，外层结构名由 `sanitizePath()` / `sanitizeFilename()` 清理。
+2. 加载并序列化源码。光栅配对生成器在构建时读取阶段的 `.slang-module` 文件。
+3. 对有入口点的文件，按阶段链接 `main`，从同一个程序取得 SPIR-V 和反射。
+   两者写入生成头的 `shaderModule`，资源和输出声明用于生成 C++ 绑定字段。
+4. 对可供 EDSL 导入的普通函数，生成头保留序列化的 Slang IR，并为函数生成
+   `FunctionProxy`。纯辅助模块只需要导入信息。一个文件同时含有 `main`
+   和可导入函数时，可用于创建管线，也可在 EDSL 中调用其辅助函数。
 
 生成的头通常这样使用：
 
@@ -388,17 +381,16 @@ Helicon 里有两条不同的“包含”路径，理解 AST 行为时要区分�
 
 auto fs = [&](Aggregate<Varyings> in) {
     // my_helpers.glsl 中非入口函数被包装成 FunctionProxy
-    return tonemap(in->color);
+    return my_helpers_glsl.tonemap(in->color);
 };
 ```
 
-注意：带 `main` 的入口函数不会被包装成 `FunctionProxy`；这类 shader 应该用
-`RasterizerPipeline<VertShader, FragShader>` / `ComputePipeline<Shader>` 通过
-生成头里的 `slangModule` 来使用，而不是在 EDSL lambda 里直接调用 `main`。
+把生成的阶段对象传给 `ComputePipeline(cs)` 或 `RasterizerPipeline(vs, fs)` 即可使用其
+`main` 入口。构造函数直接使用构建时生成的 SPIR-V 和反射。
 
 #### 2.2 生成头里的模块和绑定代理
 
-单阶段头提供 `SlangModule`（模块名、路径、序列化 IR）和反射得到的绑定信息。
+带入口点的单阶段头提供编译好的 `shaderModule` 和反射得到的绑定信息。
 已登记配对的阶段头在声明阶段对象后标记自身可见，并逐一检查配对的另一阶段是否已经可见。
 因此按任意顺序包含 VS 和 FS，第二个阶段都会引入对应的配对头。配对头也可以直接包含，
 它会引入两个阶段头并定义对应的 `RasterizerPipeline<VS, FS>` 特化。

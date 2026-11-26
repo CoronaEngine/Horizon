@@ -38,6 +38,21 @@ void test_cpu()
     original = copy;
     expect(original.getChainHead()->pNext != copy.getChainHead()->pNext, "assigned Vulkan features own their chain");
     using namespace EmbeddedShader;
+    for (auto [module, stage] : {std::pair{&compute_write_slang.shaderModule, ShaderStage::ComputeShader},
+                                 std::pair{&baseline_vert_slang.shaderModule, ShaderStage::VertexShader},
+                                 std::pair{&baseline_frag_slang.shaderModule, ShaderStage::FragmentShader}}) {
+        const auto* words = std::get_if<std::vector<uint32_t>>(&module->shaderCode);
+        expect(words && !words->empty() && words->front() == 0x07230203u, "generated stage contains SPIR-V");
+        const auto& entries = module->shaderResources.entryPointInfoPool;
+        expect(entries.size() == 1 && entries.front().name == "main" && entries.front().stage == stage,
+               "generated reflection identifies the shader entry point and stage");
+    }
+    const auto& computeResources = compute_write_slang.shaderModule.shaderResources;
+    expect(computeResources.pushConstantSize == 2 * sizeof(uint32_t) &&
+           std::ranges::any_of(computeResources.bindInfoPool, [](const auto& binding) {
+               return binding.variateName == "value" && binding.byteOffset == sizeof(uint32_t);
+           }), "generated compute reflection preserves push constant size and member offset");
+
     int vertexParses = 0, fragmentParses = 0, computeParses = 0;
     auto vertex = [&](Float3 pos) { ++vertexParses; position() = Float4(pos, Float(1)); };
     auto fragment = [&] { ++fragmentParses; return Float4(1, 0, 0, 1); };
@@ -379,7 +394,7 @@ void test_compute_dispatch_snapshots()
     HardwareExecutor executor;
     {
         ComputePipeline original(compute_write_slang);
-        ComputePipeline other(compute_write_slang);
+        ComputePipeline<compute_write_slang_t> other;
         static_assert(std::same_as<decltype(original), ComputePipeline<compute_write_slang_t>>);
         static_assert(!std::is_base_of_v<ComputePipeline<>, decltype(original)>);
         auto moved = std::move(original);
@@ -598,23 +613,19 @@ void test_gpu()
            std::ranges::equal(mipPixels, std::span(input).first(mipPixels.size())),
            "staged upload retains its buffer and writes the selected image mip");
 
+    std::cerr << "GPU: EDSL compute\n";
     EmbeddedShader::CompilerOption options;
-    std::cerr << "GPU: Slang compilation/compute dispatch\n";
     options.compileGLSL = false;
     options.compileHLSL = false;
-    EmbeddedShader::ShaderCodeCompiler compiler(
-        "[shader(\"compute\")] [numthreads(1,1,1)] void main() {}",
-        EmbeddedShader::ShaderStage::ComputeShader, options);
-    auto module = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-    expect(!std::get<std::vector<uint32_t>>(module.shaderCode).empty(), "current Slang emits SPIR-V");
-    ComputePipeline pipeline(module);
-    executor << pipeline(1, 1, 1);
-    executor.commit();
-
-    std::cerr << "GPU: EDSL compute\n";
-    ComputePipeline edsl([] {}, ktm::uvec3(1), options);
-    executor << edsl(1, 1, 1);
-    executor.commit();
+    EmbeddedShader::ArrayProxy<uint32_t> importedOutput(destination);
+    ComputePipeline edsl([&] {
+        EmbeddedShader::Uint index = EmbeddedShader::dispatchThreadID()->x;
+        importedOutput[index] = compute_write_slang.addIndex(EmbeddedShader::Uint(40), index);
+    }, ktm::uvec3(1), options);
+    executor << edsl.uses({{destination, ResourceAccess::Write}})(8);
+    executor.commit().waitForDeferredResources();
+    expect(destination.copyToData(output) && output == std::array{40u, 41u, 42u, 43u, 44u, 45u, 46u, 47u},
+           "EDSL can import a helper from a Slang module that also defines a compute entry point");
 
     std::cerr << "GPU: generated raster fields after move\n";
     RasterizerPipeline raster(baseline_vert_slang, baseline_frag_slang);

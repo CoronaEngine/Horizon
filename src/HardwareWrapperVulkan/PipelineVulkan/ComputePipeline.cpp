@@ -2,65 +2,15 @@
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
-#include "Compiler/ShaderLanguageConverter.h"
 #include <span>
 #include <array>
 
 ComputePipelineVulkan::ComputePipelineVulkan() = default;
 
-ComputePipelineVulkan::ComputePipelineVulkan(std::string shaderCode,
-                                             const std::source_location &sourceLocation)
-    : ComputePipelineVulkan()
+ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &module)
+    : shaderCode(module)
 {
-    EmbeddedShader::ShaderCodeCompiler compiler(shaderCode,
-                                                EmbeddedShader::ShaderStage::ComputeShader,
-                                                EmbeddedShader::CompilerOption(),
-                                                sourceLocation);
-
-    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-
-    const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
-    if (pushConstantSize > 0)
-    {
-        this->pushConstant = std::make_unique<uint8_t[]>(pushConstantSize);
-    }
-
-    // 初始化 per-pipeline UBO
-    uboSize = this->shaderCode.shaderResources.uniformBufferSize;
-    if (uboSize > 0)
-    {
-        tempUBO = std::make_unique<uint8_t[]>(uboSize);
-    }
-}
-
-ComputePipelineVulkan::ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler &compiler,
-                                             const std::source_location &sourceLocation)
-    : ComputePipelineVulkan()
-{
-    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-
-    const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
-    if (pushConstantSize > 0)
-    {
-        this->pushConstant = std::make_unique<uint8_t[]>(pushConstantSize);
-    }
-
-    // 初始化 per-pipeline UBO
-    uboSize = this->shaderCode.shaderResources.uniformBufferSize;
-    if (uboSize > 0)
-    {
-        tempUBO = std::make_unique<uint8_t[]>(uboSize);
-    }
-}
-
-ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &spirV,
-                                             const std::source_location &sourceLocation)
-    : ComputePipelineVulkan()
-{
-    // Reuse SPIR-V and reflection emitted together by the current Slang compiler.
-    const auto &resources = spirV.shaderResources;
-
-    this->shaderCode = spirV;
+    const auto &resources = shaderCode.shaderResources;
 
     const uint32_t pushConstantSize = resources.pushConstantSize;
     if (pushConstantSize > 0)

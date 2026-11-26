@@ -265,9 +265,9 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 & ./build/conan/examples/relwithdebinfo/bin/RelWithDebInfo/HorizonExamples.exe drawstress_slang
 ```
 
-源码字符串由 Helicon 的 Slang 编译器处理。构造管线时使用 `ComputePipeline(source)` 或 `RasterizerPipeline(vertexSource, fragmentSource, multiviewCount)`，迁移旧调用时删去 `ShaderLanguage` 实参。
+手写着色器通过 `#include SLANG(...)`、`HLSL(...)` 或 `GLSL(...)` 引入。构建时生成的阶段对象自带 SPIR-V 和反射。计算管线写作 `ComputePipeline pipeline(compute_write_slang)`，光栅管线传入顶点和片元两个阶段对象。EDSL 在相同的构造位置传入 lambda。
 
-EDSL、Slang 源码和已编译模块可直接传给 `ComputePipeline` 或 `RasterizerPipeline`。要使用 Slang 光栅着色器的具名字段，在目标中登记实际使用的顶点和片元着色器配对。每组三个参数依次为生成头、顶点着色器、片元着色器。
+在目标中登记实际使用的顶点和片元着色器配对，即可通过具名字段绑定资源和输出。每组三个参数依次为生成头、顶点着色器、片元着色器。
 
 ```cmake
 helicon_compile_shaders(HorizonExamples RASTER_PAIRS
@@ -329,16 +329,12 @@ executor << std::move(batch);
 拷贝命令持有资源包装对象，executor 通过 timeline semaphore 保留资源到 GPU 完成。
 测试覆盖头文件独立包含、无窗口 displayer 的移动语义、
 临时缓冲区保活、整块/局部/同缓冲区拷贝、越界拒绝、图像 mip/数组层/偏移往返和子视图保活，
-以及当前 Slang、EDSL 和预编译 Slang 模块的计算管线入口。
+以及使用生成的 Slang 阶段和 EDSL 创建计算管线后的 GPU 写入与读回。
 光栅测试通过像素回读验证 GPU 生成的间接绘制命令和多 pass 的颜色、深度附件加载。
 CPU 测试不初始化 Vulkan；GPU 测试要求 Vulkan 1.4，无相应 loader/device 时明确返回 CTest 的 skip 状态。
 设备存在但初始化、编译或执行失败会报错，不会被当成跳过。
 
-**预编译着色器迁移：** 不再接受单独的 `std::vector<uint32_t>` 来隐式反射 SPIR-V。
-请传入当前编译器返回的 `EmbeddedShader::ShaderCodeModule`（含 SPIR-V 和反射）；
-`ComputePipeline<CS>` / `RasterizerPipeline<VS, FS>` 使用当前生成器的 `slangModule`。
-旧的仅包含 `spirv` 的生成头需要用当前 ShaderCompileScripts 重新生成。
-整个迁移不添加第三方库，也不恢复 SPIRV-Cross 或 Corona Kernel。
+**迁移手写着色器**　原先传入源码字符串或 `ShaderCodeModule` 的调用应改为引入着色器文件并传入阶段对象。已有工程需要用当前版本的 ShaderCompileScripts 重新生成着色器头。
 
 Linux 窗口 surface 创建尚未实现。
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <Codegen/AST/Enum.hpp>
+#include <functional>
 #include <memory>
 #include <set>
 #include <unordered_set>
