@@ -61,12 +61,3 @@ struct HardwareExecutor::Command::Impl::Dispatch final : HardwareExecutor::Comma
     std::vector<ResourceUse> resourceUses;
     std::shared_ptr<UniformSnapshot> uniform;
 };
-
-template<class CS>
-struct ComputePipeline<CS>::Impl
-{
-    std::shared_ptr<ComputePipelineVulkan> backend;
-    std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants;
-    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
-    std::vector<ResourceUse> resourceUses;
-};

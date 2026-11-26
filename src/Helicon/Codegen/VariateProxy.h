@@ -1257,14 +1257,17 @@ namespace EmbeddedShader
 		BoundField& operator=(const T& value)
 		{
 			if (!pipeline_) return *this;
-			if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareImage>)
-				pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType, location);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer>)
-				pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType);
+			if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareImage> ||
+			              std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer>)
+				writeResource(value);
 			else
-				pipeline_->setPushConstantDirect(byteOffset, &value, sizeof(T), bindType);
+				writeValue(&value, sizeof(T));
 			return *this;
 		}
+	private:
+		void writeValue(const void* data, size_t size);
+		void writeResource(const ::HardwareBuffer& buffer);
+		void writeResource(const ::HardwareImage& image);
 	};
 
 	template<typename ElementType>

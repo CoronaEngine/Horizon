@@ -55,6 +55,36 @@ struct PipelineBindings
     std::shared_ptr<BindingSnapshot> snapshot();
 };
 
+namespace EmbeddedShader {
+template<class PipelineType>
+void BoundField<PipelineType>::writeValue(const void* data, size_t size)
+{
+    auto& state = PipelineType::Impl::checked(pipeline_->impl_);
+    state.backend->setPushConstantDirect(byteOffset, data, size, bindType);
+}
+
+template<class PipelineType>
+void BoundField<PipelineType>::writeResource(const ::HardwareBuffer& buffer)
+{
+    auto& state = PipelineType::Impl::checked(pipeline_->impl_);
+    state.backend->setResourceDirect(byteOffset, typeSize, buffer, bindType);
+}
+
+template<class PipelineType>
+void BoundField<PipelineType>::writeResource(const ::HardwareImage& image)
+{
+    auto& state = PipelineType::Impl::checked(pipeline_->impl_);
+    if constexpr (std::is_same_v<PipelineType, ::RasterPipeline<>>)
+        state.backend->setResourceDirect(byteOffset, typeSize, image, bindType, location);
+    else
+        state.backend->setResourceDirect(byteOffset, typeSize, image, bindType);
+}
+
+// Only the pipeline implementation files have the complete Impl needed for these writes.
+extern template struct BoundField<::ComputePipeline<>>;
+extern template struct BoundField<::RasterPipeline<>>;
+} // namespace EmbeddedShader
+
 // Each invocation owns its upload and descriptor set until its submission's
 // timeline point completes. The layout is compatible with the pipeline's set 3.
 struct UniformSnapshot

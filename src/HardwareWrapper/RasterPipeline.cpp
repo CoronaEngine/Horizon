@@ -13,6 +13,12 @@ struct RasterPipeline<VS, FS>::Impl
     size_t explicitTargetCount{}; // The last entries override reflected outputs.
     std::vector<ResourceUse> resourceUses;
 
+    static Impl& checked(const std::unique_ptr<Impl>& impl)
+    {
+        if (!impl || !impl->backend) throw std::logic_error("Empty raster pipeline handle");
+        return *impl;
+    }
+
     void refreshShaderVariant();
 };
 
@@ -47,13 +53,6 @@ template<class VS, class FS>
 RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::operator=(RasterPipeline&&) noexcept = default;
 
 template<class VS, class FS>
-auto RasterPipeline<VS, FS>::state() -> Impl&
-{
-    if (!impl_ || !impl_->backend) throw std::logic_error("Empty raster pipeline handle");
-    return *impl_;
-}
-
-template<class VS, class FS>
 RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::uses(std::initializer_list<ResourceUse> resources)
 {
     if (!impl_) impl_ = std::make_unique<Impl>();
@@ -74,39 +73,19 @@ RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::bindRenderTarget(uint32_t locati
 template<class VS, class FS>
 void RasterPipeline<VS, FS>::setDepthImage(HardwareImage& depthImage)
 {
-    state().backend->setDepthImage(depthImage);
+    Impl::checked(impl_).backend->setDepthImage(depthImage);
 }
 
 template<class VS, class FS>
 void RasterPipeline<VS, FS>::setRasterState(RasterState rasterState)
 {
-    state().backend->setRasterState(rasterState);
+    Impl::checked(impl_).backend->setRasterState(rasterState);
 }
 
 template<class VS, class FS>
 HardwareImage RasterPipeline<VS, FS>::getDepthImage()
 {
-    return state().backend->getDepthImage();
-}
-
-template<class VS, class FS>
-void RasterPipeline<VS, FS>::setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType)
-{
-    state().backend->setPushConstantDirect(byteOffset, data, size, bindType);
-}
-
-template<class VS, class FS>
-void RasterPipeline<VS, FS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize,
-                                               const HardwareBuffer& buffer, int32_t bindType)
-{
-    state().backend->setResourceDirect(byteOffset, typeSize, buffer, bindType);
-}
-
-template<class VS, class FS>
-void RasterPipeline<VS, FS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize,
-                                               const HardwareImage& image, int32_t bindType, uint32_t location)
-{
-    state().backend->setResourceDirect(byteOffset, typeSize, image, bindType, location);
+    return Impl::checked(impl_).backend->getDepthImage();
 }
 
 template<class VS, class FS>
@@ -116,7 +95,7 @@ HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
     std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
 {
     if (!count && !pass) return HardwareExecutor::Command(nullptr);
-    auto& pipeline = state();
+    auto& pipeline = Impl::checked(impl_);
     if (pipeline.variants) pipeline.refreshShaderVariant();
     auto& backend = *pipeline.backend;
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
@@ -159,3 +138,4 @@ void RasterPipeline<VS, FS>::Impl::refreshShaderVariant()
 }
 
 template struct RasterPipeline<void, void>;
+template struct EmbeddedShader::BoundField<RasterPipeline<>>;

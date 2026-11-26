@@ -285,11 +285,8 @@ private:
 
     explicit ComputePipeline(const EmbeddedShader::ShaderCodeModule& module);
     explicit ComputePipeline(EmbeddedShader::ComputePipelineObject shader);
-    void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t = 0);
+
     struct Impl;
-    Impl& state();
     std::unique_ptr<Impl> impl_;
 
 public:
@@ -328,12 +325,8 @@ private:
                    const EmbeddedShader::ShaderCodeModule& fragment, uint32_t views);
     RasterPipeline(EmbeddedShader::RasterPipelineObject shaders, uint32_t views);
 
-    void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
     RasterPipeline& bindRenderTarget(uint32_t location, void** resource);
     struct Impl;
-    Impl& state();
     std::unique_ptr<Impl> impl_;
 
 public:

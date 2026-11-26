@@ -4,6 +4,21 @@
 #include <stdexcept>
 
 template<class CS>
+struct ComputePipeline<CS>::Impl
+{
+    std::shared_ptr<ComputePipelineVulkan> backend;
+    std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants;
+    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
+    std::vector<ResourceUse> resourceUses;
+
+    static Impl& checked(const std::unique_ptr<Impl>& impl)
+    {
+        if (!impl || !impl->backend) throw std::runtime_error("Empty ComputePipeline<> handle");
+        return *impl;
+    }
+};
+
+template<class CS>
 ComputePipeline<CS>::ComputePipeline()
     : impl_(std::make_unique<Impl>(std::make_shared<ComputePipelineVulkan>())) {}
 
@@ -30,33 +45,6 @@ template<class CS>
 ComputePipeline<CS>& ComputePipeline<CS>::operator=(ComputePipeline&&) noexcept = default;
 
 template<class CS>
-auto ComputePipeline<CS>::state() -> Impl&
-{
-    if (!impl_ || !impl_->backend) throw std::runtime_error("Empty ComputePipeline<> handle");
-    return *impl_;
-}
-
-template<class CS>
-void ComputePipeline<CS>::setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType)
-{
-    state().backend->setPushConstantDirect(byteOffset, data, size, bindType);
-}
-
-template<class CS>
-void ComputePipeline<CS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize,
-                                           const HardwareBuffer& buffer, int32_t bindType)
-{
-    state().backend->setResourceDirect(byteOffset, typeSize, buffer, bindType);
-}
-
-template<class CS>
-void ComputePipeline<CS>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize,
-                                           const HardwareImage& image, int32_t bindType, uint32_t)
-{
-    state().backend->setResourceDirect(byteOffset, typeSize, image, bindType);
-}
-
-template<class CS>
 ComputePipeline<CS>& ComputePipeline<CS>::uses(std::span<const ResourceUse> resources)
 {
     if (!impl_) impl_ = std::make_unique<Impl>();
@@ -67,7 +55,7 @@ ComputePipeline<CS>& ComputePipeline<CS>::uses(std::span<const ResourceUse> reso
 template<class CS>
 HardwareExecutor::Command ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
-    auto& impl = state();
+    auto& impl = Impl::checked(impl_);
     if (auto& variants = impl.variants)
     {
         auto conditions = variants->compute->getCurrentConditionInfo();
@@ -101,3 +89,4 @@ HardwareExecutor::Command ComputePipeline<CS>::operator()(uint16_t x, uint16_t y
 }
 
 template struct ComputePipeline<void>;
+template struct EmbeddedShader::BoundField<ComputePipeline<>>;

@@ -336,12 +336,15 @@ void test_shared_vertex_stage()
                            HardwareBuffer::Usage::RasterIndirect);
     const auto model = ktm::fmat4x4::from_eye();
     HardwareBuffer parameters(sizeof(model), HardwareBuffer::Usage::StorageBuffer, &model);
+    HardwareBuffer fieldBuffer(sizeof(uint32_t), HardwareBuffer::Usage::StorageBuffer);
 
     HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     RasterPipeline raster(disney_vert_slang, drawstress_frag_slang);
     raster.outColor = target;
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
+    // This VS/FS pair leaves the reflected uint slot available for a descriptor index.
+    raster.vsp.texCubeIndex = fieldBuffer;
     std::array<float, 4> pixel{};
     HardwareBuffer readback(sizeof(pixel), HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
@@ -350,6 +353,7 @@ void test_shared_vertex_stage()
     // At the center of the render target, the Disney view vector equals camPos.xyz.
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 1.f},
            "DrawStress fragment reads the Disney vertex output at location zero");
+    expect(ResourceManager::get(fieldBuffer)->bindlessIndex >= 0, "a named raster field binds its storage buffer");
 }
 
 // Compute supplies the indirect command, color and depth for the second pass.
@@ -490,6 +494,16 @@ void test_compute_dispatch_snapshots()
            "saved Slang dispatch retains its buffer, scalar and X/Z group counts after a pipeline move");
     expect(secondOutput.copyToData(words) && words == std::array{30u, 0u, 22u, 0u, 0u, 0u, 0u, 0u},
            "saved Slang dispatches retain their Y group counts and execute in enqueue order");
+
+    HardwareImage image(1, 1, HardwareImage::Format::RGBA8_UNORM, HardwareImage::Usage::StorageImage);
+    ComputePipeline write(compute_write_slang);
+    write.params.outputIndex = firstOutput;
+    write.params.value = UINT32_MAX;
+    write.params.value = image;
+    executor << write(1);
+    executor.commit().wait();
+    expect(firstOutput.copyToData(words) && words[0] == image.storeDescriptor(),
+           "a named compute field writes its image descriptor index into the push constants");
 }
 
 void test_compute_shader_variants()
