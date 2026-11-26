@@ -63,8 +63,8 @@ static bool isPushConstantBlockRecord(const ShaderCodeModule::ShaderResources::S
 
 using ShaderResources = ShaderCodeModule::ShaderResources;
 
-// A stage binding group receives p in its constructor. A raster specialization
-// binds each direct member to its own pipeline, including after a move.
+// Nested binding groups receive p in their constructor. Direct fields bind
+// to their containing pipeline, including after a move.
 static void emitBoundField(std::ostream& out, const ShaderResources::ShaderBindInfo& field,
                            std::string_view stateType, std::vector<std::string>* ctorInits,
                            std::string_view indent = "    ")
@@ -94,7 +94,7 @@ static void emitBindingConstructor(std::ostream& out, const std::string& name, s
 }
 
 static void emitResourceFields(std::ostream& out, const ShaderResources& resources,
-                               std::string_view stateType, std::vector<std::string>* ctorInits)
+                               std::string_view stateType)
 {
     auto emitBlock = [&](const std::string& name, ShaderResources::BindType kind) {
         if (name.empty()) return;
@@ -104,36 +104,62 @@ static void emitResourceFields(std::ostream& out, const ShaderResources& resourc
             if (field.bindType == kind && !isPushConstantBlockRecord(field, resources))
                 emitBoundField(out, field, stateType, &blockInits, "        ");
         emitBindingConstructor(out, name + "_t", stateType, blockInits, "        ");
-        out << "    } " << name;
-        if (ctorInits)
-            ctorInits->push_back(name + "(p)");
-        else
-            out << "{&pipeline_}";
-        out << ";\n";
+        out << "    } " << name << "{&pipeline_};\n";
     };
     emitBlock(resources.pushConstantName, ShaderResources::pushConstantMembers);
     emitBlock(resources.uniformBufferName, ShaderResources::uniformBufferMembers);
     for (const auto& field : resources.bindInfoPool)
         if (isDirectResourceBindType(field.bindType))
-            emitBoundField(out, field, stateType, ctorInits);
+            emitBoundField(out, field, stateType, nullptr);
 }
 
 static void emitOutputFields(std::ostream& out, const ShaderResources& resources,
-                             std::string_view stateType, std::vector<std::string>* ctorInits)
+                             std::string_view stateType)
 {
     for (const auto& field : resources.bindInfoPool)
         if (field.bindType == ShaderResources::stageOutputs)
-            emitBoundField(out, field, stateType, ctorInits);
+            emitBoundField(out, field, stateType, nullptr);
 }
 
-static void generateComputeBindings(std::ostream& out, const ShaderResources& resources)
+static void generateComputePipeline(std::ostream& out, const ShaderResources& resources,
+                                    std::string_view shaderType)
 {
-    out << "template<typename P>\nstruct Bindings {\n";
-    std::vector<std::string> inits;
-    emitResourceFields(out, resources, "P", &inits);
-    emitOutputFields(out, resources, "P", &inits);
-    emitBindingConstructor(out, "Bindings", "P", inits);
-    out << "};\n";
+    out << "\ntemplate<> struct ComputePipeline<" << shaderType << "> {\n"
+        << R"(private:
+    friend struct HardwareExecutor;
+    ::ComputePipeline<> pipeline_;
+
+public:
+)"
+        << "    ComputePipeline() : pipeline_(" << shaderType << "::shaderModule) {}\n"
+        << "    ComputePipeline(const " << shaderType << "&) : ComputePipeline() {}\n"
+        << R"(
+    ComputePipeline(ComputePipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
+
+    ComputePipeline& operator=(ComputePipeline&& other) noexcept
+    {
+        pipeline_ = std::move(other.pipeline_);
+        return *this;
+    }
+
+    ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
+    {
+        pipeline_(x, y, z);
+        return *this;
+    }
+
+    ComputePipeline& uses(std::span<const ResourceUse> resources)
+    {
+        pipeline_.uses(resources);
+        return *this;
+    }
+    ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
+
+)";
+    emitResourceFields(out, resources, "::ComputePipeline<>");
+    emitOutputFields(out, resources, "::ComputePipeline<>");
+    out << "};\n\ntemplate<std::same_as<" << shaderType << "> CS>\n"
+        << "ComputePipeline(const CS&) -> ComputePipeline<CS>;\n";
 }
 
 std::string procType(slang::TypeReflection* reflection);
@@ -496,8 +522,8 @@ public:
 
 )";
     const auto& resources = !vs.uniformBufferSize && fs.uniformBufferSize ? fs : vs;
-    emitResourceFields(code, resources, "::RasterizerPipeline<>", nullptr);
-    emitOutputFields(code, fs, "::RasterizerPipeline<>", nullptr);
+    emitResourceFields(code, resources, "::RasterizerPipeline<>");
+    emitOutputFields(code, fs, "::RasterizerPipeline<>");
     code << "};\n";
 
     std::ofstream header(output);
@@ -716,7 +742,6 @@ int main(int argc, char** argv) try
 
 	std::cout << "INFO:Generate the final C++ shader...\n";
 	std::stringstream out;
-	out << "#pragma once\n#include <Codegen/VariateProxy.h>\n";
 
     // Wrap everything in a per-shader type and expose an object with the shader name.
     auto nsName = sanitizeFilename(path);
@@ -774,11 +799,11 @@ int main(int argc, char** argv) try
 
     out << "static constexpr size_t pushConstantBlockSize = " << resources.pushConstantSize << ";\n"
         << "static constexpr size_t uniformBufferBlockSize = " << resources.uniformBufferSize << ";\n";
-    if (!moduleOnly && resources.entryPointInfoPool.front().stage == ShaderStage::ComputeShader)
-        generateComputeBindings(out, resources);
-
 	out << "}; // struct " << nsTypeName << "\n";
 	out << "inline constexpr " << nsTypeName << " " << nsName << "{};\n";
+    const bool computeStage = !moduleOnly && resources.entryPointInfoPool.front().stage == ShaderStage::ComputeShader;
+    if (computeStage)
+        generateComputePipeline(out, resources, nsTypeName);
     if (!rasterReady.empty())
     {
         out << "\n#define " << rasterReady << " 1\n";
@@ -791,7 +816,9 @@ int main(int argc, char** argv) try
 	auto stem = path.stem();
 	auto outFilePath = outPath / (stem.string() + ext);
 	file.open(outFilePath,std::ios::out);
-	file << out.str();
+    file << "#pragma once\n"
+         << (computeStage ? "#include \"Horizon.h\"\n" : "#include <Codegen/VariateProxy.h>\n")
+         << out.str();
 	file.close();
     if (!file)
     {

@@ -350,7 +350,7 @@ private:
 template<class CS = void>
 struct ComputePipeline
 {
-    static_assert(std::same_as<CS, void>, "A named compute stage must provide shader bindings");
+    static_assert(std::same_as<CS, void>, "Include the generated compute shader header for this stage");
 
 private:
     template<class> friend struct ComputePipeline;
@@ -393,45 +393,6 @@ public:
 };
 
 extern template struct ComputePipeline<void>;
-
-template<class CS> requires (!std::is_void_v<CS>)
-struct ComputePipeline<CS> : CS::template Bindings<ComputePipeline<>>
-{
-private:
-    friend struct HardwareExecutor;
-    using Fields = typename CS::template Bindings<ComputePipeline<>>;
-    ComputePipeline<> pipeline_;
-
-public:
-    ComputePipeline() : Fields(&pipeline_), pipeline_(CS::shaderModule) {}
-
-    ComputePipeline(const CS&) : ComputePipeline() {}
-
-    ComputePipeline(ComputePipeline&& other) noexcept
-        : Fields(&pipeline_), pipeline_(std::move(other.pipeline_)) {}
-
-    ComputePipeline& operator=(ComputePipeline&& other) noexcept
-    {
-        pipeline_ = std::move(other.pipeline_);
-        return *this;
-    }
-
-    ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
-    {
-        pipeline_(x, y, z);
-        return *this;
-    }
-
-    ComputePipeline& uses(std::span<const ResourceUse> resources)
-    {
-        pipeline_.uses(resources);
-        return *this;
-    }
-    ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
-};
-
-template<class CS> requires requires { CS::shaderModule; typename CS::template Bindings<ComputePipeline<>>; }
-ComputePipeline(const CS&) -> ComputePipeline<CS>;
 
 template<class VS, class FS>
 struct RasterizerPipeline

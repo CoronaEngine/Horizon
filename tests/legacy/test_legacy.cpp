@@ -1,10 +1,10 @@
+#include "Codegen/ControlFlows.h"
+#include SLANG(compute_write.slang)
 #include "Horizon.h"
 #include "Codegen/BuiltinVariate.h"
-#include "Codegen/ControlFlows.h"
 #include "Codegen/TypeAlias.h"
 #include "Compiler/ShaderUtils.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include SLANG(compute_write.slang)
 #include SLANG(examples/Baseline/Slang/baseline_vert.slang)
 #include SLANG(examples/Baseline/Slang/baseline_frag.slang)
 #include SLANG(examples/Disney/Slang/disney_vert.slang)

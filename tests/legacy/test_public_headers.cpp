@@ -101,7 +101,14 @@ void check_legacy_public_headers() {}
 using NamedCompute = ComputePipeline<compute_write_slang_t>;
 template<class T>
 concept HasOutputs = requires(T& value) { value.outputs; };
+template<class T>
+concept HasComputeBindings = requires { typename T::template Bindings<ComputePipeline<>>; };
 static_assert(!HasOutputs<compute_write_slang_t>);
+static_assert(!HasComputeBindings<compute_write_slang_t>);
+struct ComputeStageAdapter { operator compute_write_slang_t() const; };
+static_assert(!DeducesPipeline<ComputeStageAdapter>);
+static_assert(std::same_as<decltype(&NamedCompute::params), decltype(NamedCompute::params) NamedCompute::*>);
+static_assert(std::same_as<decltype(&NamedCompute::outputs), decltype(NamedCompute::outputs) NamedCompute::*>);
 static_assert(MoveOnlyHandle<NamedCompute>);
 static_assert(requires(NamedCompute& pipeline, HardwareExecutor& executor, HardwareBuffer& buffer,
                        std::span<const ResourceUse> resources) {
@@ -126,6 +133,7 @@ static_assert(!CompleteStage<disney_vert_slang_t>);
 
 #include SLANG(examples/Disney/Slang/disney_vert.slang)
 
+static_assert(!DeducesPipeline<disney_vert_slang_t> && !DeducesPipeline<disney_frag_slang_t>);
 using DisneyRaster = RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t>;
 using SharedVertexRaster = decltype(RasterizerPipeline(disney_vert_slang, drawstress_frag_slang));
 template<class T>
