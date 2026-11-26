@@ -383,72 +383,69 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
+RasterBatch::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
+                       RasterPass pass, const std::vector<ResourceUse>& uses)
+    : pipeline(std::move(backend)), state(pipeline->rasterState), pass(pass),
+      renderTargets(pipeline->renderTargets), resourceUses(uses)
 {
     if (!extent) {
         const auto color = std::find_if(renderTargets.begin(), renderTargets.end(), [](const HardwareImage& image) { return bool(image); });
-        const HardwareImage& target = color != renderTargets.end() ? *color : depthImage;
-        if (!target || (color == renderTargets.end() && !explicitDepthImage))
+        const HardwareImage& target = color != renderTargets.end() ? *color : pipeline->depthImage;
+        if (!target || (color == renderTargets.end() && !pipeline->explicitDepthImage))
             throw std::invalid_argument("An inferred raster extent requires a bound color or depth image");
         extent = legacyImageFromId(target.getImageID())->imageSize;
     }
-    const auto imageSize = *extent;
+    imageSize = *extent;
     if (!imageSize.x || !imageSize.y) throw std::invalid_argument("Raster batch requires a nonzero extent");
-    auto batch = std::make_shared<Batch>();
-    batch->pipeline = shared_from_this();
-    batch->imageSize = imageSize;
-    batch->state = rasterState;
-    batch->pass = pass;
-    batch->renderTargets = renderTargets;
-    if (!explicitDepthImage) {
-        const auto* depth = depthImage ? legacyImageFromId(depthImage.getImageID()) : nullptr;
+    if (!pipeline->explicitDepthImage) {
+        const auto* depth = pipeline->depthImage ? legacyImageFromId(pipeline->depthImage.getImageID()) : nullptr;
         if (!depth || depth->imageSize != imageSize) {
             HardwareImageCreateInfo info(imageSize.x, imageSize.y, ImageFormat::D32_FLOAT);
             info.usage = ImageUsage::DepthImage;
-            info.arrayLayers = multiviewCount;
-            depthImage = HardwareImage(info);
+            info.arrayLayers = pipeline->multiviewCount;
+            pipeline->depthImage = HardwareImage(info);
         }
     }
-    batch->depthImage = depthImage;
-    batch->clearValues.reserve(renderTargets.size() + 1);
+    depthImage = pipeline->depthImage;
+    clearValues.reserve(renderTargets.size() + 1);
     for (const auto& target : renderTargets)
-        batch->clearValues.push_back(target ? legacyImageFromId(target.getImageID())->clearValue : VkClearValue{});
-    batch->clearValues.push_back(legacyImageFromId(batch->depthImage.getImageID())->clearValue);
-    batch->uniformBytes = copyParameterBytes(tempUBO.get(), uboSize);
-    batch->bindings = bindings.snapshot();
-    return batch;
+        clearValues.push_back(target ? legacyImageFromId(target.getImageID())->clearValue : VkClearValue{});
+    clearValues.push_back(legacyImageFromId(depthImage.getImageID())->clearValue);
+    uniformBytes = copyParameterBytes(pipeline->tempUBO.get(), pipeline->uboSize);
+    bindings = pipeline->bindings.snapshot();
 }
 
-void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
+void RasterBatch::Impl::prepareFramebuffer()
 {
-    if (batch.framebuffer) return;
+    if (framebuffer) return;
     const auto sameView = [](const HardwareImage& a, const HardwareImage& b) {
         return a.getImageID() == b.getImageID() || (a && b &&
             legacyImageFromId(a.getImageID())->imageView == legacyImageFromId(b.getImageID())->imageView);
     };
-    if (lastFramebuffer && lastFramebuffer->graphics->state == batch.state &&
-        lastFramebuffer->graphics->pass == batch.pass &&
-        lastFramebuffer->size.x == batch.imageSize.x && lastFramebuffer->size.y == batch.imageSize.y &&
-        sameView(lastFramebuffer->depth, batch.depthImage) &&
+    auto& lastFramebuffer = pipeline->lastFramebuffer;
+    if (lastFramebuffer && lastFramebuffer->graphics->state == state &&
+        lastFramebuffer->graphics->pass == pass &&
+        lastFramebuffer->size.x == imageSize.x && lastFramebuffer->size.y == imageSize.y &&
+        sameView(lastFramebuffer->depth, depthImage) &&
         std::equal(lastFramebuffer->targets.begin(), lastFramebuffer->targets.end(),
-                   batch.renderTargets.begin(), batch.renderTargets.end(), sameView)) {
-        batch.framebuffer = lastFramebuffer;
+                   renderTargets.begin(), renderTargets.end(), sameView)) {
+        framebuffer = lastFramebuffer;
         return;
     }
-    auto* depth = legacyImageFromId(batch.depthImage.getImageID());
+    auto* depth = legacyImageFromId(depthImage.getImageID());
     std::vector<VkFormat> formats;
     std::vector<VkImageLayout> finalLayouts;
     std::vector<VkImageView> views;
     const auto checkExtent = [&](const auto* image) {
-        if (image->imageSize.x < batch.imageSize.x || image->imageSize.y < batch.imageSize.y ||
-            image->arrayLayers < static_cast<uint32_t>(multiviewCount))
+        if (image->imageSize.x < imageSize.x || image->imageSize.y < imageSize.y ||
+            image->arrayLayers < static_cast<uint32_t>(pipeline->multiviewCount))
             throw std::runtime_error("Rasterizer attachment is smaller than the invocation extent or view count");
     };
     const auto attachmentView = [](auto* image) {
         if (image->mipLevels == 1 && !image->cube) return image->imageView;
         return image->resourceManager->createImageView(*image, UINT32_MAX, 0);
     };
-    for (const auto& target : batch.renderTargets)
+    for (const auto& target : renderTargets)
     {
         if (!target) throw std::runtime_error("Rasterizer invocation has an unbound color attachment");
         auto* image = legacyImageFromId(target.getImageID());
@@ -459,40 +456,40 @@ void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
     }
     checkExtent(depth);
     views.push_back(attachmentView(depth));
-    std::shared_ptr<GraphicsState> graphics;
-    for (const auto& state : graphicsStates)
-        if (state->colorFormats == formats && state->finalLayouts == finalLayouts &&
-            state->depthFormat == depth->imageFormat && state->state == batch.state && state->pass == batch.pass)
-        { graphics = state; break; }
+    std::shared_ptr<RasterizerPipelineVulkan::GraphicsState> graphics;
+    for (const auto& cached : pipeline->graphicsStates)
+        if (cached->colorFormats == formats && cached->finalLayouts == finalLayouts &&
+            cached->depthFormat == depth->imageFormat && cached->state == state && cached->pass == pass)
+        { graphics = cached; break; }
     const auto device = getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice();
     if (!graphics)
     {
-        graphics = std::make_shared<GraphicsState>();
+        graphics = std::make_shared<RasterizerPipelineVulkan::GraphicsState>();
         graphics->device = device;
         graphics->colorFormats = std::move(formats);
         graphics->finalLayouts = std::move(finalLayouts);
         graphics->depthFormat = depth->imageFormat;
-        graphics->state = batch.state;
-        graphics->pass = batch.pass;
-        createRenderPass(*graphics);
-        createGraphicsPipeline(*graphics);
-        graphicsStates.push_back(graphics);
+        graphics->state = state;
+        graphics->pass = pass;
+        pipeline->createRenderPass(*graphics);
+        pipeline->createGraphicsPipeline(*graphics);
+        pipeline->graphicsStates.push_back(graphics);
     }
-    auto framebuffer = std::make_shared<FramebufferState>();
-    framebuffer->device = device;
-    framebuffer->graphics = graphics;
-    framebuffer->targets = batch.renderTargets;
-    framebuffer->depth = batch.depthImage;
-    framebuffer->size = batch.imageSize;
+    auto next = std::make_shared<RasterizerPipelineVulkan::FramebufferState>();
+    next->device = device;
+    next->graphics = graphics;
+    next->targets = renderTargets;
+    next->depth = depthImage;
+    next->size = imageSize;
     VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     info.renderPass = graphics->renderPass;
     info.attachmentCount = static_cast<uint32_t>(views.size());
     info.pAttachments = views.data();
-    info.width = batch.imageSize.x;
-    info.height = batch.imageSize.y;
+    info.width = imageSize.x;
+    info.height = imageSize.y;
     info.layers = 1;
-    coronaHardwareCheck(vkCreateFramebuffer(device, &info, nullptr, &framebuffer->framebuffer));
-    batch.framebuffer = lastFramebuffer = std::move(framebuffer);
+    coronaHardwareCheck(vkCreateFramebuffer(device, &info, nullptr, &next->framebuffer));
+    framebuffer = lastFramebuffer = std::move(next);
 }
 
 void RasterizerPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
@@ -534,9 +531,9 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 }
 
-void RasterizerPipelineVulkan::Batch::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                                     const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                                                     std::optional<ScissorRect> scissor)
+void RasterBatch::Impl::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                       const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
+                                       std::optional<ScissorRect> scissor)
 {
     if (!count) return;
     if (!packets || packets.getElementSize() != sizeof(RasterIndirectPacket) || count > packets.getElementCount() ||
@@ -580,12 +577,7 @@ void RasterizerPipelineVulkan::Batch::appendIndirect(const HardwareBuffer& verti
     drawCount += count;
 }
 
-void RasterizerPipelineVulkan::Batch::commitCommand(HardwareExecutorVulkan& executor)
-{
-    pipeline->commitCommand(executor, *this);
-}
-
-void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
+void RasterBatch::Impl::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
@@ -620,25 +612,25 @@ void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const Resour
                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, range);
     }
+    resolveDeclaredUses(result, resourceUses, shaderStages);
     resolveDeclaredUses(result, declarations, shaderStages);
 }
 
-void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan& hardwareExecutor, Batch& batch)
+void RasterBatch::Impl::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
 {
-    prepareFramebuffer(batch);
-    const auto& graphics = *batch.framebuffer->graphics;
+    prepareFramebuffer();
+    const auto& graphics = *framebuffer->graphics;
     const auto pipelineLayout = graphics.layout;
-    const auto imageSize = batch.imageSize;
     const auto commandBuffer = hardwareExecutor.currentRecordQueue->commandBuffer;
-    batch.bindings->prepareDescriptors();
-    batch.bindings->writeParameters({}, batch.uniformBytes);
-    if (!batch.uniform) batch.uniform = uniformPool.acquire(batch.uniformBytes, uboDescriptorSetLayout);
+    bindings->prepareDescriptors();
+    bindings->writeParameters({}, uniformBytes);
+    if (!uniform) uniform = pipeline->uniformPool.acquire(uniformBytes, pipeline->uboDescriptorSetLayout);
     VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     info.renderPass = graphics.renderPass;
-    info.framebuffer = batch.framebuffer->framebuffer;
+    info.framebuffer = framebuffer->framebuffer;
     info.renderArea.extent = {imageSize.x, imageSize.y};
-    info.clearValueCount = static_cast<uint32_t>(batch.clearValues.size());
-    info.pClearValues = batch.clearValues.data();
+    info.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    info.pClearValues = clearValues.data();
     vkCmdBeginRenderPass(commandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
     VkViewport viewport{0, 0, static_cast<float>(imageSize.x), static_cast<float>(imageSize.y), 0, 1};
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
@@ -646,17 +638,17 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan& hardwareExe
     std::array<VkDescriptorSet, 4> sets{};
     const auto& tables = getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors;
     for (size_t i = 0; i < 3; ++i)
-        sets[i] = batch.bindings->sets[i] ? batch.bindings->sets[i] : tables[i].descriptorSet;
-    sets[3] = batch.uniform ? batch.uniform->set : VK_NULL_HANDLE;
+        sets[i] = bindings->sets[i] ? bindings->sets[i] : tables[i].descriptorSet;
+    sets[3] = uniform ? uniform->set : VK_NULL_HANDLE;
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                             0, sets[3] ? 4 : 3, sets.data(), 0, nullptr);
     auto& caps = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils();
     const uint32_t limit = caps.featuresChain.getChainHead()->features.multiDrawIndirect
         ? caps.supportedProperties.properties.limits.maxDrawIndirectCount : 1;
-    for (const auto& group : batch.groups) {
+    for (const auto& group : groups) {
         vkCmdSetScissor(commandBuffer, 0, 1, &group.scissor);
         const VkBuffer commands = legacyBufferFromId(group.packets.getBufferID())->bufferHandle;
-        Root root = group.root;
+        auto root = group.root;
         for (uint32_t first = 0; first < group.count;) {
             const auto count = std::min(group.count - first, limit);
             root.groupBase = first;
@@ -669,12 +661,12 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan& hardwareExe
     }
 
     vkCmdEndRenderPass(commandBuffer);
-    for (size_t i = 0; i < batch.renderTargets.size(); ++i)
+    for (size_t i = 0; i < renderTargets.size(); ++i)
     {
-        auto* image = legacyImageFromId(batch.renderTargets[i].getImageID());
+        auto* image = legacyImageFromId(renderTargets[i].getImageID());
         auto range = imageViewRange(*image);
         range.levelCount = 1;
-        range.layerCount = multiviewCount;
+        range.layerCount = pipeline->multiviewCount;
         setImageSubresourceLayout(*image, range, graphics.finalLayouts[i]);
     }
     // Batch owns draw resources, attachments and descriptor allocations until GPU completion.

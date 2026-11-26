@@ -12,17 +12,10 @@
 #include "Horizon.h"
 
 struct HardwareExecutorVulkan;
-using horizon::detail::CommandRecordVulkan;
-using horizon::detail::CopyCommandImpl;
 struct ResourceAccessList;
 
-struct horizon::detail::CopyCommandImpl
-{
-    virtual ~CopyCommandImpl() = default;
-    virtual CommandRecordVulkan* getCommandRecord() = 0;
-};
-
-struct horizon::detail::CommandRecordVulkan
+namespace horizon::detail {
+struct CommandRecordVulkan
 {
     enum class ExecutorType
     {
@@ -36,6 +29,20 @@ struct horizon::detail::CommandRecordVulkan
     virtual void commitCommand(HardwareExecutorVulkan &executor) = 0;
     virtual void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) = 0;
     virtual ExecutorType getExecutorType() = 0;
+};
+} // namespace horizon::detail
+
+using horizon::detail::CommandRecordVulkan;
+
+struct CopyCommand::Impl
+{
+    struct BufferToBuffer;
+    struct BufferToImage;
+    struct ImageToImage;
+    struct ImageToBuffer;
+
+    virtual ~Impl() = default;
+    virtual CommandRecordVulkan* getCommandRecord() = 0;
 };
 
 // One enqueue's dependency metadata. Owned pipeline commands freeze execution

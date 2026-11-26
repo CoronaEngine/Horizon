@@ -5,7 +5,7 @@
 #include <optional>
 
 // ================= Buffer 到 Buffer 拷贝命令实现 =================
-struct BufferCopyCommandImpl : CopyCommandImpl
+struct CopyCommand::Impl::BufferToBuffer final : CopyCommand::Impl
 {
     HardwareBuffer srcBuffer;
     HardwareBuffer dstBuffer;
@@ -15,7 +15,7 @@ struct BufferCopyCommandImpl : CopyCommandImpl
 
     std::optional<CopyBufferCommand> command;
 
-    BufferCopyCommandImpl(const HardwareBuffer &src, const HardwareBuffer &dst)
+    BufferToBuffer(const HardwareBuffer &src, const HardwareBuffer &dst)
         : srcBuffer(src), dstBuffer(dst)
     {
     }
@@ -39,7 +39,7 @@ struct BufferCopyCommandImpl : CopyCommandImpl
 };
 
 // ================= Buffer 到 Image 拷贝命令实现 =================
-struct BufferToImageCommandImpl : CopyCommandImpl
+struct CopyCommand::Impl::BufferToImage final : CopyCommand::Impl
 {
     HardwareBuffer srcBuffer;
     HardwareImage dstImage;
@@ -49,7 +49,7 @@ struct BufferToImageCommandImpl : CopyCommandImpl
 
     std::optional<CopyBufferToImageCommand> command;
 
-    BufferToImageCommandImpl(const HardwareBuffer &src, const HardwareImage &dst)
+    BufferToImage(const HardwareBuffer &src, const HardwareImage &dst)
         : srcBuffer(src), dstImage(dst)
     {
     }
@@ -72,7 +72,7 @@ struct BufferToImageCommandImpl : CopyCommandImpl
 
 CopyCommand HardwareBuffer::copyTo(const HardwareBuffer& dst, uint64_t srcOffset, uint64_t dstOffset, uint64_t size) const
 {
-    auto copy = std::make_shared<BufferCopyCommandImpl>(*this, dst);
+    auto copy = std::make_shared<CopyCommand::Impl::BufferToBuffer>(*this, dst);
     copy->srcOffset = srcOffset;
     copy->dstOffset = dstOffset;
     copy->size = size;
@@ -81,7 +81,7 @@ CopyCommand HardwareBuffer::copyTo(const HardwareBuffer& dst, uint64_t srcOffset
 
 CopyCommand HardwareBuffer::copyTo(const HardwareImage& dst, uint64_t bufferOffset, uint32_t imageLayer, uint32_t imageMip) const
 {
-    auto copy = std::make_shared<BufferToImageCommandImpl>(*this, dst);
+    auto copy = std::make_shared<CopyCommand::Impl::BufferToImage>(*this, dst);
     copy->bufferOffset = bufferOffset;
     copy->imageLayer = imageLayer;
     copy->imageMip = imageMip;
@@ -89,7 +89,7 @@ CopyCommand HardwareBuffer::copyTo(const HardwareImage& dst, uint64_t bufferOffs
 }
 
 // ================= Image 到 Image 拷贝命令实现 =================
-struct ImageCopyCommandImpl : CopyCommandImpl
+struct CopyCommand::Impl::ImageToImage final : CopyCommand::Impl
 {
     HardwareImage srcImage;
     HardwareImage dstImage;
@@ -100,7 +100,7 @@ struct ImageCopyCommandImpl : CopyCommandImpl
 
     std::optional<CopyImageCommand> command;
 
-    ImageCopyCommandImpl(const HardwareImage &src, const HardwareImage &dst)
+    ImageToImage(const HardwareImage &src, const HardwareImage &dst)
         : srcImage(src), dstImage(dst)
     {
     }
@@ -129,7 +129,7 @@ struct ImageCopyCommandImpl : CopyCommandImpl
 CopyCommand HardwareImage::copyTo(const HardwareImage& dst, uint32_t srcLayer, uint32_t dstLayer,
                                   uint32_t srcMip, uint32_t dstMip) const
 {
-    auto copy = std::make_shared<ImageCopyCommandImpl>(*this, dst);
+    auto copy = std::make_shared<CopyCommand::Impl::ImageToImage>(*this, dst);
     copy->srcLayer = srcLayer;
     copy->dstLayer = dstLayer;
     copy->srcMip = srcMip;
@@ -138,7 +138,7 @@ CopyCommand HardwareImage::copyTo(const HardwareImage& dst, uint32_t srcLayer, u
 }
 
 // ================= Image 到 Buffer 拷贝命令实现 =================
-struct ImageToBufferCommandImpl : CopyCommandImpl
+struct CopyCommand::Impl::ImageToBuffer final : CopyCommand::Impl
 {
     HardwareImage srcImage;
     HardwareBuffer dstBuffer;
@@ -148,7 +148,7 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
 
     std::optional<CopyImageToBufferCommand> command;
 
-    ImageToBufferCommandImpl(const HardwareImage &src, const HardwareBuffer &dst)
+    ImageToBuffer(const HardwareImage &src, const HardwareBuffer &dst)
         : srcImage(src), dstBuffer(dst)
     {
     }
@@ -171,7 +171,7 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
 
 CopyCommand HardwareImage::copyTo(const HardwareBuffer& dst, uint32_t imageLayer, uint32_t imageMip, uint64_t bufferOffset) const
 {
-    auto copy = std::make_shared<ImageToBufferCommandImpl>(*this, dst);
+    auto copy = std::make_shared<CopyCommand::Impl::ImageToBuffer>(*this, dst);
     copy->imageLayer = imageLayer;
     copy->imageMip = imageMip;
     copy->bufferOffset = bufferOffset;

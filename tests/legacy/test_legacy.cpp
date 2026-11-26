@@ -558,18 +558,24 @@ void test_gpu()
         expect(!display.present(input, 2, 4, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
     }
     std::cerr << "GPU: buffer copy/readback\n";
-    executor << source.copyTo(destination);
+    CopyCommand savedCopy;
+    {
+        auto copy = HardwareBuffer(input, BufferUsage::StorageBuffer).copyTo(destination);
+        savedCopy = copy;
+        executor << copy;
+    }
     executor.commit().waitForDeferredResources();
     std::array<uint32_t, 8> output{};
     expect(destination.copyToData(output.data(), sizeof(output)), "buffer readback");
     expect(output == input, "GPU buffer round trip");
 
-    // Temporary source wrapper must remain alive until its queued copy completes.
     std::cerr << "GPU: deferred resource lifetime\n";
-    executor << HardwareBuffer(input, BufferUsage::StorageBuffer).copyTo(destination);
+    expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear destination before reusing copy");
+    executor << savedCopy;
+    savedCopy = {};
     executor.commit().waitForDeferredResources();
     expect(destination.copyToData(output.data(), sizeof(output)) && output == input,
-           "deferred copy retains temporary resources");
+           "a reused copy retains its temporary source after all command handles are released");
 
     expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear destination");
     executor << source.copyTo(destination, sizeof(uint32_t), 3 * sizeof(uint32_t), 2 * sizeof(uint32_t));

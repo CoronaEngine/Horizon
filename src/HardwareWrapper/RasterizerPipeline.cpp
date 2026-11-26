@@ -131,16 +131,15 @@ RasterBatch RasterizerPipeline<VS, FS>::capture(std::optional<ktm::uvec2> extent
                 backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
         }
     }
-    return RasterBatch(backend.capture(extent, pass), pipeline.resourceUses);
+    return RasterBatch(std::make_shared<RasterBatch::Impl>(pipeline.backend, extent, pass, pipeline.resourceUses));
 }
 
 void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                                std::optional<ScissorRect> scissor)
 {
-    if (!record_) throw std::logic_error("Raster batch already submitted");
-    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(vertices, indices, packets, count,
-                                                                          parameters, scissor);
+    if (!impl_) throw std::logic_error("Raster batch already submitted");
+    impl_->appendIndirect(vertices, indices, packets, count, parameters, scissor);
 }
 
 template<class VS, class FS>

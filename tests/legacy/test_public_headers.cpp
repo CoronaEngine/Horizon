@@ -23,6 +23,7 @@ template<class T>
 concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T> &&
                          !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T>;
 static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer>);
+static_assert(MoveOnlyHandle<RasterBatch> && std::copyable<CopyCommand>);
 static_assert(MoveOnlyHandle<ComputePipeline<>> && MoveOnlyHandle<RasterizerPipeline<>>);
 static_assert(MoveOnlyHandle<EmbeddedShader::Texture2DProxy<ktm::fvec4>>);
 static_assert(MoveOnlyHandle<EmbeddedShader::TextureCubeProxy<ktm::fvec4>>);

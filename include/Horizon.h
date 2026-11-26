@@ -22,12 +22,6 @@
 #include "Compiler/ShaderCodeCompiler.h"
 #include <ktm/ktm.h>
 
-namespace horizon::detail {
-struct CommandRecordVulkan;
-struct RasterizerPipelineVulkan;
-struct CopyCommandImpl;
-}
-
 struct HardwareExecutor;
 struct HardwareImage;
 
@@ -43,8 +37,9 @@ private:
     friend struct HardwareImage;
     friend struct HardwareExecutor;
 
-    explicit CopyCommand(std::shared_ptr<horizon::detail::CopyCommandImpl> impl) : impl_(std::move(impl)) {}
-    std::shared_ptr<horizon::detail::CopyCommandImpl> impl_;
+    struct Impl;
+    explicit CopyCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    std::shared_ptr<Impl> impl_;
 };
 
 // Legacy resources and control objects are owner-thread objects.
@@ -194,7 +189,7 @@ private:
     static HardwareBuffer rasterUpload(uint32_t bytes);
     std::uintptr_t bufferID{0};
 
-    friend struct horizon::detail::RasterizerPipelineVulkan;
+    friend class RasterBatch;
 };
 
 // ================= HardwareImage 参数结构体 =================
@@ -310,10 +305,9 @@ public:
 private:
     friend struct HardwareExecutor;
     friend struct RasterizerPipeline<>;
-    RasterBatch(std::shared_ptr<horizon::detail::CommandRecordVulkan> record, const std::vector<ResourceUse>& uses)
-        : record_(std::move(record)), uses_(uses) {}
-    std::shared_ptr<horizon::detail::CommandRecordVulkan> record_;
-    std::vector<ResourceUse> uses_;
+    struct Impl;
+    explicit RasterBatch(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    std::shared_ptr<Impl> impl_;
 };
 
 // ================= 对外封装：HardwareDisplayer =================

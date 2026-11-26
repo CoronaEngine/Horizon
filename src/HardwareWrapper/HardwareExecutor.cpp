@@ -1,6 +1,7 @@
 #include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
+#include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 #include <stdexcept>
 
 namespace {
@@ -47,9 +48,9 @@ HardwareExecutor& HardwareExecutor::enqueue(const ComputePipeline<>& pipeline)
 
 HardwareExecutor& HardwareExecutor::operator<<(RasterBatch&& batch)
 {
-    if (!batch.record_) throw std::logic_error("Raster batch already submitted");
-    execFromId(executorID)->recordOwned(batch.record_, batch.uses_);
-    batch.record_.reset();
+    if (!batch.impl_) throw std::logic_error("Raster batch already submitted");
+    execFromId(executorID)->recordOwned(batch.impl_);
+    batch.impl_.reset();
     return *this;
 }
 

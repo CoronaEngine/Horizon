@@ -12,9 +12,8 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "PipelineSnapshot.h"
 
-using horizon::detail::RasterizerPipelineVulkan;
-
-struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelineVulkan>
+namespace horizon::detail {
+struct RasterizerPipelineVulkan
 {
   public:
     RasterizerPipelineVulkan();
@@ -48,10 +47,6 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location = 0);
 
-    struct GeometryEntry {
-        VkDeviceAddress vertices, indices;
-        uint32_t strideWords, indexBytes, vertexCount, reserved{};
-    };
     struct Root {
         VkDeviceAddress packets, geometries, parameters;
         uint32_t groupBase, drawBase;
@@ -59,14 +54,7 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
     static_assert(sizeof(RasterIndirectPacket) == 32);
     static_assert(offsetof(RasterIndirectPacket, geometryIndex) == sizeof(VkDrawIndirectCommand));
     static_assert(offsetof(RasterIndirectPacket, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
-    static_assert(sizeof(GeometryEntry) == 32 && sizeof(Root) == 32 && offsetof(Root, drawBase) == 28);
-    struct IndirectGroup {
-        HardwareBuffer vertices, indices, packets, parameters;
-        std::shared_ptr<HardwareBuffer> geometryUpload;
-        VkRect2D scissor;
-        uint32_t count;
-        Root root;
-    };
+    static_assert(sizeof(Root) == 32 && offsetof(Root, drawBase) == 28);
 
     struct GraphicsState
     {
@@ -91,38 +79,13 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
         ktm::uvec2 size{};
         ~FramebufferState();
     };
-    struct Batch : CommandRecordVulkan
-    {
-        std::shared_ptr<RasterizerPipelineVulkan> pipeline;
-        ktm::uvec2 imageSize{};
-        RasterState state;
-        RasterPass pass;
-        HardwareImage depthImage;
-        std::vector<HardwareImage> renderTargets;
-        std::vector<VkClearValue> clearValues;
-        std::vector<IndirectGroup> groups;
-        uint32_t drawCount{};
-        void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                            const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                            std::optional<ScissorRect> scissor);
-        std::vector<uint8_t> uniformBytes;
-        std::shared_ptr<BindingSnapshot> bindings;
-        std::shared_ptr<UniformSnapshot> uniform;
-        std::shared_ptr<FramebufferState> framebuffer;
-        ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
-        void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
-        void commitCommand(HardwareExecutorVulkan& executor) override;
-    };
-    std::shared_ptr<Batch> capture(std::optional<ktm::uvec2> extent, RasterPass pass);
-
   private:
+    friend class ::RasterBatch;
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
     std::mutex uploadMutex;
     void initializeStageBindings(uint32_t viewCount);
     void createRenderPass(GraphicsState& state);
     void createGraphicsPipeline(GraphicsState& state);
-    void prepareFramebuffer(Batch& batch);
-    void commitCommand(HardwareExecutorVulkan& executor, Batch& batch);
 
     int multiviewCount{1};
 
@@ -149,4 +112,48 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
     std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> vertexStageOutputs;
     std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> fragmentStageInputs;
     std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> fragmentStageOutputs;
+};
+} // namespace horizon::detail
+
+using horizon::detail::RasterizerPipelineVulkan;
+
+struct RasterBatch::Impl final : CommandRecordVulkan
+{
+    struct GeometryEntry {
+        VkDeviceAddress vertices, indices;
+        uint32_t strideWords, indexBytes, vertexCount, reserved{};
+    };
+    static_assert(sizeof(GeometryEntry) == 32);
+    struct IndirectGroup {
+        HardwareBuffer vertices, indices, packets, parameters;
+        std::shared_ptr<HardwareBuffer> geometryUpload;
+        VkRect2D scissor;
+        uint32_t count;
+        RasterizerPipelineVulkan::Root root;
+    };
+
+    std::shared_ptr<RasterizerPipelineVulkan> pipeline;
+    ktm::uvec2 imageSize{};
+    RasterState state;
+    RasterPass pass;
+    HardwareImage depthImage;
+    std::vector<HardwareImage> renderTargets;
+    std::vector<VkClearValue> clearValues;
+    std::vector<IndirectGroup> groups;
+    uint32_t drawCount{};
+    std::vector<ResourceUse> resourceUses;
+    std::vector<uint8_t> uniformBytes;
+    std::shared_ptr<BindingSnapshot> bindings;
+    std::shared_ptr<UniformSnapshot> uniform;
+    std::shared_ptr<RasterizerPipelineVulkan::FramebufferState> framebuffer;
+
+    Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent, RasterPass pass,
+         const std::vector<ResourceUse>& uses);
+    void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                        const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
+                        std::optional<ScissorRect> scissor);
+    void prepareFramebuffer();
+    ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
+    void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
+    void commitCommand(HardwareExecutorVulkan& executor) override;
 };
