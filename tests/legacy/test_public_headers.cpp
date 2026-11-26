@@ -66,12 +66,18 @@ static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<st
               !CanReadBackInto<std::vector<uint16_t>>);
 
 template<class... Args>
-concept CanDrawIndirect = requires(RasterPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
-    { pipeline.drawIndirect(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<HardwareExecutor::Command>;
+concept CanCallRaster = requires(RasterPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
+    { pipeline(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<HardwareExecutor::Command>;
 };
-static_assert(CanDrawIndirect<> && CanDrawIndirect<const HardwareBuffer&>);
-static_assert(!CanDrawIndirect<std::span<const float>>);
-static_assert(!CanDrawIndirect<std::size_t, void (*)(std::span<std::byte>)>);
+static_assert(CanCallRaster<> && CanCallRaster<const HardwareBuffer&>);
+static_assert(!CanCallRaster<std::span<const float>>);
+static_assert(!CanCallRaster<std::size_t, void (*)(std::span<std::byte>)>);
+
+template<class T>
+concept HasNamedDraw = requires(T& pipeline, const HardwareBuffer& buffer) {
+    pipeline.drawIndirect(buffer, buffer, buffer, 1);
+};
+static_assert(!HasNamedDraw<RasterPipeline<>>);
 
 struct RasterPipelineAdapter {
     operator RasterPipeline<>() const;
@@ -109,7 +115,8 @@ static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
 
 template<class T>
 concept CanEnqueue = requires(HardwareExecutor& executor, T&& value) { executor << std::forward<T>(value); };
-static_assert(!CanEnqueue<HardwareExecutor&> && !CanEnqueue<ComputePipeline<>&>);
+static_assert(!CanEnqueue<HardwareExecutor&> && !CanEnqueue<ComputePipeline<>&> &&
+              !CanEnqueue<RasterPipeline<>&> && !CanEnqueue<HardwareDisplayer&>);
 static_assert(std::same_as<decltype(&HardwareExecutor::operator<<), HardwareExecutor& (HardwareExecutor::*)(HardwareExecutor::Command)>);
 static_assert(std::same_as<decltype(&HardwareExecutor::wait), HardwareExecutor& (HardwareExecutor::*)(HardwareExecutor*)>);
 static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const HardwareExecutor::Command& saved, ComputePipeline<>& pipeline) {
@@ -161,6 +168,7 @@ static_assert(!CompleteStage<disney_vert_slang_t>);
 static_assert(!DeducesPipeline<disney_vert_slang_t> && !DeducesPipeline<disney_frag_slang_t>);
 using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
 using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang));
+static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
@@ -168,8 +176,8 @@ static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
     { RasterPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
-    { pipeline.drawIndirect(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
-    { executor << pipeline.drawIndirect(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor&>;
+    { pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
+    { executor << pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor&>;
 });
 static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
 static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);

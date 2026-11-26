@@ -110,7 +110,7 @@ void RasterPipeline<VS, FS>::setResourceDirect(uint64_t byteOffset, uint32_t typ
 }
 
 template<class VS, class FS>
-HardwareExecutor::Command RasterPipeline<VS, FS>::drawIndirect(
+HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
     const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
     const HardwareBuffer& parameters, std::optional<ScissorRect> scissor,
     std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)

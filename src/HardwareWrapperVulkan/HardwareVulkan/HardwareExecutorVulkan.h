@@ -132,16 +132,6 @@ struct HardwareExecutorVulkan
         return *this;
     }
 
-    HardwareExecutorVulkan &operator<<(CommandRecordVulkan *commandRecord)
-    {
-        return record(commandRecord);
-    }
-
-    HardwareExecutorVulkan &operator<<(HardwareExecutorVulkan &other)
-    {
-        return other;
-    }
-
     HardwareExecutorVulkan &wait(const HardwareExecutorVulkan &other)
     {
         return wait(other.getSubmissionPoint());

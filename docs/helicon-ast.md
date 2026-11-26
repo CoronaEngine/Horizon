@@ -636,7 +636,7 @@ core + entryPoint + type_header + dependency modules + 每个分支选中的 tru
 
 #### 3.6 运行时切换
 
-调用 `RasterPipeline::drawIndirect()` 创建绘制命令时，EDSL 管线会比较 VS、FS
+调用光栅管线 `pipeline(vertices, indices, commands, count)` 创建绘制命令时，EDSL 管线会比较 VS、FS
 当前的条件和上次记录的条件。条件变化时，管线取出对应的着色器变体并更新自动绑定。
 绘制命令捕获当次管线和绑定，可在后续条件变化后再入队。
 

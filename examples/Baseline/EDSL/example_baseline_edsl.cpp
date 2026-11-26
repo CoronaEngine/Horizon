@@ -102,7 +102,7 @@ void BaselineEdsl::run(float seconds)
 {
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
-    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, 1)
+    render_executor << raster(vertex_buffer, index_buffer, commands, 1)
                     << display(color_image);
     render_executor.commit();
 }

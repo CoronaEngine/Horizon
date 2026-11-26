@@ -297,7 +297,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
 
 void DisneyEdsl::run(float)
 {
-    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
+    render_executor << raster(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
                     << display(final_output_image);
     render_executor.commit();
 }

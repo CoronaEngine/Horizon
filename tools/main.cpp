@@ -499,13 +499,13 @@ public:
     void setDepthImage(HardwareImage& image) { pipeline_.setDepthImage(image); }
     [[nodiscard]] HardwareImage getDepthImage() { return pipeline_.getDepthImage(); }
 
-    [[nodiscard]] HardwareExecutor::Command drawIndirect(
+    [[nodiscard]] HardwareExecutor::Command operator()(
         const HardwareBuffer& vertices, const HardwareBuffer& indices,
         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters = {},
         std::optional<ScissorRect> scissor = {}, std::optional<RasterPass> pass = {},
         std::optional<ktm::uvec2> extent = {})
     {
-        return pipeline_.drawIndirect(vertices, indices, packets, count, parameters, scissor, pass, extent);
+        return pipeline_(vertices, indices, packets, count, parameters, scissor, pass, extent);
     }
 
     RasterPipeline& uses(std::initializer_list<ResourceUse> resources)

@@ -96,7 +96,7 @@ void DrawStressSlang::run(float seconds)
     }
     parameters.flushMapped();
 
-    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters)
+    render_executor << pipeline(vertex_buffer, index_buffer, commands, draw_count, parameters)
                     << display(final_output_image);
     render_executor.commit();
 }

@@ -110,7 +110,7 @@ void DrawStressEdsl::run(float seconds)
     }
     parameters.flushMapped();
 
-    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters)
+    render_executor << raster(vertex_buffer, index_buffer, commands, draw_count, parameters)
                     << display(output_image);
     render_executor.commit();
 }

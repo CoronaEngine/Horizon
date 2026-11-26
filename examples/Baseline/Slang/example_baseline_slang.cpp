@@ -95,7 +95,7 @@ void BaselineSlang::run(float seconds)
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
     parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
-    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer)
+    render_executor << pipeline(vertex_buffer, index_buffer, commands, 1, parameter_buffer)
                     << display(color);
     render_executor.commit();
 }

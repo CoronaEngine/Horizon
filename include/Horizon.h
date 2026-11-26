@@ -354,10 +354,10 @@ public:
     void setDepthImage(HardwareImage& image);
     [[nodiscard]] HardwareImage getDepthImage();
 
-    // Capture the current bindings and draw the first count packets in order when enqueued.
+    // Capture the current bindings for an indirect draw of the first count packets.
     // An explicit pass starts a new drawIndex sequence and applies its attachment load/clear operations,
     // even with zero draws. Adjacent draws on the same attachments and extent otherwise continue the pass.
-    [[nodiscard]] HardwareExecutor::Command drawIndirect(
+    [[nodiscard]] HardwareExecutor::Command operator()(
         const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
         const HardwareBuffer& parameters = {}, std::optional<ScissorRect> scissor = {},
         std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});

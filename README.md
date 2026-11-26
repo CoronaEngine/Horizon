@@ -127,7 +127,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-Disney 光栅示例在初始化时上传球体几何、110 份材质球参数和间接命令，每帧复用这些缓冲。DrawStress 光栅示例每帧将立方体的变换矩阵写入映射的参数缓冲，调用 `flushMapped()` 后将缓冲传给 `drawIndirect`。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时上传球体几何、110 份材质球参数和间接命令，每帧复用这些缓冲。DrawStress 光栅示例每帧将立方体的变换矩阵写入映射的参数缓冲，调用 `flushMapped()` 后将缓冲作为逐 draw 参数传给光栅管线。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
 最后可以阅读 Tutorial 的原生 Vulkan 实现，对照 Vulkan 初始化、Viking Room 绘制和资源释放的顺序。Tutorial 的源码作为独立参考保留。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
@@ -273,8 +273,8 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 拷贝、绘制、计算和呈现都返回 `HardwareExecutor::Command`，可以直接用 `executor <<` 入队，也可以先保存，再按需要的顺序入队。同一条命令可以多次入队。调用计算管线时，命令会保存本次 dispatch 的工作组数量、着色器变体、参数、资源绑定和 `uses()` 声明。
 
 ```cpp
-const auto dispatch = pipeline(groupsX, groupsY, groupsZ);
-executor << dispatch << display(image);
+const auto dispatch = compute(groupsX, groupsY, groupsZ);
+executor << raster(vertexBuffer, indexBuffer, commands, count) << dispatch << display(image);
 executor.commit();
 ```
 
@@ -300,7 +300,7 @@ helicon_compile_shaders(HorizonExamples RASTER_PAIRS
 
 两个阶段都可见时，即可用 `RasterPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterPipeline<VS, FS>&`，由函数模板推导阶段类型。
 
-`executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 将命令缓冲中的前 `count` 条绘制记录入队。每次调用独立选择几何缓冲、参数和裁剪矩形。执行器按入队顺序绘制，将兼容的相邻绘制合并到同一 render pass。CPU 预先生成的间接命令可以与顶点和索引一起上传，并在后续帧中复用。
+`executor << pipeline(vertexBuffer, indexBuffer, commands, count)` 将命令缓冲中的前 `count` 条绘制记录入队。每次调用独立选择几何缓冲、参数和裁剪矩形。执行器按入队顺序绘制，将兼容的相邻绘制合并到同一 render pass。CPU 预先生成的间接命令可以与顶点和索引一起上传，并在后续帧中复用。
 
 ```cpp
 HardwareExecutor executor;
@@ -312,15 +312,15 @@ executor << indexBuffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
 const RasterIndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
 executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &packet, 1, sizeof(packet));
 
-executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
+executor << pipeline(vertexBuffer, indexBuffer, commands, 1);
 executor.commit();
 ```
 
 `createDeviceLocal` 替换当前句柄指向的分配，并在返回前将源数据复制到暂存缓冲。返回的 `HardwareExecutor::Command` 持有暂存缓冲和目标缓冲，调用方用 `executor <<` 将上传排在首次使用之前。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
 
-`drawIndirect()` 在调用时捕获当前管线、EDSL 变体、绑定和附件。渲染尺寸默认从颜色附件或显式深度附件推导，也可以通过最后一个参数 `extent` 指定。需要共享深度图时使用 `setDepthImage()`。
+调用光栅管线时，绘制命令会捕获当前管线、EDSL 变体、绑定和附件。渲染尺寸默认从颜色附件或显式深度附件推导，也可以通过最后一个参数 `extent` 指定。需要共享深度图时使用 `setDepthImage()`。
 
-首次绘制默认清除颜色和深度。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 scissor 之后显式传入 `RasterPass{}`。可分别设置 `loadColor` 和 `loadDepth`，例如 `RasterPass{.loadColor = true}` 保留颜色并清除深度。只清屏时写 `executor << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
+首次绘制默认清除颜色和深度。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 scissor 之后显式传入 `RasterPass{}`。可分别设置 `loadColor` 和 `loadDepth`，例如 `RasterPass{.loadColor = true}` 保留颜色并清除深度。只清屏时写 `executor << pipeline({}, {}, {}, 0, {}, {}, RasterPass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
 
 执行器可以把管线状态和绑定相同的相邻绘制录入一个物理 pass。对于通过描述符索引采样的纹理，可用 `pipeline.uses({{texture, ResourceAccess::Read}})` 声明实际读取的资源。存在存储写入或无法确认资源访问时，执行器会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。
 
@@ -382,9 +382,9 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 | 命令表元素（`RasterIndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
 | 几何表元素 | 0 顶点地址、8 索引地址（均为 64 位设备地址），16 `strideWords`、20 `indexBytes`、24 `vertexCount`、28 保留（均为 `uint32`） | 32 字节 |
 
-- **定位 draw**。每次 `drawIndirect` 从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一逻辑 pass 内跨调用连续编号。即使后端为同步资源而拆分 render pass，后续绘制也会加载已有附件并接着编号。零条命令和完全落在目标外的裁剪区域不占编号。
+- **定位 draw**。每次调用光栅管线都从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一逻辑 pass 内跨调用连续编号。即使后端为同步资源而拆分 render pass，后续绘制也会加载已有附件并接着编号。零条命令和完全落在目标外的裁剪区域不占编号。
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
-- **读取 draw 参数**。有逐 draw 参数时，使用 `executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `HardwareBuffer::Usage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。绘制命令持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
+- **读取 draw 参数**。有逐 draw 参数时，使用 `executor << pipeline(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `HardwareBuffer::Usage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。绘制命令持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
 - **首实例**。每个 packet 的 `firstInstance` 指定起始实例编号。设备未启用 `drawIndirectFirstInstance` 时，生成 packet 的 CPU 或 GPU 代码必须将该字段设为零。
 - **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。

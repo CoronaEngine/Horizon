@@ -184,18 +184,18 @@ void test_indirect_draws(bool forceSingleDraw)
         HardwareBuffer red(std::array<float,4>{1,0,0,1}, HardwareBuffer::Usage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
                               HardwareBuffer::Usage::StorageBuffer);
-        const auto drawLeft = pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
+        const auto drawLeft = pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
         executor << drawLeft << drawLeft
-                 << pipeline.drawIndirect({}, {}, {}, 0)
-                 << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2})
-                 << pipeline.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
+                 << pipeline({}, {}, {}, 0)
+                 << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2})
+                 << pipeline(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
         replay << drawLeft << target.copyTo(readback);
         useDrawColor = false;
         // The new shader variant requires a physical split within the same logical pass.
-        const auto drawBlue = pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1});
+        const auto drawBlue = pipeline(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1});
         executor << drawBlue
-                 << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2},
-                                          RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
+                 << pipeline(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2},
+                             RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
         replay << drawBlue << target.copyTo(splitReadback);
     }
     executor << target.copyTo(readback);
@@ -251,8 +251,8 @@ void test_raster_sampled_storage_image()
     HardwareExecutor executor;
     pipeline.uses({{input, ResourceAccess::Read}});
     executor << upload.copyTo(input)
-             << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
-             << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+             << pipeline(vertexBuffer, indexBuffer, commands, 1)
+             << pipeline(vertexBuffer, indexBuffer, commands, 1)
              << target.copyTo(readback);
     executor.commit().wait();
     auto& backend = HardwareBackendAccess::executor(executor);
@@ -262,8 +262,8 @@ void test_raster_sampled_storage_image()
            "fragment UBO handle samples a sampled/storage image from set 0");
 
     target.setClearColor(0, 1, 0, 1);
-    executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
-             << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})
+    executor << pipeline(vertexBuffer, indexBuffer, commands, 1)
+             << pipeline({}, {}, {}, 0, {}, {}, RasterPass{})
              << target.copyTo(readback);
     executor.commit().wait();
     expect(backend.recordedRasterPassCount == 2 &&
@@ -284,8 +284,8 @@ void test_raster_sampled_storage_image()
         increment.setRasterState({.depthTest = false, .depthWrite = false});
         for (bool declareAccess : {false, true}) {
             if (declareAccess) increment.uses({{counter, ResourceAccess::ReadWrite}});
-            executor << increment.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
-                     << increment.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
+            executor << increment(vertexBuffer, indexBuffer, commands, 1)
+                     << increment(vertexBuffer, indexBuffer, commands, 1)
                      << target.copyTo(readback);
             executor.commit().wait();
             const Pixel expected{declareAccess ? 4.f : 2.f, 0, 0, 1};
@@ -302,7 +302,7 @@ void test_raster_sampled_storage_image()
     for (auto& attachment : attachments) {
         attachment.setClearColor(0, 0, 0, 0);
         output = attachment;
-        executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
+        executor << pipeline(vertexBuffer, indexBuffer, commands, 1);
     }
     std::array<Pixel, 2> layerPixels{};
     HardwareBuffer layerReadback(sizeof(layerPixels), HardwareBuffer::Usage::StorageBuffer);
@@ -332,7 +332,7 @@ void test_shared_vertex_stage()
     std::array<float, 4> pixel{};
     HardwareBuffer readback(sizeof(pixel), HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
-    executor << raster.drawIndirect(vertices, indices, packets, 1, parameters) << target.copyTo(readback);
+    executor << raster(vertices, indices, packets, 1, parameters) << target.copyTo(readback);
     executor.commit().wait();
     // At the center of the render target, the Disney view vector equals camPos.xyz.
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 1.f},
@@ -397,7 +397,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), HardwareBuffer::Usage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, {}, {}, ktm::uvec2(4, 2));
+    executor << pipeline(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, {}, {}, ktm::uvec2(4, 2));
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -416,8 +416,8 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
 
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
-    executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
-                                      RasterPass{.loadColor = true, .loadDepth = true})
+    executor << pipeline(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
+                         RasterPass{.loadColor = true, .loadDepth = true})
              << target.copyTo(readback);
     executor.commit().wait();
     std::array<std::array<float,2>, std::size(vertices)> copiedVertices{};
@@ -830,13 +830,13 @@ void test_gpu()
     movedRaster.outColor = first;
     movedRaster.vp.proj = ktm::fmat4x4::from_eye();
     movedRaster.vp.view = ktm::fmat4x4::from_eye();
-    const auto firstDraw = movedRaster.drawIndirect(vertices, indices, packets, 1, drawParameters);
+    const auto firstDraw = movedRaster(vertices, indices, packets, 1, drawParameters);
     raster = std::move(movedRaster);
     raster.outColor = second;
     raster.vp.view = ktm::translate3d(ktm::fvec3(8.f, 0.f, 0.f));
     std::array<std::array<float, 4>, 2> pixels{};
     HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
-    executor << firstDraw << raster.drawIndirect(vertices, indices, packets, 1, drawParameters)
+    executor << firstDraw << raster(vertices, indices, packets, 1, drawParameters)
              << first.copyTo(readback) << second.copyTo(readback, 0, 0, sizeof(pixels[0]));
     executor.commit().wait();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) &&

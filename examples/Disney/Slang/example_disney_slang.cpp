@@ -135,7 +135,7 @@ DisneySlang::DisneySlang(void* native_window)
 
 void DisneySlang::run(float)
 {
-    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
+    render_executor << pipeline(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
                     << display(final_output_image);
     render_executor.commit();
 }
