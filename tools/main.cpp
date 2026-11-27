@@ -130,7 +130,8 @@ static void generateComputePipeline(std::ostream& out, const ShaderResources& re
 
 public:
 )"
-        << "    ComputePipeline(const " << shaderType << "& = {}) : pipeline_(" << shaderType << "::shaderModule) {}\n"
+        << "    ComputePipeline(const " << shaderType << "& shader = {})\n"
+        << "        : pipeline_(::EmbeddedShader::ComputeEntry{shader}) {}\n"
         << R"(
     ComputePipeline(ComputePipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
 
@@ -480,11 +481,10 @@ static int generateRasterPair(int argc, char** argv)
 
 public:
 )"
-         << "    RasterPipeline(uint32_t views = 1)\n"
-         << "        : pipeline_(" << vertexType << "::shaderModule, " << fragmentType << "::shaderModule, views) {}\n"
-         << "    RasterPipeline(const " << vertexType << "&, const " << fragmentType
-         << "&, uint32_t views = 1)\n"
-         << R"(        : RasterPipeline(views) {}
+         << "    RasterPipeline(uint32_t views = 1) : RasterPipeline({}, {}, views) {}\n"
+         << "    RasterPipeline(const " << vertexType << "& vertex, const " << fragmentType
+         << "& fragment, uint32_t views = 1)\n"
+         << R"(        : pipeline_(::EmbeddedShader::VertexEntry{vertex}, ::EmbeddedShader::FragmentEntry{fragment}, {}, views) {}
 
     RasterPipeline(RasterPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
 
@@ -757,6 +757,8 @@ int main(int argc, char** argv) try
         resources = std::move(result.reflections.at(ShaderLanguage::SpirV));
         for (auto& field : resources.bindInfoPool)
             field.variateName = extractMemberName(field.variateName);
+        out << "static constexpr auto shaderStage = ::EmbeddedShader::ShaderStage::"
+            << enumToString(resources.entryPointInfoPool.front().stage) << ";\n";
         out << "static inline const ::EmbeddedShader::ShaderCodeModule shaderModule{std::vector<uint32_t>{";
         emitSpirVLiteral(out, result.binaryTargets.at(ShaderLanguage::SpirV));
         out << "}, " << serializeShaderResources(resources) << "};\n";

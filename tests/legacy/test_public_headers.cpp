@@ -105,6 +105,16 @@ static_assert(requires(RasterPipeline<>& pipeline, RasterPipelineAdapter adapter
 });
 
 using ShaderVector = EmbeddedShader::VariateProxy<ktm::fvec4>;
+using VectorVertex = decltype([](ShaderVector value) { return value; });
+using OtherVectorFragment = decltype([](EmbeddedShader::VariateProxy<ktm::fvec2>) {});
+using NoStageIO = decltype([] {});
+
+template<class V, class F, class... Args>
+concept AcceptsRasterPair = std::constructible_from<RasterPipeline<>, V, F, Args...> ||
+    requires(V vertex, F fragment, Args... args) { RasterPipeline(vertex, fragment, args...); };
+static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment>);
+static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment, EmbeddedShader::CompilerOption, uint32_t, std::source_location>);
+static_assert(!AcceptsRasterPair<VectorVertex, NoStageIO> && !AcceptsRasterPair<NoStageIO, OtherVectorFragment>);
 static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
                        decltype([](ShaderVector) {}) fragment, EmbeddedShader::CompilerOption options,
                        const std::source_location& location) {
@@ -166,6 +176,10 @@ static_assert(!CompleteStage<disney_vert_slang_t>);
 #include SLANG(examples/Disney/Slang/disney_vert.slang)
 
 static_assert(!DeducesPipeline<disney_vert_slang_t> && !DeducesPipeline<disney_frag_slang_t>);
+static_assert(!std::constructible_from<EmbeddedShader::VertexEntry, disney_frag_slang_t> &&
+              !std::constructible_from<EmbeddedShader::FragmentEntry, disney_vert_slang_t> &&
+              !std::constructible_from<EmbeddedShader::ComputeEntry, disney_vert_slang_t>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO> && !AcceptsRasterPair<VectorVertex, disney_frag_slang_t>);
 using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
 using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang));
 static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);

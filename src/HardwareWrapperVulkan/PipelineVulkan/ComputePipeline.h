@@ -15,7 +15,8 @@ struct ComputePipelineVulkan
 {
     ~ComputePipelineVulkan();
 
-    explicit ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &module);
+    explicit ComputePipelineVulkan(const EmbeddedShader::ComputePipelineObject& shader);
+    explicit ComputePipelineVulkan(EmbeddedShader::ShaderCodeModule module);
 
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);

@@ -1,7 +1,10 @@
 #pragma once
 #include <Compiler/ShaderCommon.h>
 
+#include <concepts>
 #include <functional>
+#include <type_traits>
+#include <utility>
 #include <Codegen/ParseHelper.h>
 #include <Codegen/AST/AST.hpp>
 #include <Codegen/AST/Parser.hpp>
@@ -168,4 +171,23 @@ namespace EmbeddedShader
 			branch.conditionDetector = [shader, detect = std::move(branch.conditionDetector)] { return detect(); };
 		return outputs;
 	}
+
+    struct ComputeEntry
+    {
+        const ShaderCodeModule* const module{};
+        std::function<ComputePipelineObject(ktm::uvec3, CompilerOption, const std::source_location&)> compile;
+
+        template<class F> requires std::invocable<F> && std::copy_constructible<std::decay_t<F>>
+        ComputeEntry(F&& shader)
+            : compile([shader = std::forward<F>(shader)](ktm::uvec3 numthreads, CompilerOption options,
+                                                         const std::source_location& location) mutable {
+                return ComputePipelineObject::compile(std::move(shader), numthreads, std::move(options), location);
+            }) {}
+
+        template<class Tag> requires requires {
+            requires Tag::shaderStage == ShaderStage::ComputeShader;
+            { Tag::shaderModule } -> std::same_as<const ShaderCodeModule&>;
+        }
+        explicit ComputeEntry(const Tag&) : module(&Tag::shaderModule) {}
+    };
 }

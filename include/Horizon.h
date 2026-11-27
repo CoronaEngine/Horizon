@@ -3,7 +3,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <initializer_list>
 #include <ranges>
 #include <source_location>
@@ -280,11 +279,7 @@ struct ComputePipeline
     static_assert(std::same_as<CS, void>, "Include the generated compute shader header for this stage");
 
 private:
-    template<class> friend struct ComputePipeline;
     friend struct EmbeddedShader::BoundField<ComputePipeline>;
-
-    explicit ComputePipeline(const EmbeddedShader::ShaderCodeModule& module);
-    explicit ComputePipeline(EmbeddedShader::ComputePipelineObject shader);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -293,12 +288,9 @@ public:
     // Creates an empty handle for later assignment. Assign a pipeline before dispatching.
     ComputePipeline();
 
-    template<class F>
-        requires std::invocable<F>
-    ComputePipeline(F&& shader, ktm::uvec3 numthreads = ktm::uvec3(1), EmbeddedShader::CompilerOption options = {},
-                    const std::source_location& location = std::source_location::current())
-        : ComputePipeline(EmbeddedShader::ComputePipelineObject::compile(
-              std::forward<F>(shader), numthreads, options, location)) {}
+    ComputePipeline(EmbeddedShader::ComputeEntry shader, ktm::uvec3 numthreads = ktm::uvec3(1),
+                    EmbeddedShader::CompilerOption options = {},
+                    const std::source_location& location = std::source_location::current());
 
     ~ComputePipeline();
     ComputePipeline(ComputePipeline&&) noexcept;
@@ -319,12 +311,7 @@ struct RasterPipeline
                   "Register this VS/FS pair in RASTER_PAIRS and include both stage headers or the generated pipeline header");
 
 private:
-    template<class, class> friend struct RasterPipeline;
     friend struct EmbeddedShader::BoundField<RasterPipeline>;
-
-    RasterPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
-                   const EmbeddedShader::ShaderCodeModule& fragment, uint32_t views);
-    RasterPipeline(EmbeddedShader::RasterPipelineObject shaders, uint32_t views);
 
     RasterPipeline& bindRenderTarget(uint32_t location, void** resource);
     struct Impl;
@@ -334,12 +321,12 @@ public:
     // Creates an empty handle for later assignment. Assign a pipeline before setting raster state or drawing.
     RasterPipeline();
 
-    template<class V, class F>
-        requires requires(V& vertex, F& fragment) { std::function{vertex}; std::function{fragment}; }
-    RasterPipeline(V&& vertex, F&& fragment, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
-                   std::source_location location = std::source_location::current())
-        : RasterPipeline(EmbeddedShader::RasterPipelineObject::compile(
-              std::forward<V>(vertex), std::forward<F>(fragment), options, location), views) {}
+    RasterPipeline(EmbeddedShader::VertexEntry vertex, EmbeddedShader::FragmentEntry fragment,
+                   EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
+                   std::source_location location = std::source_location::current());
+
+    template<class V, class F> requires EmbeddedShader::RasterStagePairMismatch<V, F>
+    RasterPipeline(V&&, F&&, EmbeddedShader::CompilerOption = {}, uint32_t = 1, std::source_location = {}) = delete;
 
     ~RasterPipeline();
     RasterPipeline(RasterPipeline&&) noexcept;

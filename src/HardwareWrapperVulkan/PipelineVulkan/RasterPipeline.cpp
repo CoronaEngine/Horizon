@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <span>
+#include <stdexcept>
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
@@ -52,6 +53,21 @@ void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResource
 RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
                                            EmbeddedShader::ShaderCodeModule fragmentSpirV, uint32_t viewCount)
     : vertShaderCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
+{
+    initializeStageBindings(viewCount);
+}
+
+RasterPipelineVulkan::RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders,
+                                           const ConditionInfo& vertexConditions, const ConditionInfo& fragmentConditions,
+                                           uint32_t viewCount)
+    : vertShaderCode(shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexConditions)),
+      fragShaderCode(shaders.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragmentConditions))
+{
+    EmbeddedShader::linkRasterDrawParameter(vertShaderCode, fragShaderCode);
+    initializeStageBindings(viewCount);
+}
+
+void RasterPipelineVulkan::initializeStageBindings(uint32_t viewCount)
 {
     if (viewCount == 0 || viewCount > 32) throw std::invalid_argument("Invalid multiview count");
     const auto& vertex = vertShaderCode.shaderResources;
@@ -713,12 +729,153 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
 }
 
 std::shared_ptr<RasterPipelineVulkan> RasterPipelineVulkan::variant(
-    EmbeddedShader::ShaderCodeModule vertex, EmbeddedShader::ShaderCodeModule fragment) const
+    const EmbeddedShader::RasterPipelineObject& shaders, const ConditionInfo& vertexConditions,
+    const ConditionInfo& fragmentConditions) const
 {
-    auto next = std::make_shared<RasterPipelineVulkan>(std::move(vertex), std::move(fragment), multiviewCount);
+    auto next = std::make_shared<RasterPipelineVulkan>(shaders, vertexConditions, fragmentConditions, multiviewCount);
     if (next->renderTargets.size() == renderTargets.size()) next->renderTargets = renderTargets;
     next->rasterState = rasterState;
     next->depthImage = depthImage;
     next->explicitDepthImage = explicitDepthImage;
     return next;
 }
+
+template<class VS, class FS>
+struct RasterPipeline<VS, FS>::Impl
+{
+    std::shared_ptr<RasterPipelineVulkan> backend;
+    std::unique_ptr<EmbeddedShader::RasterPipelineObject> variants;
+    EmbeddedShader::ShaderCodeCompiler::ConditionInfo vertexConditions, fragmentConditions;
+    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
+    size_t explicitTargetCount{}; // The last entries override reflected outputs.
+    std::vector<ResourceUse> resourceUses;
+
+    static Impl& checked(const std::unique_ptr<Impl>& impl)
+    {
+        if (!impl || !impl->backend) throw std::logic_error("Empty raster pipeline handle");
+        return *impl;
+    }
+
+    void refreshShaderVariant();
+};
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>::RasterPipeline() = default;
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::VertexEntry vertex, EmbeddedShader::FragmentEntry fragment,
+                                       EmbeddedShader::CompilerOption options, uint32_t views, std::source_location location)
+    : impl_(std::make_unique<Impl>())
+{
+    if (vertex.module || fragment.module) {
+        if (!vertex.module || !fragment.module)
+            throw std::invalid_argument("Raster pipeline requires two EDSL stages or two precompiled stages");
+        impl_->backend = std::make_shared<RasterPipelineVulkan>(*vertex.module, *fragment.module, views);
+        return;
+    }
+
+    auto shaders = EmbeddedShader::RasterPipelineObject::compile(
+        std::move(vertex), std::move(fragment), std::move(options), location);
+    impl_->vertexConditions = shaders.vertex->getCurrentConditionInfo();
+    impl_->fragmentConditions = shaders.fragment->getCurrentConditionInfo();
+    impl_->backend = std::make_shared<RasterPipelineVulkan>(shaders, impl_->vertexConditions, impl_->fragmentConditions, views);
+    impl_->autoBindEntries = std::move(shaders.autoBindEntries);
+    if (!impl_->vertexConditions.empty() || !impl_->fragmentConditions.empty())
+        impl_->variants = std::make_unique<EmbeddedShader::RasterPipelineObject>(std::move(shaders));
+}
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>::~RasterPipeline() = default;
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>::RasterPipeline(RasterPipeline&&) noexcept = default;
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::operator=(RasterPipeline&&) noexcept = default;
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::uses(std::initializer_list<ResourceUse> resources)
+{
+    if (!impl_) impl_ = std::make_unique<Impl>();
+    impl_->resourceUses.assign(resources);
+    return *this;
+}
+
+template<class VS, class FS>
+RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::bindRenderTarget(uint32_t location, void** resource)
+{
+    if (!impl_) impl_ = std::make_unique<Impl>();
+    impl_->autoBindEntries.push_back({resource, 0, 0,
+        static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs), location});
+    ++impl_->explicitTargetCount;
+    return *this;
+}
+
+template<class VS, class FS>
+void RasterPipeline<VS, FS>::setDepthImage(HardwareImage& depthImage)
+{
+    Impl::checked(impl_).backend->setDepthImage(depthImage);
+}
+
+template<class VS, class FS>
+void RasterPipeline<VS, FS>::setRasterState(RasterState rasterState)
+{
+    Impl::checked(impl_).backend->setRasterState(rasterState);
+}
+
+template<class VS, class FS>
+HardwareImage RasterPipeline<VS, FS>::getDepthImage()
+{
+    return Impl::checked(impl_).backend->getDepthImage();
+}
+
+template<class VS, class FS>
+HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
+    const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
+    const HardwareBuffer& parameters, std::optional<ScissorRect> scissor,
+    std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
+{
+    if (!count && !pass) return HardwareExecutor::Command(nullptr);
+    auto& pipeline = Impl::checked(impl_);
+    if (pipeline.variants) pipeline.refreshShaderVariant();
+    auto& backend = *pipeline.backend;
+    // Auto-bind: read current resource from each EDSL proxy's back-pointer
+    for (const auto& entry : pipeline.autoBindEntries)
+    {
+        if (entry.boundValueRef)
+        {
+            backend.setPushConstantDirect(entry.byteOffset, entry.boundValueRef, entry.boundValueSize, entry.bindType);
+        }
+        else if (entry.boundResourceRef && *entry.boundResourceRef)
+        {
+            void* res = *entry.boundResourceRef;
+            if (entry.boundResourceIsBuffer)
+                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareBuffer*>(res), entry.bindType);
+            else
+                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
+        }
+    }
+    auto draw = std::make_shared<HardwareExecutor::Command::Impl::Draw>(pipeline.backend, extent, pass, pipeline.resourceUses);
+    draw->appendIndirect(vertices, indices, packets, count, parameters, scissor);
+    if (!draw->drawCount && !pass) return HardwareExecutor::Command(nullptr);
+    return HardwareExecutor::Command(std::move(draw));
+}
+
+template<class VS, class FS>
+void RasterPipeline<VS, FS>::Impl::refreshShaderVariant()
+{
+    auto vertex = variants->vertex->getCurrentConditionInfo();
+    auto fragment = variants->fragment->getCurrentConditionInfo();
+    if (vertex == vertexConditions && fragment == fragmentConditions) return;
+    auto next = backend->variant(*variants, vertex, fragment);
+    variants->updateAutoBind(vertex, fragment);
+    auto& bindings = variants->autoBindEntries;
+    bindings.insert(bindings.end(), autoBindEntries.end() - explicitTargetCount, autoBindEntries.end());
+    autoBindEntries = std::move(bindings);
+    backend = std::move(next);
+    vertexConditions = std::move(vertex);
+    fragmentConditions = std::move(fragment);
+}
+
+template struct RasterPipeline<void, void>;
+template struct EmbeddedShader::BoundField<RasterPipeline<>>;

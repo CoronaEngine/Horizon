@@ -134,6 +134,8 @@ void test_cpu()
            "EDSL raster construction rejects zero views");
     expect(throws<std::invalid_argument>([] { (void)RasterPipeline(baseline_vert_slang, baseline_frag_slang, 33); }),
            "Slang raster construction rejects more than 32 views");
+    expect(throws<std::invalid_argument>([&] { (void)RasterPipeline(VertexEntry{baseline_vert_slang}, fragment); }),
+           "a precompiled vertex stage cannot be paired with an EDSL fragment");
 }
 
 bool has_vulkan_14_device()
@@ -177,22 +179,27 @@ void test_indirect_draws(bool forceSingleDraw)
     {
         HardwareImage reflectedTarget(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
         Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = reflectedTarget;
-        bool useDrawColor = true;
-        auto vs = [&](Float2 pos, Float scale) {
+        auto useVertexParameter = std::make_shared<bool>(true);
+        auto useFragmentParameter = std::make_shared<bool>(true);
+        std::weak_ptr<bool> vertexFlag = useVertexParameter, fragmentFlag = useFragmentParameter;
+        auto vs = [flag = std::move(useVertexParameter)](Float2 pos, Float scale) {
             Float w;
             w = Float(1);
-            $IF(useDrawColor) { w = rasterDrawParameter<float>(3); };
+            $IF(*flag) { w = rasterDrawParameter<float>(3); };
             position() = Float4(pos, Float(0), w * scale);
             return Float4(0, 0, drawIndex(), 0);
         };
-        auto fs = [&](Float4 drawColorOffset) {
+        auto fs = [&, flag = std::move(useFragmentParameter)](Float4 drawColorOffset) {
             Float4 value;
             value = Float4(0, 0, 1, 1);
-            $IF(useDrawColor) { value = rasterDrawParameter<ktm::fvec4>(0); };
+            $IF(*flag) { value = rasterDrawParameter<ktm::fvec4>(0); };
             color << value + drawColorOffset;
         };
         RasterPipeline<> pipeline;
-        pipeline = RasterPipeline(vs, fs);
+        pipeline = RasterPipeline(std::move(vs), std::move(fs));
+        useVertexParameter = vertexFlag.lock();
+        useFragmentParameter = fragmentFlag.lock();
+        expect(useVertexParameter && useFragmentParameter, "both raster stages retain their condition captures");
         pipeline.bindRenderTarget(0, overrideColor);
         overrideColor = target;
         pipeline.setRasterState({.depthTest = false, .depthWrite = false});
@@ -223,7 +230,8 @@ void test_indirect_draws(bool forceSingleDraw)
         acrossDisplay << drawLeft << HardwareDisplayer{}(target)
                       << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{2,0,2,2})
                       << target.copyTo(readback);
-        useDrawColor = false;
+        *useVertexParameter = false;
+        *useFragmentParameter = false;
         // The new shader variant requires a physical split within the same logical pass.
         const auto drawBlue = pipeline(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1});
         executor << drawBlue
@@ -541,7 +549,7 @@ void test_compute_shader_variants()
     HardwareBuffer outputBuffer(words, HardwareBuffer::Usage::StorageBuffer);
     HardwareBuffer inputBuffer(std::array{42u}, HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
-    {
+    const auto replay = [&] {
         ArrayProxy<uint32_t> input(inputBuffer), output(outputBuffer);
         Uint slot;
         auto flag = std::make_shared<bool>(false);
@@ -564,10 +572,18 @@ void test_compute_shader_variants()
         slot = 2u;
         const auto last = pipeline(1);
         executor << first << withInput << last;
-    }
+        return withInput;
+    }();
     executor.commit().wait();
     expect(outputBuffer.copyToData(words) && words == std::array{10u, 53u, 12u},
            "queued false/true/false dispatches retain their shader variant, buffer bindings and slot");
+
+    const uint32_t nextInput = 7;
+    expect(inputBuffer.copyFromData(&nextInput, sizeof(nextInput)), "update the input before replay");
+    executor << replay;
+    executor.commit().wait();
+    expect(outputBuffer.copyToData(words) && words == std::array{10u, 18u, 12u},
+           "a saved dispatch reuses its shader variant, input buffer and slot after pipeline destruction");
 }
 
 void test_compute_sampling()
