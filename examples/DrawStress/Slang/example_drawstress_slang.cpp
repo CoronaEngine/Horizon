@@ -23,7 +23,7 @@ DrawStressSlang::DrawStressSlang(void* native_window)
     };
     {
         // Each packet points to its cube's mat4 in the per-frame payload, in 32-bit words.
-        std::vector<RasterIndirectPacket> packets(draw_count);
+        std::vector<RasterPipeline<>::IndirectPacket> packets(draw_count);
         for (uint32_t i = 0; i < draw_count; ++i) {
             packets[i].vertexCount = static_cast<uint32_t>(cube_indices.size());
             packets[i].instanceCount = 1;

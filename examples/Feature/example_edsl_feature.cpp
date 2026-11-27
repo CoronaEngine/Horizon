@@ -31,7 +31,7 @@ EdslFeature::EdslFeature(void* native_window)
     }
     executor << vertex_buffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer, vertices.data(), vertices.size(), sizeof(vertices[0]));
     executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
-    const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+    const RasterPipeline<>::IndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
     executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &command, 1, sizeof(command));
     executor.commit().wait();
 
@@ -44,7 +44,7 @@ EdslFeature::EdslFeature(void* native_window)
         albedo << Float4(edsl_feature_geometry_glsl.boxAlbedo(normal), 1.0f);
         normals << Float4(normal, 1.0f);
     };
-    geometry = RasterPipeline(vertex_shader, fragment_shader, {.blend = RasterBlend::Opaque},
+    geometry = RasterPipeline(vertex_shader, fragment_shader, {.blend = RasterPipeline<>::Blend::Opaque},
                               {.enableMatrixColumnMajor = true});
     albedo_image.setClearColor(0, 0, 0, 0);
     normal_image.setClearColor(0, 0, 0, 0);

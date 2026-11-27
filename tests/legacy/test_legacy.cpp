@@ -27,6 +27,8 @@
 
 namespace
 {
+using Raster = RasterPipeline<>;
+
 void expect(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
@@ -203,29 +205,29 @@ void test_indirect_draws(bool forceSingleDraw)
         HardwareBuffer rightVertices(vertices, HardwareBuffer::Usage::VertexBuffer);
         HardwareBuffer leftIndices(std::array<uint16_t,3>{0,1,2}, HardwareBuffer::Usage::IndexBuffer);
         HardwareBuffer rightIndices(std::array<uint32_t,7>{99,1,2,3,4,5,6}, HardwareBuffer::Usage::IndexBuffer);
-        HardwareBuffer leftCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
+        HardwareBuffer leftCommands(std::array{Raster::IndirectPacket{.vertexCount=3, .instanceCount=1}},
                                     HardwareBuffer::Usage::RasterIndirect);
         HardwareBuffer rightCommands(std::array{
-            RasterIndirectPacket{.vertexCount=3, .instanceCount=2, .firstIndex=1, .baseVertex=-1},
-            RasterIndirectPacket{.vertexCount=3, .instanceCount=1, .firstIndex=4, .baseVertex=-1, .parameterWord=4}
+            Raster::IndirectPacket{.vertexCount=3, .instanceCount=2, .firstIndex=1, .baseVertex=-1},
+            Raster::IndirectPacket{.vertexCount=3, .instanceCount=1, .firstIndex=4, .baseVertex=-1, .parameterWord=4}
         }, HardwareBuffer::Usage::RasterIndirect);
         HardwareBuffer red(std::array<float,4>{1,0,0,1}, HardwareBuffer::Usage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
                               HardwareBuffer::Usage::StorageBuffer);
-        const auto drawLeft = pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{0,0,2,2});
+        const auto drawLeft = pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, Raster::ScissorRect{0,0,2,2});
         HardwareBuffer empty;
         executor << drawLeft << empty.copyTo(leftCommands) << drawLeft
                  << pipeline({}, {}, {}, 0)
-                 << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{-3,0,2,2})
-                 << pipeline(rightVertices, rightIndices, rightCommands, 2, greens, {}, ScissorRect{2,0,2,2});
+                 << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, Raster::ScissorRect{-3,0,2,2})
+                 << pipeline(rightVertices, rightIndices, rightCommands, 2, greens, {}, Raster::ScissorRect{2,0,2,2});
         replay << drawLeft << target.copyTo(readback);
         *useVertexParameter = false;
         *useFragmentParameter = false;
         // The new shader variant requires a physical split within the same logical pass.
-        const auto drawBlue = pipeline(leftVertices, leftIndices, leftCommands, 1, {}, {}, ScissorRect{2,0,1,1});
+        const auto drawBlue = pipeline(leftVertices, leftIndices, leftCommands, 1, {}, {}, Raster::ScissorRect{2,0,1,1});
         executor << drawBlue
-                 << pipeline(leftVertices, leftIndices, leftCommands, 1, {}, {}, ScissorRect{3,0,1,2},
-                             RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
+                 << pipeline(leftVertices, leftIndices, leftCommands, 1, {}, {}, Raster::ScissorRect{3,0,1,2},
+                             Raster::Pass{.loadColor = true}, ktm::uvec2(4, 1));
         replay << drawBlue << target.copyTo(splitReadback);
 
         HardwareImage displayTarget(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
@@ -233,9 +235,9 @@ void test_indirect_draws(bool forceSingleDraw)
         color = displayTarget;
         *useVertexParameter = true;
         *useFragmentParameter = true;
-        acrossDisplay << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{0,0,2,2})
+        acrossDisplay << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, Raster::ScissorRect{0,0,2,2})
                       << HardwareDisplayer{}(displayTarget)
-                      << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{2,0,2,2})
+                      << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, Raster::ScissorRect{2,0,2,2})
                       << displayTarget.copyTo(readback);
     }
     executor << target.copyTo(readback);
@@ -293,7 +295,7 @@ void test_raster_sampled_storage_image()
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
     HardwareBuffer vertexBuffer(vertices, HardwareBuffer::Usage::VertexBuffer);
     HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
-    HardwareBuffer commands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
+    HardwareBuffer commands(std::array{Raster::IndirectPacket{.vertexCount=3, .instanceCount=1}},
                             HardwareBuffer::Usage::RasterIndirect);
     HardwareExecutor executor;
     pipeline.uses({{input, ResourceAccess::Read}});
@@ -310,7 +312,7 @@ void test_raster_sampled_storage_image()
 
     target.setClearColor(0, 1, 0, 1);
     executor << pipeline(vertexBuffer, indexBuffer, commands, 1)
-             << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPass{})
+             << pipeline({}, {}, {}, 0, {}, {}, {}, Raster::Pass{})
              << target.copyTo(readback);
     executor.commit().wait();
     expect(backend.recordedRasterPassCount == 2 &&
@@ -344,7 +346,7 @@ void test_raster_sampled_storage_image()
     HardwareImage layers(HardwareImage::CreateInfo{.width = 2, .height = 2, .format = HardwareImage::Format::RGBA32_FLOAT,
         .usage = HardwareImage::Usage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
     std::array attachments{layers[0][1], layers[0][1], layers[1][1]};
-    RasterPipeline additive(vs, fs, {.blend = RasterBlend::Additive});
+    RasterPipeline additive(vs, fs, {.blend = Raster::Blend::Additive});
     additive.uses({{input, ResourceAccess::Read}});
     for (auto& attachment : attachments) {
         attachment.setClearColor(0, 0, 0, 0);
@@ -366,14 +368,14 @@ void test_shared_vertex_stage()
     HardwareBuffer vertices(positions, HardwareBuffer::Usage::VertexBuffer);
     // The Disney VS fetches two packed 16-bit indices per word.
     HardwareBuffer indices(std::array<uint16_t, 4>{0, 1, 2, 0}, HardwareBuffer::Usage::IndexBuffer);
-    HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}},
+    HardwareBuffer packets(std::array{Raster::IndirectPacket{.vertexCount = 3, .instanceCount = 1}},
                            HardwareBuffer::Usage::RasterIndirect);
     const auto model = ktm::fmat4x4::from_eye();
     HardwareBuffer parameters(sizeof(model), HardwareBuffer::Usage::StorageBuffer, &model);
     HardwareBuffer fieldBuffer(sizeof(uint32_t), HardwareBuffer::Usage::StorageBuffer);
 
     HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
-    RasterPipeline raster(disney_vert_slang, drawstress_frag_slang, {.blend = RasterBlend::Additive});
+    RasterPipeline raster(disney_vert_slang, drawstress_frag_slang, {.blend = Raster::Blend::Additive});
     raster.outColor = target;
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
@@ -407,8 +409,8 @@ void test_generated_packet_and_attachment_load(bool use16BitIndices)
         return Float4(0, 0, instanceIndex(), 0);
     };
     auto fs = [&](Float4 instanceColor) { output << rasterDrawParameter<ktm::fvec4>(0) + instanceColor; };
-    RasterPipeline opaque(vs, fs, {.blend = RasterBlend::Opaque});
-    RasterPipeline additive(vs, fs, {.depthWrite = false, .compare = RasterCompare::Equal, .blend = RasterBlend::Additive});
+    RasterPipeline opaque(vs, fs, {.blend = Raster::Blend::Opaque});
+    RasterPipeline additive(vs, fs, {.depthWrite = false, .compare = Raster::Compare::Equal, .blend = Raster::Blend::Additive});
     HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
 
     const std::array<float,2> vertices[]{{-1,-1},{3,-1},{-1,3},{0,-1},{1,-1},{1,1},{0,1}};
@@ -440,17 +442,17 @@ void test_generated_packet_and_attachment_load(bool use16BitIndices)
            indexBuffer.getElementCount() == indices.size() &&
            indexBuffer.getElementSize() == (use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t)),
            "staged raster buffers preserve element counts, vertex stride and index width");
-    HardwareBuffer firstCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
+    HardwareBuffer firstCommands(std::array{Raster::IndirectPacket{.vertexCount=3, .instanceCount=1}},
                                  HardwareBuffer::Usage::RasterIndirect);
     HardwareBuffer redAndDepth(std::array<float,5>{1,0,0,1,0.5f}, HardwareBuffer::Usage::StorageBuffer);
-    HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, HardwareBuffer::Usage::RasterIndirect);
+    HardwareBuffer packets(std::array<Raster::IndirectPacket,1>{}, HardwareBuffer::Usage::RasterIndirect);
     const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                                .featuresChain.getChainHead()->features;
     const uint32_t firstInstance = features.drawIndirectFirstInstance ? 7u : 0u;
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), HardwareBuffer::Usage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    executor << opaque(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, depth, ScissorRect{0,0,4,1}, {}, ktm::uvec2(4, 2));
+    executor << opaque(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, depth, Raster::ScissorRect{0,0,4,1}, {}, ktm::uvec2(4, 2));
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -468,7 +470,7 @@ void test_generated_packet_and_attachment_load(bool use16BitIndices)
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
     executor << additive(vertexBuffer, indexBuffer, packets, 1, generatedParameters, depth, {},
-                         RasterPass{.loadColor = true, .loadDepth = true})
+                         Raster::Pass{.loadColor = true, .loadDepth = true})
              << target.copyTo(readback);
     executor.commit().wait();
     std::array<std::array<float,2>, std::size(vertices)> copiedVertices{};
@@ -943,11 +945,11 @@ void test_gpu()
 
     std::cerr << "GPU: generated raster fields after move\n";
     RasterPipeline raster(baseline_vert_slang, baseline_frag_slang);
-    using Raster = RasterPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
-    static_assert(std::same_as<decltype(raster), Raster>);
-    static_assert(std::same_as<decltype(&Raster::vp), decltype(raster.vp) Raster::*>);
-    static_assert(std::same_as<decltype(&Raster::outColor), decltype(raster.outColor) Raster::*>);
-    static_assert(!std::is_base_of_v<RasterPipeline<>, Raster>);
+    using BaselineRaster = RasterPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
+    static_assert(std::same_as<decltype(raster), BaselineRaster>);
+    static_assert(std::same_as<decltype(&BaselineRaster::vp), decltype(raster.vp) BaselineRaster::*>);
+    static_assert(std::same_as<decltype(&BaselineRaster::outColor), decltype(raster.outColor) BaselineRaster::*>);
+    static_assert(!std::is_base_of_v<Raster, BaselineRaster>);
     HardwareImage first(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     HardwareImage second(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     second.setClearColor(0.75f, 0.f, 0.f, 1.f);
@@ -958,7 +960,7 @@ void test_gpu()
     const std::array triangle{Vertex{-1, -1, 0, 0, 0}, Vertex{3, -1, 0, 0, 0}, Vertex{-1, 3, 0, 0, 0}};
     HardwareBuffer vertices(triangle, HardwareBuffer::Usage::VertexBuffer);
     HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
-    HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}}, HardwareBuffer::Usage::RasterIndirect);
+    HardwareBuffer packets(std::array{Raster::IndirectPacket{.vertexCount = 3, .instanceCount = 1}}, HardwareBuffer::Usage::RasterIndirect);
     const struct { ktm::fmat4x4 model; uint32_t textureIndex; } draw{ktm::fmat4x4::from_eye(), texture.storeDescriptor()};
     HardwareBuffer drawParameters(sizeof(draw), HardwareBuffer::Usage::StorageBuffer, &draw);
 

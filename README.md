@@ -300,6 +300,8 @@ helicon_compile_shaders(HorizonExamples RASTER_PAIRS
 
 两个阶段都可见时，即可用 `RasterPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterPipeline<VS, FS>&`，由函数模板推导阶段类型。
 
+EDSL 和 Slang 共用 `RasterPipeline<>` 中的光栅类型。构造管线时可以在 VS、FS 后传入 `RasterPipeline<>::State`，其中的 `compare`、`blend` 和 `topology` 分别使用 `RasterPipeline<>::Compare`、`RasterPipeline<>::Blend` 和 `RasterPipeline<>::Topology`。每次绘制可单独指定 `RasterPipeline<>::ScissorRect`。
+
 `executor << pipeline(vertexBuffer, indexBuffer, commands, count)` 将命令缓冲中的前 `count` 条绘制记录入队。每次调用独立选择几何缓冲、参数和裁剪矩形。执行器按入队顺序绘制，将兼容的相邻绘制合并到同一 render pass。CPU 预先生成的间接命令可以与顶点和索引一起上传，并在后续帧中复用。
 
 ```cpp
@@ -309,7 +311,7 @@ executor << vertexBuffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer,
                                            vertices.data(), vertices.size(), sizeof(vertices[0]));
 executor << indexBuffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
                                           indices.data(), indices.size(), sizeof(indices[0]));
-const RasterIndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+const RasterPipeline<>::IndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
 executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &packet, 1, sizeof(packet));
 
 executor << pipeline(vertexBuffer, indexBuffer, commands, 1);
@@ -320,7 +322,7 @@ executor.commit();
 
 调用光栅管线时，绘制命令会捕获当前管线、EDSL 变体、绑定和附件。需要深度测试时，创建 `HardwareImage::Usage::DepthImage` 图像，在 `parameters` 后传入，例如 `pipeline(vertices, indices, commands, count, parameters, depth)`。省略 `depth` 会关闭深度测试和写入。渲染尺寸默认从颜色或深度附件推导，也可以通过最后一个参数 `extent` 指定。
 
-首次绘制默认清除已绑定的附件。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 `scissor` 之后显式传入 `RasterPass{}`。两遍绘制可以传入同一张深度图，第二遍用 `RasterPass{.loadColor = true, .loadDepth = true}` 保留上一遍的颜色和深度。只清除颜色时写 `executor << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
+首次绘制默认清除已绑定的附件。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 `scissor` 之后显式传入 `RasterPipeline<>::Pass{}`。两遍绘制可以传入同一张深度图，第二遍用 `RasterPipeline<>::Pass{.loadColor = true, .loadDepth = true}` 保留上一遍的颜色和深度。只清除颜色时写 `executor << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPipeline<>::Pass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
 
 执行器可以把管线状态和绑定相同的相邻绘制录入一个物理 pass。对于通过描述符索引采样的纹理，可用 `pipeline.uses({{texture, ResourceAccess::Read}})` 声明实际读取的资源。存在存储写入或无法确认资源访问时，执行器会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。
 
@@ -379,7 +381,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 | 数据 | 字节偏移与字段 | 大小 |
 | --- | --- | --- |
 | 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 表内起点 `groupBase`、28 逻辑 pass 内起点 `drawBase`（均为 `uint32`） | 32 字节 |
-| 命令表元素（`RasterIndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
+| 命令表元素（`RasterPipeline<>::IndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
 | 几何表元素 | 0 顶点地址、8 索引地址（均为 64 位设备地址），16 `strideWords`、20 `indexBytes`、24 `vertexCount`、28 保留（均为 `uint32`） | 32 字节 |
 
 - **定位 draw**。每次调用光栅管线都从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一逻辑 pass 内跨调用连续编号。即使后端为同步资源而拆分 render pass，后续绘制也会加载已有附件并接着编号。零条命令和完全落在目标外的裁剪区域不占编号。

@@ -11,7 +11,7 @@ DisneySlang::DisneySlang(void* native_window)
     : ExampleBase(native_window),
       display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT),
       depth_image(800, 600, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage),
-      pipeline({.topology = RasterTopology::TriangleStrip})
+      pipeline({.topology = RasterPipeline<>::Topology::TriangleStrip})
 {
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
@@ -82,7 +82,7 @@ DisneySlang::DisneySlang(void* native_window)
             indices.data(), indices.size(), sizeof(indices[0]));
 
         constexpr uint32_t parameter_words = sizeof(DrawParameters) / sizeof(uint32_t);
-        std::array<RasterIndirectPacket, rows * columns> packets;
+        std::array<RasterPipeline<>::IndirectPacket, rows * columns> packets;
         for (uint32_t i = 0; i < packets.size(); ++i) {
             packets[i] = {.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1,
                           .parameterWord = i * parameter_words};

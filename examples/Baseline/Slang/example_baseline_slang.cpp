@@ -20,7 +20,7 @@ BaselineSlang::BaselineSlang(void* native_window)
     : ExampleBase(native_window), display(native_window),
       color(800, 600, HardwareImage::Format::RGBA16_FLOAT),
       depth(800, 600, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage),
-      pipeline({.compare = RasterCompare::LessEqual})
+      pipeline({.compare = RasterPipeline<>::Compare::LessEqual})
 {
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     {
@@ -53,7 +53,7 @@ BaselineSlang::BaselineSlang(void* native_window)
             vertices.data(), vertices.size(), sizeof(vertices[0]));
         render_executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
-        const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+        const RasterPipeline<>::IndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
         render_executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &command, 1, sizeof(command));
     }
 

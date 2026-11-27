@@ -2,6 +2,8 @@
 #include "Horizon.h"
 #include "Horizon.h"
 
+#include <array>
+#include <bit>
 #include <type_traits>
 
 static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image, const HardwareDisplayer& display) {
@@ -67,12 +69,18 @@ static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<st
               !CanReadBackInto<std::vector<std::string>&> && !CanReadBackInto<std::vector<bool>&> &&
               !CanReadBackInto<std::vector<uint16_t>>);
 
+using Raster = RasterPipeline<>;
+static_assert(std::bit_cast<std::array<uint32_t, 8>>(Raster::IndirectPacket{
+    .vertexCount = 1, .instanceCount = 2, .firstVertex = 3, .firstInstance = 4,
+    .geometryIndex = 5, .firstIndex = 6, .baseVertex = -7, .parameterWord = 8,
+}) == std::array<uint32_t, 8>{1, 2, 3, 4, 5, 6, uint32_t(-7), 8});
+
 template<class... Args>
 concept CanCallRaster = requires(RasterPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
     { pipeline(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<HardwareExecutor::Command>;
 };
 static_assert(CanCallRaster<> && CanCallRaster<const HardwareBuffer&>);
-static_assert(CanCallRaster<const HardwareBuffer&, const HardwareImage&, ScissorRect, RasterPass, ktm::uvec2>);
+static_assert(CanCallRaster<const HardwareBuffer&, const HardwareImage&, Raster::ScissorRect, Raster::Pass, ktm::uvec2>);
 static_assert(!CanCallRaster<std::span<const float>>);
 static_assert(!CanCallRaster<std::size_t, void (*)(std::span<std::byte>)>);
 
@@ -116,13 +124,14 @@ template<class V, class F, class... Args>
 concept AcceptsRasterPair = std::constructible_from<RasterPipeline<>, V, F, Args...> ||
     requires(V vertex, F fragment, Args... args) { RasterPipeline(vertex, fragment, args...); };
 static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment>);
-static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment, RasterState, EmbeddedShader::CompilerOption,
+static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment, Raster::State, EmbeddedShader::CompilerOption,
                                 uint32_t, std::source_location>);
 static_assert(!AcceptsRasterPair<VectorVertex, NoStageIO> && !AcceptsRasterPair<NoStageIO, OtherVectorFragment>);
 static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
                        decltype([](ShaderVector) {}) fragment, EmbeddedShader::CompilerOption options,
                        const std::source_location& location) {
-    { RasterPipeline(vertex, fragment, {.blend = RasterBlend::Opaque}) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {.blend = Raster::Blend::Opaque, .topology = Raster::Topology::TriangleStrip}) }
+        -> std::same_as<RasterPipeline<>>;
     { RasterPipeline(vertex, fragment, {}, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterPipeline<>>;
     { RasterPipeline(vertex, fragment, {}, options, 2, location) } -> std::same_as<RasterPipeline<>>;
 });
@@ -184,21 +193,22 @@ static_assert(!std::constructible_from<EmbeddedShader::VertexEntry, disney_frag_
               !std::constructible_from<EmbeddedShader::FragmentEntry, disney_vert_slang_t> &&
               !std::constructible_from<EmbeddedShader::ComputeEntry, disney_vert_slang_t>);
 static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO> && !AcceptsRasterPair<VectorVertex, disney_frag_slang_t>);
-static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO, RasterState> &&
-              !AcceptsRasterPair<VectorVertex, disney_frag_slang_t, RasterState>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO, Raster::State> &&
+              !AcceptsRasterPair<VectorVertex, disney_frag_slang_t, Raster::State>);
 using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
-using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang, RasterState{}));
+using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang, Raster::State{}));
 static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
 static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer, const HardwareImage& depth) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
-    { DisneyRaster({.blend = RasterBlend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
-    { RasterPipeline(disney_vert_slang, disney_frag_slang, {.blend = RasterBlend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
+    { DisneyRaster({.blend = Raster::Blend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
+    { RasterPipeline(disney_vert_slang, disney_frag_slang, {.blend = Raster::Blend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
     { pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
-    { executor << pipeline(buffer, buffer, buffer, 1, {}, depth) } -> std::same_as<HardwareExecutor&>;
+    { executor << pipeline(buffer, buffer, buffer, 1, {}, depth, Raster::ScissorRect{}, Raster::Pass{}) }
+        -> std::same_as<HardwareExecutor&>;
 });
 static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
 static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);

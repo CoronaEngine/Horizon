@@ -54,7 +54,7 @@ BaselineEdsl::BaselineEdsl(void* native_window)
             vertices.data(), vertices.size(), sizeof(vertices[0]));
         render_executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
-        const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+        const RasterPipeline<>::IndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
         render_executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &command, 1, sizeof(command));
     }
 
@@ -86,7 +86,7 @@ BaselineEdsl::BaselineEdsl(void* native_window)
         color << EmbeddedShader::texture(albedo, uv);
     };
 
-    raster = RasterPipeline(vertex_shader, fragment_shader, {.compare = RasterCompare::LessEqual},
+    raster = RasterPipeline(vertex_shader, fragment_shader, {.compare = RasterPipeline<>::Compare::LessEqual},
                             {.enableMatrixColumnMajor = true});
 
     view = ktm::look_at_rh<float>({2, 2, 2}, {0, 0, 0}, {0, 0, 1});

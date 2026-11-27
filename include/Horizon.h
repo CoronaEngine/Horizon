@@ -228,37 +228,6 @@ struct ResourceUse
     ResourceAccess access;
 };
 
-struct ScissorRect
-{
-    int32_t x { 0 };
-    int32_t y { 0 };
-    uint32_t width { 0 };
-    uint32_t height { 0 };
-};
-
-enum class RasterCompare { Less, LessEqual, Equal, Always };
-enum class RasterBlend { Alpha, Opaque, Additive };
-enum class RasterTopology { TriangleList, TriangleStrip };
-struct RasterState {
-    bool depthWrite{true};
-    RasterCompare compare{RasterCompare::Less};
-    RasterBlend blend{RasterBlend::Alpha};
-    RasterTopology topology{RasterTopology::TriangleList};
-    bool operator==(const RasterState&) const = default;
-};
-struct RasterPass {
-    bool loadColor{}, loadDepth{};
-    bool operator==(const RasterPass&) const = default;
-};
-
-// Vulkan consumes the first four words. The vertex shader consumes the remaining words.
-struct RasterIndirectPacket {
-    uint32_t vertexCount{}, instanceCount{}, firstVertex{}, firstInstance{};
-    uint32_t geometryIndex{}, firstIndex{};
-    int32_t baseVertex{};
-    uint32_t parameterWord{};
-};
-
 template<class CS = void>
 struct ComputePipeline
 {
@@ -303,15 +272,45 @@ private:
     std::unique_ptr<Impl> impl_;
 
 public:
+    enum class Compare { Less, LessEqual, Equal, Always };
+    enum class Blend { Alpha, Opaque, Additive };
+    enum class Topology { TriangleList, TriangleStrip };
+
+    struct State {
+        bool depthWrite{true};
+        Compare compare{Compare::Less};
+        Blend blend{Blend::Alpha};
+        Topology topology{Topology::TriangleList};
+        bool operator==(const State&) const = default;
+    };
+
+    struct Pass {
+        bool loadColor{}, loadDepth{};
+        bool operator==(const Pass&) const = default;
+    };
+
+    struct ScissorRect {
+        int32_t x{}, y{};
+        uint32_t width{}, height{};
+    };
+
+    // The first four words are the indirect draw arguments. The vertex shader reads the remaining words.
+    struct IndirectPacket {
+        uint32_t vertexCount{}, instanceCount{}, firstVertex{}, firstInstance{};
+        uint32_t geometryIndex{}, firstIndex{};
+        int32_t baseVertex{};
+        uint32_t parameterWord{};
+    };
+
     // Creates an empty handle for later assignment. Assign a pipeline before drawing.
     RasterPipeline();
 
     RasterPipeline(EmbeddedShader::VertexEntry vertex, EmbeddedShader::FragmentEntry fragment,
-                   RasterState state = {}, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
+                   State state = {}, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
                    std::source_location location = std::source_location::current());
 
     template<class V, class F> requires EmbeddedShader::RasterStagePairMismatch<V, F>
-    RasterPipeline(V&&, F&&, RasterState = {}, EmbeddedShader::CompilerOption = {}, uint32_t = 1,
+    RasterPipeline(V&&, F&&, State = {}, EmbeddedShader::CompilerOption = {}, uint32_t = 1,
                    std::source_location = {}) = delete;
 
     ~RasterPipeline();
@@ -325,7 +324,7 @@ public:
     [[nodiscard]] HardwareExecutor::Command operator()(
         const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
         const HardwareBuffer& parameters = {}, const HardwareImage& depth = {},
-        std::optional<ScissorRect> scissor = {}, std::optional<RasterPass> pass = {},
+        std::optional<ScissorRect> scissor = {}, std::optional<Pass> pass = {},
         std::optional<ktm::uvec2> extent = {});
 
     RasterPipeline& uses(std::initializer_list<ResourceUse> resources);
@@ -334,4 +333,4 @@ public:
 extern template struct RasterPipeline<void, void>;
 
 template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
-RasterPipeline(const VS&, const FS&, RasterState = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;
+RasterPipeline(const VS&, const FS&, RasterPipeline<>::State = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;

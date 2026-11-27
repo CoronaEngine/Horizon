@@ -10,6 +10,8 @@
 #include "Compiler/ShaderUtils.h"
 
 namespace {
+using Raster = RasterPipeline<>;
+
 VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& image)
 {
     // Descriptor-backed targets stay in their descriptor layout through the pass.
@@ -56,7 +58,7 @@ void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResource
 }
 
 RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
-                                           EmbeddedShader::ShaderCodeModule fragmentSpirV, RasterState state, uint32_t viewCount)
+                                           EmbeddedShader::ShaderCodeModule fragmentSpirV, Raster::State state, uint32_t viewCount)
     : rasterState(state), vertShaderCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
 {
     initializeStageBindings(viewCount);
@@ -64,7 +66,7 @@ RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vert
 
 RasterPipelineVulkan::RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders,
                                            const ConditionInfo& vertexConditions, const ConditionInfo& fragmentConditions,
-                                           RasterState state, uint32_t viewCount)
+                                           Raster::State state, uint32_t viewCount)
     : rasterState(state),
       vertShaderCode(shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexConditions)),
       fragShaderCode(shaders.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragmentConditions))
@@ -254,7 +256,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     // 配置输入装配
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = rasterState.topology == RasterTopology::TriangleStrip
+    inputAssembly.topology = rasterState.topology == Raster::Topology::TriangleStrip
         ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
@@ -287,10 +289,10 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = rasterState.depthWrite ? VK_TRUE : VK_FALSE;
     switch (rasterState.compare) {
-    case RasterCompare::Less: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; break;
-    case RasterCompare::LessEqual: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL; break;
-    case RasterCompare::Equal: depthStencil.depthCompareOp = VK_COMPARE_OP_EQUAL; break;
-    case RasterCompare::Always: depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS; break;
+    case Raster::Compare::Less: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; break;
+    case Raster::Compare::LessEqual: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL; break;
+    case Raster::Compare::Equal: depthStencil.depthCompareOp = VK_COMPARE_OP_EQUAL; break;
+    case Raster::Compare::Always: depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS; break;
     }
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
@@ -299,7 +301,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = rasterState.blend != RasterBlend::Opaque;
+    colorBlendAttachment.blendEnable = rasterState.blend != Raster::Blend::Opaque;
     colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
@@ -307,7 +309,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
-    if (rasterState.blend == RasterBlend::Additive) {
+    if (rasterState.blend == Raster::Blend::Additive) {
         colorBlendAttachment.srcColorBlendFactor = colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     }
@@ -398,9 +400,9 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 }
 
 HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth,
-                                            std::optional<ktm::uvec2> extent, std::optional<RasterPass> requestedPass,
+                                            std::optional<ktm::uvec2> extent, std::optional<Raster::Pass> requestedPass,
                                             const std::vector<ResourceUse>& uses)
-    : pipeline(std::move(backend)), pass(requestedPass.value_or(RasterPass{})),
+    : pipeline(std::move(backend)), pass(requestedPass.value_or(Raster::Pass{})),
       startsPass(requestedPass.has_value()), depthImage(depth),
       renderTargets(pipeline->renderTargets), resourceUses(uses)
 {
@@ -587,10 +589,10 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 
 void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                                 const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                                                std::optional<ScissorRect> scissor)
+                                                std::optional<Raster::ScissorRect> scissor)
 {
     if (!count) return;
-    if (!packets || packets.getElementSize() != sizeof(RasterIndirectPacket) || count > packets.getElementCount() ||
+    if (!packets || packets.getElementSize() != sizeof(Raster::IndirectPacket) || count > packets.getElementCount() ||
         !(ResourceManager::get(packets)->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
         throw std::invalid_argument("Invalid indirect packet buffer or draw count");
     if (!vertices || !indices || vertices.getElementSize() % 4 ||
@@ -712,8 +714,8 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
             root.groupBase = first;
             vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                0, sizeof(root), &root);
-            vkCmdDrawIndirect(commandBuffer, commands, VkDeviceSize(first) * sizeof(RasterIndirectPacket),
-                              count, sizeof(RasterIndirectPacket));
+            vkCmdDrawIndirect(commandBuffer, commands, VkDeviceSize(first) * sizeof(Raster::IndirectPacket),
+                              count, sizeof(Raster::IndirectPacket));
             first += count;
         }
     }
@@ -761,7 +763,7 @@ RasterPipeline<VS, FS>::RasterPipeline() = default;
 
 template<class VS, class FS>
 RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::VertexEntry vertex, EmbeddedShader::FragmentEntry fragment,
-                                       RasterState state, EmbeddedShader::CompilerOption options, uint32_t views,
+                                       State state, EmbeddedShader::CompilerOption options, uint32_t views,
                                        std::source_location location)
     : impl_(std::make_unique<Impl>())
 {
@@ -803,7 +805,7 @@ template<class VS, class FS>
 HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
     const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
     const HardwareBuffer& parameters, const HardwareImage& depth, std::optional<ScissorRect> scissor,
-    std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
+    std::optional<Pass> pass, std::optional<ktm::uvec2> extent)
 {
     if (!count && !pass) return HardwareExecutor::Command(nullptr);
     auto& pipeline = Impl::checked(impl_);

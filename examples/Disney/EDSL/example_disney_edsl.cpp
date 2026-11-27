@@ -84,7 +84,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
             indices.data(), indices.size(), sizeof(indices[0]));
 
         constexpr uint32_t parameter_words = sizeof(DrawParameters) / sizeof(uint32_t);
-        std::array<RasterIndirectPacket, rows * columns> packets;
+        std::array<RasterPipeline<>::IndirectPacket, rows * columns> packets;
         for (uint32_t i = 0; i < packets.size(); ++i) {
             packets[i] = {.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1,
                           .parameterWord = i * parameter_words};
@@ -283,7 +283,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
                         (mapped * (Float(6.2) * mapped + Float3(1.7f)) + Float3(0.06f));
         final_output << Float4(filmic, Float(1.0));
     };
-    raster = RasterPipeline(edsl_vertex, edsl_fragment, {.topology = RasterTopology::TriangleStrip},
+    raster = RasterPipeline(edsl_vertex, edsl_fragment, {.topology = RasterPipeline<>::Topology::TriangleStrip},
                             {.enableMatrixColumnMajor = true});
 
     constexpr float yaw = ktm::pi<float>, pitch = 0.42f * ktm::pi<float>;

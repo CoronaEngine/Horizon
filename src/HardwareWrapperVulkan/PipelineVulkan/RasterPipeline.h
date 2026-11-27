@@ -18,9 +18,9 @@ struct RasterPipelineVulkan
   public:
     using ConditionInfo = EmbeddedShader::ShaderCodeCompiler::ConditionInfo;
     RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
-                         EmbeddedShader::ShaderCodeModule fragmentSpirV, RasterState state, uint32_t viewCount);
+                         EmbeddedShader::ShaderCodeModule fragmentSpirV, RasterPipeline<>::State state, uint32_t viewCount);
     RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders, const ConditionInfo& vertexConditions,
-                         const ConditionInfo& fragmentConditions, RasterState state, uint32_t viewCount);
+                         const ConditionInfo& fragmentConditions, RasterPipeline<>::State state, uint32_t viewCount);
     ~RasterPipelineVulkan();
 
     std::shared_ptr<RasterPipelineVulkan> variant(const EmbeddedShader::RasterPipelineObject& shaders,
@@ -36,9 +36,9 @@ struct RasterPipelineVulkan
         VkDeviceAddress packets, geometries, parameters;
         uint32_t groupBase, drawBase;
     };
-    static_assert(sizeof(RasterIndirectPacket) == 32);
-    static_assert(offsetof(RasterIndirectPacket, geometryIndex) == sizeof(VkDrawIndirectCommand));
-    static_assert(offsetof(RasterIndirectPacket, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
+    static_assert(sizeof(RasterPipeline<>::IndirectPacket) == 32);
+    static_assert(offsetof(RasterPipeline<>::IndirectPacket, geometryIndex) == sizeof(VkDrawIndirectCommand));
+    static_assert(offsetof(RasterPipeline<>::IndirectPacket, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
     static_assert(sizeof(Root) == 32 && offsetof(Root, drawBase) == 28);
 
     struct GraphicsState
@@ -50,7 +50,7 @@ struct RasterPipelineVulkan
         std::vector<VkFormat> colorFormats;
         std::vector<VkImageLayout> finalLayouts;
         VkFormat depthFormat{VK_FORMAT_UNDEFINED};
-        RasterPass pass;
+        RasterPipeline<>::Pass pass;
         ~GraphicsState();
     };
     struct FramebufferState
@@ -77,7 +77,7 @@ struct RasterPipelineVulkan
     std::vector<std::shared_ptr<GraphicsState>> graphicsStates;
     std::shared_ptr<FramebufferState> lastFramebuffer;
 
-    const RasterState rasterState;
+    const RasterPipeline<>::State rasterState;
     std::vector<HardwareImage> renderTargets;
 
     EmbeddedShader::ShaderCodeModule vertShaderCode;
@@ -116,7 +116,7 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
 
     std::shared_ptr<RasterPipelineVulkan> pipeline;
     ktm::uvec2 imageSize{};
-    RasterPass pass;
+    RasterPipeline<>::Pass pass;
     bool startsPass{};
     HardwareImage depthImage;
     std::vector<HardwareImage> renderTargets;
@@ -130,12 +130,12 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
     std::shared_ptr<RasterPipelineVulkan::FramebufferState> framebuffer;
 
     Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth, std::optional<ktm::uvec2> extent,
-         std::optional<RasterPass> pass, const std::vector<ResourceUse>& uses);
+         std::optional<RasterPipeline<>::Pass> pass, const std::vector<ResourceUse>& uses);
     bool sameAttachments(const Draw& next) const;
     bool canMerge(const Draw& next) const;
     void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                        std::optional<ScissorRect> scissor);
+                        std::optional<RasterPipeline<>::ScissorRect> scissor);
     void prepareFramebuffer();
     Entry queueEntry(std::shared_ptr<Impl> owner) override { return RecordedCommand(*this, std::move(owner)); }
     ExecutorType getExecutorType() override { return ExecutorType::Graphics; }

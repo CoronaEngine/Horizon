@@ -481,9 +481,9 @@ static int generateRasterPair(int argc, char** argv)
 
 public:
 )"
-         << "    RasterPipeline(RasterState state = {}, uint32_t views = 1) : RasterPipeline({}, {}, state, views) {}\n"
+         << "    RasterPipeline(::RasterPipeline<>::State state = {}, uint32_t views = 1) : RasterPipeline({}, {}, state, views) {}\n"
          << "    RasterPipeline(const " << vertexType << "& vertex, const " << fragmentType
-         << "& fragment, RasterState state = {}, uint32_t views = 1)\n"
+         << "& fragment, ::RasterPipeline<>::State state = {}, uint32_t views = 1)\n"
          << R"(        : pipeline_(::EmbeddedShader::VertexEntry{vertex}, ::EmbeddedShader::FragmentEntry{fragment}, state, {}, views) {}
 
     RasterPipeline(RasterPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
@@ -497,8 +497,8 @@ public:
     [[nodiscard]] HardwareExecutor::Command operator()(
         const HardwareBuffer& vertices, const HardwareBuffer& indices,
         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters = {},
-        const HardwareImage& depth = {}, std::optional<ScissorRect> scissor = {},
-        std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {})
+        const HardwareImage& depth = {}, std::optional<::RasterPipeline<>::ScissorRect> scissor = {},
+        std::optional<::RasterPipeline<>::Pass> pass = {}, std::optional<ktm::uvec2> extent = {})
     {
         return pipeline_(vertices, indices, packets, count, parameters, depth, scissor, pass, extent);
     }
