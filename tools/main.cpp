@@ -47,6 +47,7 @@ static bool isDirectResourceBindType(ShaderCodeModule::ShaderResources::BindType
 		case BindType::sampler:
 		case BindType::rawBuffer:
 		case BindType::storageTexture:
+		case BindType::accelerationStructure:
 		case BindType::storageBuffer:
 			return true;
 		default:
@@ -71,6 +72,12 @@ static void emitBoundField(std::ostream& out, const ShaderResources::ShaderBindI
                            std::string_view stateType, std::vector<std::string>* ctorInits,
                            std::string_view indent = "    ", bool aliased = false)
 {
+    if (field.bindType == ShaderResources::accelerationStructure) {
+        if (stateType != "::RayTracePipeline<>" || field.set != 3 || field.binding != 1 || field.elementCount != 1)
+            throw std::runtime_error("A scene must be a scalar acceleration structure at set 3 binding 1");
+        out << indent << stateType << "::SceneField " << field.variateName << "{pipeline_};\n";
+        return;
+    }
     std::ostringstream args;
     const bool descriptor = isDirectResourceBindType(field.bindType);
     args << ", " << field.byteOffset << ", " << field.typeSize << ", " << static_cast<int32_t>(field.bindType)
@@ -128,7 +135,8 @@ static void emitResourceFields(std::ostream& out, std::span<const ShaderResource
             const auto previous = std::ranges::find(fields, field.variateName,
                                                     &ShaderResources::ShaderBindInfo::variateName);
             if (previous == fields.end()) fields.push_back(field);
-            else if (previous->set != field.set || previous->binding != field.binding)
+            else if (previous->set != field.set || previous->binding != field.binding ||
+                     ((previous->bindType == ShaderResources::accelerationStructure) != (field.bindType == ShaderResources::accelerationStructure)))
                 throw std::runtime_error("Ambiguous descriptor binding for shader field " + field.variateName);
             else if (!previous->elementCount || (field.elementCount && field.elementCount < previous->elementCount))
                 previous->elementCount = field.elementCount;
@@ -435,7 +443,8 @@ static Slang::ComPtr<slang::IComponentType> linkStage(const Slang::ComPtr<slang:
     auto program = ShaderLanguageConverter::link(session, components);
     auto stage = program->getLayout()->getEntryPointByIndex(0)->getStage();
     if (stage != SLANG_STAGE_VERTEX && stage != SLANG_STAGE_FRAGMENT && stage != SLANG_STAGE_COMPUTE &&
-        stage != SLANG_STAGE_MESH && stage != SLANG_STAGE_AMPLIFICATION)
+        stage != SLANG_STAGE_MESH && stage != SLANG_STAGE_AMPLIFICATION && stage != SLANG_STAGE_RAY_GENERATION &&
+        stage != SLANG_STAGE_MISS && stage != SLANG_STAGE_CLOSEST_HIT)
         throw std::runtime_error("Unsupported shader stage: " + std::string(module->getFilePath()));
     if (expectedStage && slangStageToShaderStage(stage) != *expectedStage)
         throw std::runtime_error("Shader main does not match its registered stage: " + std::string(module->getFilePath()));
@@ -491,7 +500,8 @@ static int generateGraphicsPipeline(int argc, char** argv)
         std::filesystem::path source, ir, header;
     };
     std::array stages{Stage{"-ts", ShaderStage::TaskShader}, Stage{"-vs", ShaderStage::VertexShader},
-                      Stage{"-ms", ShaderStage::MeshShader}, Stage{"-fs", ShaderStage::FragmentShader}};
+                      Stage{"-ms", ShaderStage::MeshShader}, Stage{"-fs", ShaderStage::FragmentShader},
+                      Stage{"-rg", ShaderStage::RayGeneration}, Stage{"-mi", ShaderStage::Miss}, Stage{"-ch", ShaderStage::ClosestHit}};
     std::filesystem::path output;
     for (int i = 2; i < argc; i += 2) {
         std::string_view flag = argv[i];
@@ -512,8 +522,11 @@ static int generateGraphicsPipeline(int argc, char** argv)
     const bool task = !stages[0].source.empty();
     const bool vertex = !stages[1].source.empty();
     const bool mesh = !stages[2].source.empty();
-    if (output.empty() || stages[3].source.empty() || vertex == mesh || (task && !mesh))
-        throw std::runtime_error("Expected VS/FS, MS/FS or Task/MS/FS and an output header");
+    const bool ray = !stages[4].source.empty() || !stages[5].source.empty() || !stages[6].source.empty();
+    const bool rayGroup = ray && !stages[4].source.empty() && !stages[5].source.empty() && !stages[6].source.empty()
+                          && !task && !vertex && !mesh && stages[3].source.empty();
+    if (output.empty() || (ray ? !rayGroup : stages[3].source.empty() || vertex == mesh || (task && !mesh)))
+        throw std::runtime_error("Expected VS/FS, MS/FS, Task/MS/FS or raygen/miss/closest-hit and an output header");
 
     // foo.vert and foo.frag are distinct modules with the same Slang module name.
     std::vector<Slang::ComPtr<slang::ISession>> sessions;
@@ -538,18 +551,18 @@ static int generateGraphicsPipeline(int argc, char** argv)
         auto* layout = program->getLayout();
         auto& bindings = resources.emplace_back(ShaderLanguageConverter::slangReflection(layout));
         prepareBindingNames(bindings);
-        if (mesh) {
+        if (mesh || ray) {
             for (unsigned i = 0; i < layout->getParameterCount(); ++i) {
                 auto* var = layout->getParameterByIndex(i);
                 auto* type = var->getTypeLayout();
                 if (type->getKind() != slang::TypeReflection::Kind::ConstantBuffer) continue;
                 const bool push = type->getParameterCategory() == slang::ParameterCategory::PushConstantBuffer;
                 if (!push && (var->getBindingSpace() != 3 || var->getBindingIndex() != 0))
-                    throw std::runtime_error("Mesh uniform buffer must use set 3 binding 0: " + stage.source.string());
+                    throw std::runtime_error("Pipeline uniform buffer must use set 3 binding 0: " + stage.source.string());
                 auto*& previous = parameterBlocks[push ? 1 : 0];
                 if (previous && (std::string_view(previous->getName()) != var->getName() ||
                     !sameParameterLayout(previous->getTypeLayout()->getElementTypeLayout(), type->getElementTypeLayout())))
-                    throw std::runtime_error("Incompatible mesh parameter block in " + stage.source.string());
+                    throw std::runtime_error("Incompatible pipeline parameter block in " + stage.source.string());
                 previous = var;
             }
         } else {
@@ -560,11 +573,11 @@ static int generateGraphicsPipeline(int argc, char** argv)
         names.emplace_back(stage.flag.substr(1));
         code << "#include \"" << stage.header.generic_string() << "\"\n";
     }
-    if (!mesh && resources.front().uniformBufferSize && resources.back().uniformBufferSize &&
+    if (vertex && resources.front().uniformBufferSize && resources.back().uniformBufferSize &&
         resources.front().uniformBufferSize != resources.back().uniformBufferSize)
         throw std::runtime_error("Uniform buffer block sizes differ in raster stages");
 
-    const std::string name = mesh ? "MeshPipeline" : "RasterPipeline";
+    const std::string name = ray ? "RayTracePipeline" : mesh ? "MeshPipeline" : "RasterPipeline";
     const auto runtime = "::" + name + "<>";
     auto emitList = [&](auto emit) {
         for (size_t i = 0; i < types.size(); ++i) {
@@ -574,13 +587,21 @@ static int generateGraphicsPipeline(int argc, char** argv)
     };
     code << "\ntemplate<> struct " << name << "<";
     emitList([&](size_t i) { code << types[i]; });
-    code << "> {\nprivate:\n    " << runtime << " pipeline_;\n\npublic:\n    "
-         << name << "(" << runtime << "::State state = {}, uint32_t views = 1) : " << name << "(";
+    code << "> {\nprivate:\n    " << runtime << " pipeline_;\n\npublic:\n";
+    if (ray)
+        code << "    using AccelerationStructure = " << runtime << "::AccelerationStructure;\n"
+             << "    using Instance = " << runtime << "::Instance;\n"
+             << "    " << name << "() : " << name << "(";
+    else
+        code << "    " << name << "(" << runtime << "::State state = {}, uint32_t views = 1) : " << name << "(";
     emitList([&](size_t) { code << "{}"; });
-    code << ", state, views) {}\n    " << name << "(";
+    code << (ray ? ") {}\n    " : ", state, views) {}\n    ") << name << "(";
     emitList([&](size_t i) { code << "const " << types[i] << "& " << names[i]; });
-    code << ", " << runtime << "::State state = {}, uint32_t views = 1)\n        : pipeline_(";
-    if (mesh)
+    if (!ray) code << ", " << runtime << "::State state = {}, uint32_t views = 1";
+    code << ")\n        : pipeline_(";
+    if (ray)
+        code << "rg.shaderModule, mi.shaderModule, ch.shaderModule";
+    else if (mesh)
         code << (task ? "&ts.shaderModule" : "nullptr") << ", ms.shaderModule, fs.shaderModule, state, views";
     else
         code << "::EmbeddedShader::VertexEntry{vs}, ::EmbeddedShader::FragmentEntry{fs}, state, {}, views";
@@ -588,22 +609,28 @@ static int generateGraphicsPipeline(int argc, char** argv)
          << "    " << name << "& operator=(" << name << "&& other) noexcept {\n"
          << "        pipeline_ = std::move(other.pipeline_);\n        return *this;\n    }\n\n"
          << "    [[nodiscard]] HardwareExecutor::Command operator()(\n        ";
-    if (!mesh) code << "const HardwareBuffer& vertices, const HardwareBuffer& indices,\n        ";
-    code << "const HardwareBuffer& packets, uint32_t count, ";
-    if (!mesh) code << "const HardwareBuffer& parameters = {},\n        ";
-    code << R"(const HardwareImage& depth = {},
+    if (ray)
+        code << "uint32_t width, uint32_t height = 1, uint32_t depth = 1)\n"
+             << "    {\n        return pipeline_(width, height, depth);\n    }\n\n";
+    else {
+        if (!mesh) code << "const HardwareBuffer& vertices, const HardwareBuffer& indices,\n        ";
+        code << "const HardwareBuffer& packets, uint32_t count, ";
+        if (!mesh) code << "const HardwareBuffer& parameters = {},\n        ";
+        code << R"(const HardwareImage& depth = {},
         std::optional<::RasterPipeline<>::ScissorRect> scissor = {}, std::optional<::RasterPipeline<>::Pass> pass = {},
         std::optional<ktm::uvec2> extent = {})
     {
 )" << "        return pipeline_(" << (mesh ? "packets, count" : "vertices, indices, packets, count, parameters")
-         << ", depth, scissor, pass, extent);\n    }\n\n";
+             << ", depth, scissor, pass, extent);\n    }\n\n";
+    }
     emitResourceFields(code, resources, runtime);
-    emitOutputFields(code, resources.back(), runtime);
+    if (!ray) emitOutputFields(code, resources.back(), runtime);
     code << "};\n\ntemplate<";
     emitList([&](size_t i) { code << "std::same_as<" << types[i] << "> " << names[i]; });
     code << ">\n" << name << "(";
     emitList([&](size_t i) { code << "const " << names[i] << "&"; });
-    code << ", " << runtime << "::State = {}, uint32_t = 1) -> " << name << "<";
+    if (!ray) code << ", " << runtime << "::State = {}, uint32_t = 1";
+    code << ") -> " << name << "<";
     emitList([&](size_t i) { code << names[i]; });
     code << ">;\n";
 
@@ -706,7 +733,12 @@ int main(int argc, char** argv) try
 				inputStage = ShaderStage::FragmentShader;
 				stageExplicit = true;
 			}
-			else if (arg == "mesh" || arg == "task")
+			else if (arg == "raygen" || arg == "miss" || arg == "closesthit")
+            {
+                inputStage = arg == "raygen" ? ShaderStage::RayGeneration : arg == "miss" ? ShaderStage::Miss : ShaderStage::ClosestHit;
+                stageExplicit = true;
+            }
+            else if (arg == "mesh" || arg == "task")
 			{
 				inputStage = arg == "mesh" ? ShaderStage::MeshShader : ShaderStage::TaskShader;
 				stageExplicit = true;
@@ -856,11 +888,14 @@ int main(int argc, char** argv) try
 
     using Kind = slang::DeclReflection::Kind;
     std::stringstream functions;
-    const bool meshStage = !moduleOnly && (resources.entryPointInfoPool.front().stage == ShaderStage::MeshShader ||
-                                           resources.entryPointInfoPool.front().stage == ShaderStage::TaskShader);
+    const bool bindingsOnly = !moduleOnly && (resources.entryPointInfoPool.front().stage == ShaderStage::MeshShader ||
+                                           resources.entryPointInfoPool.front().stage == ShaderStage::TaskShader ||
+                                           resources.entryPointInfoPool.front().stage == ShaderStage::RayGeneration ||
+                                           resources.entryPointInfoPool.front().stage == ShaderStage::Miss ||
+                                           resources.entryPointInfoPool.front().stage == ShaderStage::ClosestHit);
     for (auto child : declarations->getChildren())
     {
-        if (meshStage) break; // Mesh entry points only expose reflected bindings to C++.
+        if (bindingsOnly) break; // Only module-scope shader bindings are exposed to C++ for these stages.
         const auto kind = child->getKind();
         if (kind == Kind::Struct || kind == Kind::Variable)
         {

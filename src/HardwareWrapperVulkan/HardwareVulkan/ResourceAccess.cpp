@@ -12,7 +12,7 @@ bool incompatibleImageUses(VkImageLayout a, VkAccessFlags2 accessA, VkImageLayou
     return a != b || bool(accessA & colorAccess) != bool(accessB & colorAccess);
 }
 
-constexpr VkAccessFlags2 writes = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+constexpr VkAccessFlags2 writes = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
     VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 }
@@ -197,6 +197,16 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
             VkAccessFlags2 sourceAccess{};
             if (dependency(buffers[use.buffer], stages, access, sourceStages, sourceAccess))
             {
+                if ((access | sourceAccess) & (VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                                               VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)) {
+                    VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+                    barrier.srcStageMask = sourceStages;
+                    barrier.srcAccessMask = sourceAccess;
+                    barrier.dstStageMask = stages;
+                    barrier.dstAccessMask = access;
+                    result.memoryBarriers.push_back(barrier);
+                    continue;
+                }
                 VkBufferMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
                 barrier.srcStageMask = sourceStages;
                 barrier.srcAccessMask = sourceAccess;

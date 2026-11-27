@@ -96,6 +96,9 @@ namespace EmbeddedShader
                 return "ComputeShader";
             case ShaderStage::MeshShader:
                 return "MeshShader";
+            case ShaderStage::RayGeneration: return "RayGeneration";
+            case ShaderStage::Miss: return "Miss";
+            case ShaderStage::ClosestHit: return "ClosestHit";
             case ShaderStage::TaskShader:
                 return "TaskShader";
             default:break;

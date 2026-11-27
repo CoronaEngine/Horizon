@@ -14,6 +14,7 @@ struct DeviceFeaturesChain
     DeviceFeaturesChain& operator=(const DeviceFeaturesChain& other);
 
     VkPhysicalDeviceFeatures2 *getChainHead();
+    bool supportsBufferAddress() const { return deviceFeatures12.bufferDeviceAddress; }
     bool supportsPulledRaster() const { return deviceFeatures11.shaderDrawParameters && deviceFeatures12.bufferDeviceAddress; }
     bool supportsMultiview() const { return deviceFeatures11.multiview != VK_FALSE; }
 

@@ -21,11 +21,11 @@ namespace EmbeddedShader
         case SLANG_STAGE_HULL:       return ShaderStage::VertexShader;
         case SLANG_STAGE_DOMAIN:     return ShaderStage::VertexShader;
         case SLANG_STAGE_GEOMETRY:   return ShaderStage::VertexShader;
-        case SLANG_STAGE_RAY_GENERATION: return ShaderStage::ComputeShader;
+        case SLANG_STAGE_RAY_GENERATION: return ShaderStage::RayGeneration;
         case SLANG_STAGE_INTERSECTION:   return ShaderStage::ComputeShader;
         case SLANG_STAGE_ANY_HIT:        return ShaderStage::ComputeShader;
-        case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ComputeShader;
-        case SLANG_STAGE_MISS:           return ShaderStage::ComputeShader;
+        case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ClosestHit;
+        case SLANG_STAGE_MISS:           return ShaderStage::Miss;
         case SLANG_STAGE_CALLABLE:       return ShaderStage::ComputeShader;
         case SLANG_STAGE_MESH:           return ShaderStage::MeshShader;
         case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::TaskShader;
@@ -75,6 +75,7 @@ namespace EmbeddedShader
                 case Resources::sampledImages:
                 case Resources::sampler:
                 case Resources::texture:
+                case Resources::accelerationStructure:
                 case Resources::rawBuffer: return Access::ReadOnly;
                 case Resources::storageTexture:
                 case Resources::storageBuffer:
@@ -417,6 +418,8 @@ namespace EmbeddedShader
 
     EmbeddedShader::ShaderCodeModule::ShaderResources::BindType ShaderCursor::deduceLeafBindType(slang::TypeLayoutReflection* typeLayout)
     {
+        if (typeLayout->getResourceShape() == SLANG_ACCELERATION_STRUCTURE)
+            return ShaderCodeModule::ShaderResources::accelerationStructure;
         int rangeCount = typeLayout->getBindingRangeCount();
         if (rangeCount > 0)
         {
@@ -965,6 +968,9 @@ namespace EmbeddedShader
 	        return SLANG_STAGE_PIXEL;
 	    case ShaderStage::ComputeShader:
 	        return SLANG_STAGE_COMPUTE;
+	    case ShaderStage::RayGeneration: return SLANG_STAGE_RAY_GENERATION;
+	    case ShaderStage::Miss: return SLANG_STAGE_MISS;
+	    case ShaderStage::ClosestHit: return SLANG_STAGE_CLOSEST_HIT;
 	    case ShaderStage::MeshShader:
 	        return SLANG_STAGE_MESH;
 	    case ShaderStage::TaskShader:
@@ -1027,7 +1033,8 @@ namespace EmbeddedShader
                 resources.entryPointInfoPool.push_back(epInfo);
                 // Task payloads and mesh primitives are exchanged between shader stages.
                 // Only module-scope resources are host bindings for these stages.
-                if (meshStage) continue;
+                if (meshStage || epInfo.stage == ShaderStage::RayGeneration || epInfo.stage == ShaderStage::Miss ||
+                    epInfo.stage == ShaderStage::ClosestHit) continue;
 
                 // Varying Inputs
                 for (int i = 0; i < entryPoint->getParameterCount(); ++i)

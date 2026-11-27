@@ -52,6 +52,8 @@ struct HardwareExecutor::Command::Impl
 {
     struct Draw;
     struct Dispatch;
+    struct BuildAS;
+    struct Trace;
     struct Display;
     struct BufferToBuffer;
     struct BufferToImage;

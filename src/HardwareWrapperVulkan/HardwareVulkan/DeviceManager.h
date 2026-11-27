@@ -46,6 +46,15 @@ class DeviceManager
         VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceMeshShaderPropertiesEXT meshShaderProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
         bool computeDerivativeGroupQuads{};
+        bool rayTrace{};
+        PFN_vkCreateAccelerationStructureKHR createAS{};
+        PFN_vkDestroyAccelerationStructureKHR destroyAS{};
+        PFN_vkGetAccelerationStructureBuildSizesKHR buildSizes{};
+        PFN_vkGetAccelerationStructureDeviceAddressKHR addressAS{};
+        PFN_vkCmdBuildAccelerationStructuresKHR buildAS{};
+        PFN_vkCreateRayTracingPipelinesKHR createRayPipelines{};
+        PFN_vkGetRayTracingShaderGroupHandlesKHR rayGroupHandles{};
+        PFN_vkCmdTraceRaysKHR traceRays{};
         DeviceFeaturesChain featuresChain;
     };
 

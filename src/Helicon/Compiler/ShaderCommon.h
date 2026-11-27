@@ -26,6 +26,7 @@ namespace EmbeddedShader
         ComputeShader = 2,
         MeshShader,
         TaskShader,
+        RayGeneration, Miss, ClosestHit,
     };
 
     std::string enumToString(ShaderStage stage);

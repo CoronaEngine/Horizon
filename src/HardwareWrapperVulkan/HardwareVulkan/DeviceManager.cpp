@@ -263,6 +263,26 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
     createInfo.pEnabledFeatures = nullptr;
     void* enabledFeatures = deviceFeaturesUtils.featuresChain.getChainHead();
 
+    constexpr std::array rayExtensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR ray{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    if (deviceFeaturesUtils.featuresChain.supportsBufferAddress() &&
+        std::ranges::all_of(rayExtensions, [&](const char* name) {
+            return std::ranges::any_of(availableExtensions, [&](const auto& ext) { return strcmp(name, ext.extensionName) == 0; });
+        })) {
+        accel.pNext = &ray;
+        VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &accel};
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &query);
+        if (accel.accelerationStructure && ray.rayTracingPipeline) {
+            requiredExtensions.insert(requiredExtensions.end(), rayExtensions.begin(), rayExtensions.end());
+            ray = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, enabledFeatures, VK_TRUE};
+            accel = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &ray, VK_TRUE};
+            enabledFeatures = &accel;
+            deviceFeaturesUtils.rayTrace = true;
+        }
+    }
+
     auto& mesh = deviceFeaturesUtils.meshShaderFeatures;
     if (std::ranges::any_of(availableExtensions, [](const auto& extension) {
             return strcmp(extension.extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0;
@@ -305,6 +325,16 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
     createInfo.pNext = enabledFeatures;
 
     coronaHardwareCheck(vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice));
+    if (deviceFeaturesUtils.rayTrace) {
+        deviceFeaturesUtils.createAS = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCreateAccelerationStructureKHR"));
+        deviceFeaturesUtils.destroyAS = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(logicalDevice, "vkDestroyAccelerationStructureKHR"));
+        deviceFeaturesUtils.buildSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureBuildSizesKHR"));
+        deviceFeaturesUtils.addressAS = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureDeviceAddressKHR"));
+        deviceFeaturesUtils.buildAS = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdBuildAccelerationStructuresKHR"));
+        deviceFeaturesUtils.createRayPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCreateRayTracingPipelinesKHR"));
+        deviceFeaturesUtils.rayGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkGetRayTracingShaderGroupHandlesKHR"));
+        deviceFeaturesUtils.traceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdTraceRaysKHR"));
+    }
 }
 
 void DeviceManager::createQueueUtils()

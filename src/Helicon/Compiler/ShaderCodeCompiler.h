@@ -44,6 +44,7 @@ struct ShaderCodeModule
                 storageTexture,
                 storageBuffer,
                 uniformBufferMembers,
+                accelerationStructure,
             };
             struct ShaderBindInfo
             {

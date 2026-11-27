@@ -13,6 +13,8 @@ VkBufferUsageFlags convertBufferUsage(HardwareBuffer::Usage const usage)
     {
     case VertexBuffer:
     case IndexBuffer:
+        if (getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils().rayTrace)
+            vkUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
         vkUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         break;
     case RasterIndirect:

@@ -152,15 +152,16 @@ struct UniformSnapshot
     UniformSnapshot(const UniformSnapshot&) = delete;
     UniformSnapshot& operator=(const UniformSnapshot&) = delete;
     ~UniformSnapshot();
-    void prepare(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout);
+    void prepare(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout, VkAccelerationStructureKHR scene = VK_NULL_HANDLE);
 };
 
 // A slot is writable only when no queued/in-flight invocation retains it.
 struct UniformSnapshotPool {
     std::vector<std::shared_ptr<UniformSnapshot>> slots;
     size_t next{0};
-    std::shared_ptr<UniformSnapshot> acquire(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout);
+    std::shared_ptr<UniformSnapshot> acquire(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout,
+                                             VkAccelerationStructureKHR scene = VK_NULL_HANDLE);
 };
 
-VkDescriptorSetLayout createUniformSnapshotLayout(VkDevice device);
+VkDescriptorSetLayout createUniformSnapshotLayout(VkDevice device, bool uniform = true, bool scene = false);
 std::vector<uint8_t> copyParameterBytes(const uint8_t* data, size_t size);

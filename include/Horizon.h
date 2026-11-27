@@ -32,6 +32,7 @@ public:
         template<class> friend struct ComputePipeline;
         template<class, class> friend struct RasterPipeline;
         template<class...> friend struct MeshPipeline;
+        template<class...> friend struct RayTracePipeline;
 
         struct Impl;
         explicit Command(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -374,3 +375,56 @@ private:
 };
 
 extern template struct MeshPipeline<>;
+
+template<class... Stages>
+struct RayTracePipeline
+{
+    static_assert(sizeof...(Stages) == 0, "Register the raygen/miss/closest-hit combination and include each stage header");
+
+    struct Instance;
+
+    struct AccelerationStructure {
+        // Replace this handle and capture inputs for a triangle BLAS or an instance TLAS.
+        [[nodiscard]] HardwareExecutor::Command build(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                                      uint32_t positionOffset = 0);
+        [[nodiscard]] HardwareExecutor::Command build(std::span<const Instance> instances);
+
+    private:
+        friend struct RayTracePipeline;
+        friend class HardwareExecutor::Command;
+        struct Impl;
+        std::shared_ptr<Impl> impl_;
+    };
+
+    struct Instance {
+        AccelerationStructure geometry;
+        ktm::fmat4x4 transform = ktm::fmat4x4::from_eye();
+        uint32_t id = 0;
+        uint8_t mask = 0xff;
+    };
+
+    ~RayTracePipeline();
+    RayTracePipeline(RayTracePipeline&&) noexcept;
+    RayTracePipeline& operator=(RayTracePipeline&&) noexcept;
+
+    [[nodiscard]] HardwareExecutor::Command operator()(uint32_t width, uint32_t height = 1, uint32_t depth = 1);
+
+private:
+    template<class...> friend struct RayTracePipeline;
+    friend class HardwareExecutor::Command;
+    friend struct EmbeddedShader::BoundField<RayTracePipeline>;
+    using Descriptor = HardwareExecutor::Descriptor;
+    class SceneField {
+    public:
+        explicit SceneField(RayTracePipeline& pipeline) : pipeline_(pipeline) {}
+        void operator=(const AccelerationStructure& scene);
+    private:
+        RayTracePipeline& pipeline_;
+    };
+    RayTracePipeline(const EmbeddedShader::ShaderCodeModule& raygen, const EmbeddedShader::ShaderCodeModule& miss,
+                     const EmbeddedShader::ShaderCodeModule& closestHit);
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+extern template struct RayTracePipeline<>;

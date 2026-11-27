@@ -140,10 +140,14 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit(bool submitPendingWaits)
     // queue rather than making each render and blit hand off to another queue.
     using Type = CommandRecordVulkan::ExecutorType;
     Type type = Type::Transfer;
+    bool needsCompute = false;
     for (const auto& command : commandList)
     {
-        if (command.type == Type::Graphics) { type = Type::Graphics; break; }
-        if (command.type == Type::Compute) type = Type::Compute;
+        if (command.type == Type::Graphics) type = Type::Graphics;
+        if (command.type == Type::Compute) {
+            needsCompute = true;
+            if (type != Type::Graphics) type = Type::Compute;
+        }
     }
     auto* queues = &device.graphicsQueues;
     size_t index = 0;
@@ -156,6 +160,13 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit(bool submitPendingWaits)
     {
         queues = &device.transferQueues;
         index = device.currentTransferQueueIndex.fetch_add(1) % queues->size();
+    }
+    if (needsCompute && queues == &device.graphicsQueues) {
+        const auto capable = std::ranges::find_if(*queues, [&](const auto& queue) {
+            return (device.queueFamilies[queue.queueFamilyIndex].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+        });
+        if (capable == queues->end()) throw std::runtime_error("Submission requires a compute-capable graphics queue");
+        index = static_cast<size_t>(capable - queues->begin());
     }
     auto& queue = queues->at(index);
     if (lastSubmission && lastSubmission.queue != &queue)

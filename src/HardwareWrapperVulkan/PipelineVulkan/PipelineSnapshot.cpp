@@ -345,16 +345,15 @@ std::vector<uint8_t> copyParameterBytes(const uint8_t* data, size_t size)
     return data && size ? std::vector<uint8_t>(data, data + size) : std::vector<uint8_t>{};
 }
 
-VkDescriptorSetLayout createUniformSnapshotLayout(VkDevice device)
+VkDescriptorSetLayout createUniformSnapshotLayout(VkDevice device, bool uniform, bool scene)
 {
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    binding.descriptorCount = 1;
-    binding.stageFlags = VK_SHADER_STAGE_ALL;
+    const VkDescriptorSetLayoutBinding bindings[]{
+        {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+        {1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr},
+    };
     VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    info.bindingCount = 1;
-    info.pBindings = &binding;
+    info.bindingCount = uint32_t(uniform) + uint32_t(scene);
+    info.pBindings = bindings + !uniform;
     VkDescriptorSetLayout layout{};
     coronaHardwareCheck(vkCreateDescriptorSetLayout(device, &info, nullptr, &layout));
     return layout;
@@ -365,10 +364,10 @@ UniformSnapshot::~UniformSnapshot()
     if (pool) vkDestroyDescriptorPool(device, pool, nullptr);
 }
 
-void UniformSnapshot::prepare(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout)
+void UniformSnapshot::prepare(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout, VkAccelerationStructureKHR scene)
 {
-    if (bytes.empty()) return;
-    if (!buffer) buffer = HardwareBuffer(static_cast<uint32_t>(bytes.size()), HardwareBuffer::Usage::UniformBuffer);
+    if (bytes.empty() && !scene) return;
+    if (!bytes.empty() && !buffer) buffer = HardwareBuffer(static_cast<uint32_t>(bytes.size()), HardwareBuffer::Usage::UniformBuffer);
     if (uploadedBytes.size() != bytes.size() || !std::equal(bytes.begin(), bytes.end(), uploadedBytes.begin()))
     {
         if (!buffer.copyFromData(bytes.data(), bytes.size()))
@@ -377,29 +376,47 @@ void UniformSnapshot::prepare(std::span<const uint8_t> bytes, VkDescriptorSetLay
     }
     if (set) return;
     device = getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice();
-    VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1};
+    VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}, {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1}};
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets = 1;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &size;
+    poolInfo.poolSizeCount = uint32_t(!bytes.empty()) + uint32_t(scene != VK_NULL_HANDLE);
+    poolInfo.pPoolSizes = sizes + bytes.empty();
     coronaHardwareCheck(vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool));
     VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     allocation.descriptorPool = pool;
     allocation.descriptorSetCount = 1;
     allocation.pSetLayouts = &layout;
     coronaHardwareCheck(vkAllocateDescriptorSets(device, &allocation, &set));
-    VkDescriptorBufferInfo info{ResourceManager::get(buffer)->bufferHandle, 0, bytes.size()};
-    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write.dstSet = set;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.pBufferInfo = &info;
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    VkDescriptorBufferInfo info{};
+    VkWriteDescriptorSetAccelerationStructureKHR as{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    as.accelerationStructureCount = 1;
+    as.pAccelerationStructures = &scene;
+    VkWriteDescriptorSet writes[2]{};
+    uint32_t count = 0;
+    if (!bytes.empty()) {
+        info = {ResourceManager::get(buffer)->bufferHandle, 0, bytes.size()};
+        auto& write = writes[count++];
+        write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = set;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &info;
+    }
+    if (scene) {
+        auto& write = writes[count++];
+        write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, &as};
+        write.dstSet = set;
+        write.dstBinding = 1;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    }
+    vkUpdateDescriptorSets(device, count, writes, 0, nullptr);
 }
 
-std::shared_ptr<UniformSnapshot> UniformSnapshotPool::acquire(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout)
+std::shared_ptr<UniformSnapshot> UniformSnapshotPool::acquire(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout,
+                                                              VkAccelerationStructureKHR scene)
 {
-    if (bytes.empty()) return {};
+    if (bytes.empty() && !scene) return {};
     if (!slots.empty()) {
         // Immutable bytes and descriptor sets can serve multiple in-flight invocations.
         const auto& latest = slots[next ? next - 1 : slots.size() - 1];
@@ -410,13 +427,13 @@ std::shared_ptr<UniformSnapshot> UniformSnapshotPool::acquire(std::span<const ui
         const size_t index = (next + visited) % slots.size();
         if (slots[index].use_count() == 1)
         {
-            slots[index]->prepare(bytes, layout);
+            slots[index]->prepare(bytes, layout, scene);
             next = (index + 1) % slots.size();
             return slots[index];
         }
     }
     auto slot = std::make_shared<UniformSnapshot>();
-    slot->prepare(bytes, layout);
+    slot->prepare(bytes, layout, scene);
     slots.push_back(slot);
     next = 0;
     return slot;
