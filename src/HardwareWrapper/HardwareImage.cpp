@@ -212,11 +212,6 @@ HardwareImage::operator bool() const
     return impl_ && impl_->imageHandle != VK_NULL_HANDLE;
 }
 
-HardwareDescriptor HardwareImage::storeReadDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadOnly}; }
-HardwareDescriptor HardwareImage::storeWriteDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::WriteOnly}; }
-HardwareDescriptor HardwareImage::storeReadWriteDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadAndWrite}; }
-HardwareDescriptor HardwareImage::storeSampledDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadOnly, true}; }
-
 void HardwareImage::setClearColor(float r, float g, float b, float a)
 {
     if (impl_) impl_->clearValue.color = {{r, g, b, a}};

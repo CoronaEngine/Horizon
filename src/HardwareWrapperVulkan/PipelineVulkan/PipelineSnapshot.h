@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <array>
+#include <variant>
 
 using PipelineResource = std::variant<HardwareBuffer, HardwareImage>;
 bool sameResource(const PipelineResource& a, const PipelineResource& b);
@@ -17,6 +18,10 @@ inline constexpr uint32_t pendingDescriptorIndex = UINT32_MAX;
 // A captured binding owns the resource and its reflected access in this shader variant.
 struct PipelineBinding
 {
+    explicit PipelineBinding(const HardwareExecutor::Descriptor& descriptor);
+    PipelineBinding(PipelineResource resource, EmbeddedShader::Ast::AccessPermissions access, bool sampled = false);
+    void applyFieldAccess(uint32_t set, uint32_t binding, EmbeddedShader::Ast::AccessPermissions declared, bool aliased);
+
     uint64_t offset{};
     uint32_t size{};
     bool uniform{};
@@ -26,6 +31,9 @@ struct PipelineBinding
     uint32_t privateSlot{UINT32_MAX};
     VkPipelineStageFlags2 stages{};
     VkAccessFlags2 access{};
+
+private:
+    explicit PipelineBinding(HardwareExecutor::Descriptor::Impl descriptor);
 };
 
 struct BindingSnapshot
@@ -55,7 +63,7 @@ struct PipelineBindings
     void writeValue(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, int32_t bindType,
                     uint64_t offset, const void* data, size_t size);
     void writeResource(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, int32_t bindType,
-                       uint64_t offset, uint32_t typeSize, const HardwareDescriptor& descriptor, VkPipelineStageFlags2 stages,
+                       uint64_t offset, uint32_t typeSize, PipelineBinding value, VkPipelineStageFlags2 stages,
                        std::optional<uint32_t> fixedSlot = std::nullopt);
     void erase(uint64_t offset, size_t size, bool uniform);
     void set(PipelineBinding binding);
@@ -89,7 +97,7 @@ void BoundField<PipelineType>::writeResource(const ::HardwareBuffer& buffer)
         throw std::invalid_argument("Assign a buffer descriptor to a shader index field");
     const auto access = access_ != Ast::AccessPermissions::None ? access_
         : bindType == Bind::rawBuffer ? Ast::AccessPermissions::ReadOnly : Ast::AccessPermissions::ReadAndWrite;
-    writeResource(HardwareDescriptor(buffer, access));
+    writeBinding(PipelineBinding(buffer, access));
 }
 
 template<class PipelineType>
@@ -102,32 +110,26 @@ void BoundField<PipelineType>::writeResource(const ::HardwareImage& image)
             return;
         }
     }
-    if (bindType == Bind::storageTexture)
-        writeResource(HardwareDescriptor(image, access_ == Ast::AccessPermissions::None ? Ast::AccessPermissions::ReadAndWrite : access_));
-    else if (bindType == Bind::texture || bindType == Bind::sampledImages || bindType == Bind::sampler)
-        writeResource(image.storeSampledDescriptor());
+    if (bindType == Bind::storageTexture) {
+        const auto access = access_ == Ast::AccessPermissions::None ? Ast::AccessPermissions::ReadAndWrite : access_;
+        writeBinding(PipelineBinding(image, access));
+    } else if (bindType == Bind::texture || bindType == Bind::sampledImages || bindType == Bind::sampler)
+        writeBinding(PipelineBinding(image, Ast::AccessPermissions::ReadOnly, true));
     else throw std::invalid_argument("Assign an image descriptor to a shader index field");
 }
 
 template<class PipelineType>
-void BoundField<PipelineType>::writeResource(const ::HardwareDescriptor& descriptor)
+void BoundField<PipelineType>::writeResource(const Descriptor& descriptor)
 {
-    if (descriptorCount_ != UINT64_MAX) {
-        const uint32_t table = std::holds_alternative<HardwareBuffer>(descriptor.resource_) ? 1u : descriptor.sampled_ ? 0u : 2u;
-        if (binding != 0 || set != table)
-            throw std::invalid_argument("Descriptor does not match the shader field's table");
-        if (access_ != Ast::AccessPermissions::None && (access_ & descriptor.access_) != descriptor.access_)
-            throw std::invalid_argument("Descriptor access is incompatible with the shader field");
-    }
+    writeBinding(PipelineBinding(descriptor));
+}
+
+template<class PipelineType>
+void BoundField<PipelineType>::writeBinding(auto value)
+{
+    if (descriptorCount_ != UINT64_MAX) value.applyFieldAccess(set, binding, access_, aliased_);
     auto& state = PipelineType::Impl::checked(pipeline_->impl_);
-    // Several Slang names can refer to this single physical slot across shader stages.
-    if (aliased_ && descriptor.access_ != access_) {
-        auto shared = descriptor;
-        shared.access_ = access_;
-        state.backend->setResourceDirect(byteOffset, typeSize, shared, bindType, element_);
-    } else {
-        state.backend->setResourceDirect(byteOffset, typeSize, descriptor, bindType, element_);
-    }
+    state.backend->setResourceDirect(byteOffset, typeSize, std::move(value), bindType, element_);
 }
 
 // Only the pipeline implementation files have the complete Impl needed for these writes.

@@ -131,11 +131,11 @@ void ComputePipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const voi
                         bindType, byteOffset, data, size);
 }
 
-void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, PipelineBinding value,
                                               int32_t bindType, uint32_t slot)
 {
     bindings.writeResource({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize},
-                           bindType, byteOffset, typeSize, descriptor, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, slot);
+                           bindType, byteOffset, typeSize, std::move(value), VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, slot);
 }
 
 void ComputePipelineVulkan::bindAuto(const EmbeddedShader::AutoBindEntry& entry)

@@ -22,6 +22,21 @@ void PipelineBindings::erase(uint64_t offset, size_t size, bool uniform)
 
 namespace {
 using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
+using Descriptor = HardwareExecutor::Descriptor;
+
+Descriptor::Use reflectedUse(EmbeddedShader::Ast::AccessPermissions access, bool sampled)
+{
+    using Access = EmbeddedShader::Ast::AccessPermissions;
+    using Use = Descriptor::Use;
+    if (sampled && access != Access::ReadOnly)
+        throw std::invalid_argument("Sampling requires a read-only image binding");
+    switch (access) {
+    case Access::ReadOnly: return sampled ? Use::Sampled : Use::Read;
+    case Access::WriteOnly: return Use::Write;
+    case Access::ReadAndWrite: return Use::ReadWrite;
+    default: throw std::invalid_argument("Shader descriptor has no access");
+    }
+}
 
 inline bool writeBytes(std::span<uint8_t> target, uint64_t offset, const void* data, size_t size)
 {
@@ -44,6 +59,72 @@ int32_t descriptorIndex(const PipelineBinding& binding)
         }
     }, binding.resource);
 }
+}
+
+struct HardwareExecutor::Descriptor::Impl
+{
+    PipelineResource resource;
+    Use use;
+
+    Impl(PipelineResource value, Use role) : resource(std::move(value)), use(role)
+    {
+        if (const auto* buffer = std::get_if<HardwareBuffer>(&resource)) {
+            if (use == Use::Sampled || !*buffer || !(ResourceManager::get(*buffer)->bufferUsage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
+                throw std::invalid_argument("Shader descriptors require a storage buffer and a storage access mode");
+        } else {
+            const auto& image = std::get<HardwareImage>(resource);
+            const auto usage = use == Use::Sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : VK_IMAGE_USAGE_STORAGE_BIT;
+            if (!image || !(ResourceManager::get(image)->imageUsage & usage))
+                throw std::invalid_argument("Image usage does not support this shader descriptor");
+        }
+    }
+
+    static Descriptor create(PipelineResource resource, Use use)
+    {
+        return Descriptor(std::make_shared<const Impl>(std::move(resource), use));
+    }
+};
+
+Descriptor HardwareBuffer::storeReadDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::Read); }
+Descriptor HardwareBuffer::storeWriteDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::Write); }
+Descriptor HardwareBuffer::storeReadWriteDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::ReadWrite); }
+
+Descriptor HardwareImage::storeReadDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::Read); }
+Descriptor HardwareImage::storeWriteDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::Write); }
+Descriptor HardwareImage::storeReadWriteDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::ReadWrite); }
+Descriptor HardwareImage::storeSampledDescriptor() const { return Descriptor::Impl::create(*this, Descriptor::Use::Sampled); }
+
+PipelineBinding::PipelineBinding(const Descriptor& descriptor)
+    : PipelineBinding(descriptor.impl_ ? *descriptor.impl_ : throw std::invalid_argument("Cannot bind an empty descriptor")) {}
+
+PipelineBinding::PipelineBinding(PipelineResource resource, EmbeddedShader::Ast::AccessPermissions access, bool sampled)
+    : PipelineBinding(Descriptor::Impl(std::move(resource), reflectedUse(access, sampled))) {}
+
+PipelineBinding::PipelineBinding(Descriptor::Impl descriptor)
+    : resource(std::move(descriptor.resource))
+{
+    using Use = Descriptor::Use;
+    table = std::holds_alternative<HardwareBuffer>(resource) ? 1u : descriptor.use == Use::Sampled ? 0u : 2u;
+    switch (descriptor.use) {
+    case Use::Read: case Use::Sampled: access = VK_ACCESS_2_SHADER_READ_BIT; break;
+    case Use::Write: access = VK_ACCESS_2_SHADER_WRITE_BIT; break;
+    case Use::ReadWrite: access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT; break;
+    }
+}
+
+void PipelineBinding::applyFieldAccess(uint32_t set, uint32_t binding, EmbeddedShader::Ast::AccessPermissions declared, bool aliased)
+{
+    using Access = EmbeddedShader::Ast::AccessPermissions;
+    if (binding != 0 || set != table)
+        throw std::invalid_argument("Descriptor does not match the shader field's table");
+    if (declared == Access::None && !aliased) return;
+    VkAccessFlags2 allowed{};
+    if ((declared & Access::ReadOnly) != Access::None) allowed |= VK_ACCESS_2_SHADER_READ_BIT;
+    if ((declared & Access::WriteOnly) != Access::None) allowed |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    if ((allowed & access) != access)
+        throw std::invalid_argument("Descriptor access is incompatible with the shader field");
+    // All shader names for the same physical slot share this captured binding.
+    if (aliased) access = allowed;
 }
 
 void PipelineBindings::set(PipelineBinding next)
@@ -75,18 +156,10 @@ void PipelineBindings::writeValue(std::span<uint8_t> pushConstants, std::span<ui
 }
 
 void PipelineBindings::writeResource(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, int32_t bindType,
-                                     uint64_t offset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+                                     uint64_t offset, uint32_t typeSize, PipelineBinding value,
                                      VkPipelineStageFlags2 stages, std::optional<uint32_t> fixedSlot)
 {
-    using Access = EmbeddedShader::Ast::AccessPermissions;
-    if (!std::visit([](const auto& handle) { return bool(handle); }, descriptor.resource_))
-        throw std::invalid_argument("Cannot bind a descriptor without a resource");
-    PipelineBinding value;
-    value.resource = descriptor.resource_;
-    value.table = std::holds_alternative<HardwareBuffer>(value.resource) ? 1u : descriptor.sampled_ ? 0u : 2u;
     value.stages = stages;
-    if ((descriptor.access_ & Access::ReadOnly) != Access::None) value.access |= VK_ACCESS_2_SHADER_READ_BIT;
-    if ((descriptor.access_ & Access::WriteOnly) != Access::None) value.access |= VK_ACCESS_2_SHADER_WRITE_BIT;
     if (!value.access || !stages) throw std::invalid_argument("Shader descriptor has no access or stage");
 
     if (bindType == BindType::uniformBufferMembers || bindType == BindType::pushConstantMembers) {
@@ -129,8 +202,8 @@ void PipelineBindings::bindAuto(std::span<uint8_t> pushConstants, std::span<uint
     if (entry.stages & 1) stages |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
     if (entry.stages & 2) stages |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     if (entry.stages & 4) stages |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    writeResource(pushConstants, uniformBytes, entry.bindType, entry.byteOffset, entry.typeSize,
-                  HardwareDescriptor(std::move(handle), entry.access, entry.sampled), stages);
+    PipelineBinding value(std::move(handle), entry.access, entry.sampled);
+    writeResource(pushConstants, uniformBytes, entry.bindType, entry.byteOffset, entry.typeSize, std::move(value), stages);
 }
 
 void PipelineBindings::addLayout(const EmbeddedShader::ShaderCodeModule::ShaderResources& resources)

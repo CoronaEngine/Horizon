@@ -324,7 +324,7 @@ executor.commit();
 
 首次绘制默认清除已绑定的附件。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 `scissor` 之后显式传入 `RasterPipeline<>::Pass{}`。两遍绘制可以传入同一张深度图，第二遍用 `RasterPipeline<>::Pass{.loadColor = true, .loadDepth = true}` 保留上一遍的颜色和深度。只清除颜色时写 `executor << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPipeline<>::Pass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
 
-手写 Slang 通过参数索引描述符表时，给字段赋一个 `HardwareDescriptor`。例如 Baseline 使用 `pipeline.vp.texIndex = texture_image.storeSampledDescriptor()`。缓冲和存储图像分别用 `storeReadDescriptor()`、`storeWriteDescriptor()` 或 `storeReadWriteDescriptor()` 表达本次访问。图像的过滤采样用 `storeSampledDescriptor()`，按坐标读取存储图像用 `storeReadDescriptor()`。这些值可以保存和复制，持有对应的资源或图像视图。Slang 反射出的直接资源字段和固定槽位仍可写成 `pipeline.outputs[3] = buffer`，读写范围由 shader 声明决定。EDSL 从代理的赋值、读取和采样处记录用途。
+手写 Slang 通过参数索引描述符表时，给字段赋一个 `HardwareExecutor::Descriptor`。例如 Baseline 使用 `pipeline.vp.texIndex = texture_image.storeSampledDescriptor()`。公开枚举 `HardwareExecutor::Descriptor::Use` 包含 `Read`、`Write`、`ReadWrite` 和 `Sampled`。缓冲和存储图像分别用 `storeReadDescriptor()`、`storeWriteDescriptor()` 或 `storeReadWriteDescriptor()` 表达本次访问。图像的过滤采样用 `storeSampledDescriptor()`，按坐标读取存储图像用 `storeReadDescriptor()`。这些值可以保存和复制，持有对应的资源或图像视图。Slang 反射出的直接资源字段和固定槽位仍可写成 `pipeline.outputs[3] = buffer`，读写范围由 shader 声明决定。EDSL 从代理的赋值、读取和采样处记录用途。
 
 命令创建时保存绑定及其访问方式。EDSL 会按当前主机条件选择变体，GPU 条件会合并各条可能执行的路径。希望某个采样或导入函数的资源只在特定变体中登记时，把调用也写在对应的 `$IF` 分支里。同一张图在一条管线里同时用于采样和存储时，给两个 EDSL 代理绑定同一张图，分别用于 `sample()` 和下标访问。
 

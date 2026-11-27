@@ -686,19 +686,26 @@ void test_mixed_descriptor_slots()
                source.copyToData(result) && result[0] == value,
                "fixed reads and managed writes retain distinct resources through a private descriptor collision");
     }
-    const auto owned = HardwareBuffer(std::array{50u}, HardwareBuffer::Usage::StorageBuffer).storeReadDescriptor();
-    fixed[slot] = owned;
-    const auto detached = pipeline(1);
+    const auto detached = [&] {
+        auto original = HardwareBuffer(std::array{50u}, HardwareBuffer::Usage::StorageBuffer).storeReadDescriptor();
+        auto copy = original;
+        original = source.storeReadDescriptor();
+        const auto moved = std::move(copy);
+        expect(throws<std::invalid_argument>([&] { fixed[slot] = copy; }), "a moved-from descriptor rejects binding");
+        fixed[slot] = moved;
+        return pipeline(1);
+    }();
     fixed[slot] = source.storeReadDescriptor();
     executor << detached;
     executor.commit().wait();
     std::array<uint32_t, 1> result{};
-    expect(destination.copyToData(result) && result[0] == 51, "a descriptor owns the temporary buffer used on replay");
+    expect(destination.copyToData(result) && result[0] == 51, "a saved command retains its buffer after all descriptor copies expire");
 
     BoundField<ComputePipeline<>> readAlias(&pipeline, 0, 0, Bind::storageBuffer, 0, 1, 0, 0,
                                             Ast::AccessPermissions::ReadAndWrite, true);
     auto writeAlias = readAlias;
-    readAlias[slot] = source.storeReadDescriptor();
+    const auto read = source.storeReadDescriptor();
+    readAlias[slot] = read;
     writeAlias[slot] = source.storeWriteDescriptor();
     executor << pipeline(1);
     const auto aliases = commandAccesses(std::get<RecordedCommand>(HardwareBackendAccess::state(executor).pending.back()));
@@ -706,6 +713,12 @@ void test_mixed_descriptor_slots()
         return use.buffer == ResourceManager::get(source)->bufferHandle &&
                use.access == (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
     }), "assigning either name of a shared fixed slot preserves access through all aliases");
+    fixed[slot] = read;
+    executor << pipeline(1);
+    const auto reused = commandAccesses(std::get<RecordedCommand>(HardwareBackendAccess::state(executor).pending.back()));
+    expect(std::ranges::any_of(reused, [&](const auto& use) {
+        return use.buffer == ResourceManager::get(source)->bufferHandle && use.access == VK_ACCESS_2_SHADER_READ_BIT;
+    }), "reusing a descriptor after an alias binding preserves its original read access");
     executor.commit().wait();
 }
 
@@ -1219,6 +1232,14 @@ void test_gpu()
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) &&
            pixels[0] == texel && pixels[1] == std::array{0.75f, 0.f, 0.f, 1.f},
            "moved raster fields bind each attachment and snapshot its uniform value");
+
+    raster.vp.view = ktm::fmat4x4::from_eye();
+    raster.vp.texIndex = 3u;
+    raster.combinedTextureSamplerHandles[3] = texture;
+    executor << raster(vertices, indices, packets, 1, drawParameters) << second.copyTo(readback);
+    executor.commit().wait();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels[0])) && pixels[0] == texel,
+           "a reflected sampler field binds a sampled/storage image to the fixed sampling slot");
 }
 }
 

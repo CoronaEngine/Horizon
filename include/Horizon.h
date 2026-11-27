@@ -10,7 +10,6 @@
 #include <memory>
 #include <optional>
 #include <type_traits>
-#include <variant>
 #include <vector>
 
 #include "Codegen/ComputePipelineObject.h"
@@ -36,6 +35,23 @@ public:
         struct Impl;
         explicit Command(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
         std::shared_ptr<Impl> impl_;
+    };
+
+    // Assign to a shader field to retain the resource and its intended use.
+    class Descriptor
+    {
+    public:
+        // Read, Write and ReadWrite use storage descriptors. Sampled reads an image through a sampler.
+        enum class Use : uint8_t { Read, Write, ReadWrite, Sampled };
+
+    private:
+        friend struct HardwareBuffer;
+        friend struct HardwareImage;
+        friend struct PipelineBinding;
+
+        struct Impl;
+        explicit Descriptor(std::shared_ptr<const Impl> impl) : impl_(std::move(impl)) {}
+        std::shared_ptr<const Impl> impl_;
     };
 
     HardwareExecutor();
@@ -101,9 +117,9 @@ public:
 
     ExternalHandle exportBufferMemory();
 
-    [[nodiscard]] HardwareDescriptor storeReadDescriptor() const;
-    [[nodiscard]] HardwareDescriptor storeWriteDescriptor() const;
-    [[nodiscard]] HardwareDescriptor storeReadWriteDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeReadDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeWriteDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeReadWriteDescriptor() const;
 
     // 流式拷贝命令（用于 HardwareExecutor << ）
     [[nodiscard]] HardwareExecutor::Command copyTo(const HardwareBuffer& dst, uint64_t srcOffset = 0,
@@ -178,10 +194,10 @@ public:
     HardwareImage operator[](const uint32_t index);
     explicit operator bool() const;
 
-    [[nodiscard]] HardwareDescriptor storeReadDescriptor() const;
-    [[nodiscard]] HardwareDescriptor storeWriteDescriptor() const;
-    [[nodiscard]] HardwareDescriptor storeReadWriteDescriptor() const;
-    [[nodiscard]] HardwareDescriptor storeSampledDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeReadDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeWriteDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeReadWriteDescriptor() const;
+    [[nodiscard]] HardwareExecutor::Descriptor storeSampledDescriptor() const;
 
     /// Set the clear color used by the RasterPipeline render pass (LOAD_OP_CLEAR).
     /// Default is (0, 0, 0, 1).  For transparent render targets, use (0, 0, 0, 0).
@@ -199,21 +215,6 @@ private:
     friend struct ResourceManager;
     struct Impl;
     std::shared_ptr<Impl> impl_;
-};
-
-// Assign to a shader index field to capture both its resource and how the shader uses it.
-class HardwareDescriptor
-{
-    friend struct HardwareBuffer;
-    friend struct HardwareImage;
-    friend struct PipelineBindings;
-    template<class> friend struct EmbeddedShader::BoundField;
-
-    HardwareDescriptor(std::variant<HardwareBuffer, HardwareImage> resource,
-                       EmbeddedShader::Ast::AccessPermissions access, bool sampled = false);
-    std::variant<HardwareBuffer, HardwareImage> resource_;
-    EmbeddedShader::Ast::AccessPermissions access_;
-    bool sampled_;
 };
 
 struct HardwareDisplayer
@@ -240,6 +241,7 @@ struct ComputePipeline
 
 private:
     friend struct EmbeddedShader::BoundField<ComputePipeline>;
+    using Descriptor = HardwareExecutor::Descriptor;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -269,6 +271,7 @@ struct RasterPipeline
 
 private:
     friend struct EmbeddedShader::BoundField<RasterPipeline>;
+    using Descriptor = HardwareExecutor::Descriptor;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

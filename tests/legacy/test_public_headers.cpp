@@ -24,15 +24,22 @@ static_assert(!ExposesResourceID<HardwareBuffer> && !ExposesResourceID<HardwareI
               !ExposesResourceID<HardwareExecutor> && !ExposesResourceID<HardwareDisplayer>);
 static_assert(std::copyable<HardwareBuffer> && std::is_nothrow_move_constructible_v<HardwareBuffer> &&
               std::is_nothrow_move_assignable_v<HardwareBuffer>);
-static_assert(std::copyable<HardwareDescriptor> && !std::convertible_to<HardwareDescriptor, uint32_t>);
+using Descriptor = HardwareExecutor::Descriptor;
+static_assert(std::copyable<Descriptor> && !std::default_initializable<Descriptor> &&
+              std::is_nothrow_move_constructible_v<Descriptor> && !std::convertible_to<Descriptor, uint32_t>);
+using DescriptorUse = Descriptor::Use;
+static_assert(std::same_as<std::underlying_type_t<DescriptorUse>, uint8_t>);
+static_assert(DescriptorUse::Read != DescriptorUse::Write && DescriptorUse::Read != DescriptorUse::ReadWrite &&
+              DescriptorUse::Read != DescriptorUse::Sampled && DescriptorUse::Write != DescriptorUse::ReadWrite &&
+              DescriptorUse::Write != DescriptorUse::Sampled && DescriptorUse::ReadWrite != DescriptorUse::Sampled);
 static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image) {
-    { buffer.storeReadDescriptor() } -> std::same_as<HardwareDescriptor>;
-    { buffer.storeWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
-    { buffer.storeReadWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
-    { image.storeSampledDescriptor() } -> std::same_as<HardwareDescriptor>;
-    { image.storeReadDescriptor() } -> std::same_as<HardwareDescriptor>;
-    { image.storeWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
-    { image.storeReadWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { buffer.storeReadDescriptor() } -> std::same_as<Descriptor>;
+    { buffer.storeWriteDescriptor() } -> std::same_as<Descriptor>;
+    { buffer.storeReadWriteDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeSampledDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeReadDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeWriteDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeReadWriteDescriptor() } -> std::same_as<Descriptor>;
 });
 static_assert(requires(HardwareBuffer& buffer) {
     { buffer.exportBufferMemory() } -> std::same_as<HardwareBuffer::ExternalHandle>;
@@ -148,6 +155,7 @@ static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
 
 template<class T>
 concept CanEnqueue = requires(HardwareExecutor& executor, T&& value) { executor << std::forward<T>(value); };
+static_assert(!CanEnqueue<Descriptor>);
 static_assert(!CanEnqueue<HardwareExecutor&> && !CanEnqueue<ComputePipeline<>&> &&
               !CanEnqueue<RasterPipeline<>&> && !CanEnqueue<HardwareDisplayer&>);
 static_assert(std::same_as<decltype(&HardwareExecutor::operator<<), HardwareExecutor& (HardwareExecutor::*)(HardwareExecutor::Command)>);

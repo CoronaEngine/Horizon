@@ -526,10 +526,10 @@ void RasterPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void
                         bindType, byteOffset, data, size);
 }
 
-void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, PipelineBinding value,
                                             int32_t bindType, uint32_t slot)
 {
-    bindings.writeResource({}, {tempUBO.get(), uboSize}, bindType, byteOffset, typeSize, descriptor,
+    bindings.writeResource({}, {tempUBO.get(), uboSize}, bindType, byteOffset, typeSize, std::move(value),
                            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, slot);
 }
 

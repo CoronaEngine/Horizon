@@ -2,6 +2,7 @@
 
 #include "Compiler/ShaderLanguageConverter.h"
 #include "boost/pfr.hpp"
+#include <cstdint>
 #include <sstream>
 #include <regex>
 #include <type_traits>
@@ -19,7 +20,6 @@
 // Forward declarations for Level 2 resource binding (defined in Horizon.h)
 struct HardwareImage;
 struct HardwareBuffer;
-class HardwareDescriptor;
 
 namespace EmbeddedShader
 {
@@ -1207,22 +1207,21 @@ namespace EmbeddedShader
 	    SlangModule* sourceModule = nullptr;
 	};
 
-	// Pipeline-bound field proxy for direct member access syntax:
-	//   raster.GlobalUniformParam.globalTime = currentTime;
+	// Field proxy used by generated Slang pipeline specializations.
 	template<typename PipelineType>
 	struct BoundField
 	{
 		PipelineType* pipeline_;
 		uint64_t byteOffset;
 		uint32_t typeSize;
-		int32_t  bindType;
+		int32_t bindType;
 		uint32_t location;
 		uint32_t set;
 		uint32_t binding;
 
 		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc,
-		           uint32_t set_ = 0, uint32_t binding_ = 0, uint64_t descriptorCount = UINT64_MAX,
-		           Ast::AccessPermissions access = Ast::AccessPermissions::None, bool aliased = false)
+				   uint32_t set_ = 0, uint32_t binding_ = 0, uint64_t descriptorCount = UINT64_MAX,
+				   Ast::AccessPermissions access = Ast::AccessPermissions::None, bool aliased = false)
 			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc),
 			  set(set_), binding(binding_), descriptorCount_(descriptorCount), access_(access), aliased_(aliased) {}
 
@@ -1233,22 +1232,26 @@ namespace EmbeddedShader
 		{
 			if (!pipeline_) return *this;
 			if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareImage> ||
-			              std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer> ||
-			              std::is_same_v<std::remove_cvref_t<T>, ::HardwareDescriptor>)
+						  std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer> ||
+						  std::is_same_v<std::remove_cvref_t<T>, Descriptor>)
 				writeResource(value);
 			else
 				writeValue(&value, sizeof(T));
 			return *this;
 		}
+
 	private:
+		using Descriptor = typename PipelineType::Descriptor;
+
 		uint64_t descriptorCount_; // 0 for unbounded arrays, UINT64_MAX for ordinary value/output fields.
 		Ast::AccessPermissions access_;
 		bool aliased_;
 		uint32_t element_{};
+		void writeBinding(auto value);
 		void writeValue(const void* data, size_t size);
 		void writeResource(const ::HardwareBuffer& buffer);
 		void writeResource(const ::HardwareImage& image);
-		void writeResource(const ::HardwareDescriptor& descriptor);
+		void writeResource(const Descriptor& descriptor);
 	};
 
 	template<typename ElementType>

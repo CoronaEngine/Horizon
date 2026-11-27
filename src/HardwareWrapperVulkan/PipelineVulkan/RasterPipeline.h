@@ -29,7 +29,7 @@ struct RasterPipelineVulkan
 
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, PipelineBinding value,
                            int32_t bindType, uint32_t slot);
     void setRenderTarget(uint32_t location, const HardwareImage& image);
 
