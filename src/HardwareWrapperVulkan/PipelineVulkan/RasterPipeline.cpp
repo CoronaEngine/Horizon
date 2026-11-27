@@ -744,7 +744,6 @@ struct RasterPipeline<VS, FS>::Impl
     std::unique_ptr<EmbeddedShader::RasterPipelineObject> variants;
     EmbeddedShader::ShaderCodeCompiler::ConditionInfo vertexConditions, fragmentConditions;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
-    size_t explicitTargetCount{}; // The last entries override reflected outputs.
     std::vector<ResourceUse> resourceUses;
 
     static Impl& checked(const std::unique_ptr<Impl>& impl)
@@ -800,16 +799,6 @@ RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::uses(std::initializer_list<Resou
 }
 
 template<class VS, class FS>
-RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::bindRenderTarget(uint32_t location, void** resource)
-{
-    if (!impl_) impl_ = std::make_unique<Impl>();
-    impl_->autoBindEntries.push_back({resource, 0, 0,
-        static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs), location});
-    ++impl_->explicitTargetCount;
-    return *this;
-}
-
-template<class VS, class FS>
 void RasterPipeline<VS, FS>::setDepthImage(HardwareImage& depthImage)
 {
     Impl::checked(impl_).backend->setDepthImage(depthImage);
@@ -861,9 +850,7 @@ void RasterPipeline<VS, FS>::Impl::refreshShaderVariant()
     if (vertex == vertexConditions && fragment == fragmentConditions) return;
     auto next = backend->variant(*variants, vertex, fragment);
     variants->updateAutoBind(vertex, fragment);
-    auto& bindings = variants->autoBindEntries;
-    bindings.insert(bindings.end(), autoBindEntries.end() - explicitTargetCount, autoBindEntries.end());
-    autoBindEntries = std::move(bindings);
+    autoBindEntries = std::move(variants->autoBindEntries);
     backend = std::move(next);
     vertexConditions = std::move(vertex);
     fragmentConditions = std::move(fragment);

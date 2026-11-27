@@ -299,7 +299,6 @@ struct RasterPipeline
 private:
     friend struct EmbeddedShader::BoundField<RasterPipeline>;
 
-    RasterPipeline& bindRenderTarget(uint32_t location, void** resource);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
@@ -331,12 +330,6 @@ public:
         std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});
 
     RasterPipeline& uses(std::initializer_list<ResourceUse> resources);
-
-    template<class T>
-    RasterPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
-    {
-        return bindRenderTarget(location, &proxy.boundResource_);
-    }
 };
 
 extern template struct RasterPipeline<void, void>;

@@ -122,7 +122,7 @@ void test_cpu()
            "a compute placeholder rejects dispatch before a shader is assigned");
 
     RasterPipeline<> pendingRaster;
-    pendingRaster.uses({}).bindRenderTarget(0, target);
+    pendingRaster.uses({});
     (void)pendingRaster({}, {}, {}, 0);
     expect(throws<std::logic_error>([&] { (void)pendingRaster({}, {}, {}, 1); }),
            "a raster placeholder rejects a draw before shaders are assigned");
@@ -176,8 +176,7 @@ void test_indirect_draws(bool forceSingleDraw)
     HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
     HardwareBuffer splitReadback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
     {
-        HardwareImage reflectedTarget(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
-        Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = reflectedTarget;
+        Texture2D<ktm::fvec4> color = target;
         auto useVertexParameter = std::make_shared<bool>(true);
         auto useFragmentParameter = std::make_shared<bool>(true);
         std::weak_ptr<bool> vertexFlag = useVertexParameter, fragmentFlag = useFragmentParameter;
@@ -199,8 +198,6 @@ void test_indirect_draws(bool forceSingleDraw)
         useVertexParameter = vertexFlag.lock();
         useFragmentParameter = fragmentFlag.lock();
         expect(useVertexParameter && useFragmentParameter, "both raster stages retain their condition captures");
-        pipeline.bindRenderTarget(0, overrideColor);
-        overrideColor = target;
         // One triangle covers the screen, the other covers only the second pixel row.
         const std::array<std::array<float, 3>, 6> vertices{{
             {-1,-1,1}, {3,-1,1}, {-1,3,1}, {-1,0,1}, {3,0,1}, {-1,2,1}
@@ -225,9 +222,6 @@ void test_indirect_draws(bool forceSingleDraw)
                  << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2})
                  << pipeline(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
         replay << drawLeft << target.copyTo(readback);
-        acrossDisplay << drawLeft << HardwareDisplayer{}(target)
-                      << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{2,0,2,2})
-                      << target.copyTo(readback);
         *useVertexParameter = false;
         *useFragmentParameter = false;
         // The new shader variant requires a physical split within the same logical pass.
@@ -236,6 +230,16 @@ void test_indirect_draws(bool forceSingleDraw)
                  << pipeline(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2},
                              RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
         replay << drawBlue << target.copyTo(splitReadback);
+
+        HardwareImage displayTarget(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+        displayTarget.setClearColor(0, 0, 0, 0);
+        color = displayTarget;
+        *useVertexParameter = true;
+        *useFragmentParameter = true;
+        acrossDisplay << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2})
+                      << HardwareDisplayer{}(displayTarget)
+                      << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{2,0,2,2})
+                      << displayTarget.copyTo(readback);
     }
     executor << target.copyTo(readback);
     auto& multiDraw = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
@@ -273,7 +277,7 @@ void test_indirect_draws(bool forceSingleDraw)
         {}, {}, {1,0,0,1}, {1,0,0,1}
     }};
     expect(readback.copyToData(pixels) && pixels == expectedAfterDisplay,
-           "a skipped display separates compatible draws: the second clears the first and starts at draw index zero");
+           "draws keep their original attachment after rebinding and the skipped display resets clear and draw index");
 }
 
 void test_raster_sampled_storage_image()

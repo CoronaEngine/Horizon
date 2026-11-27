@@ -512,13 +512,6 @@ public:
         return *this;
     }
 
-    template<class T>
-    RasterPipeline& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
-    {
-        pipeline_.bindRenderTarget(location, proxy);
-        return *this;
-    }
-
 )";
     const auto& resources = !vs.uniformBufferSize && fs.uniformBufferSize ? fs : vs;
     emitResourceFields(code, resources, "::RasterPipeline<>");
