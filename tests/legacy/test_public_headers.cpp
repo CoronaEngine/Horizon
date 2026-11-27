@@ -196,7 +196,7 @@ static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO> && !AcceptsRast
 static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO, Raster::State> &&
               !AcceptsRasterPair<VectorVertex, disney_frag_slang_t, Raster::State>);
 using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
-using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang, Raster::State{}));
+using SharedVertexRaster = RasterPipeline<disney_vert_slang_t, drawstress_frag_slang_t>;
 static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
@@ -210,7 +210,20 @@ static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const
     { executor << pipeline(buffer, buffer, buffer, 1, {}, depth, Raster::ScissorRect{}, Raster::Pass{}) }
         -> std::same_as<HardwareExecutor&>;
 });
-static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
-static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);
+static_assert(requires(SharedVertexRaster& pipeline) {
+    { RasterPipeline(disney_vert_slang, disney_frag_slang) } -> std::same_as<DisneyRaster>;
+    { RasterPipeline(disney_vert_slang, drawstress_frag_slang, Raster::State{}) } -> std::same_as<SharedVertexRaster>;
+    pipeline.vsp.proj_view;
+    pipeline.outColor;
+});
 
 #include "Disney/Slang/disney.pipeline.hpp"
+#include "Baseline/Slang/baseline.pipeline.hpp"
+
+static_assert(AcceptsRasterPair<baseline_vert_slang_t, baseline_frag_slang_t>);
+// The Disney VS and Baseline FS each have a different registered partner.
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, baseline_frag_slang_t>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, baseline_frag_slang_t, Raster::State, uint32_t>);
+
+struct RasterFragmentAdapter { operator disney_frag_slang_t() const; };
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, RasterFragmentAdapter>);

@@ -513,7 +513,8 @@ public:
     const auto& resources = !vs.uniformBufferSize && fs.uniformBufferSize ? fs : vs;
     emitResourceFields(code, resources, "::RasterPipeline<>");
     emitOutputFields(code, fs, "::RasterPipeline<>");
-    code << "};\n";
+    code << "};\n\ntemplate<std::same_as<" << vertexType << "> VS, std::same_as<" << fragmentType << "> FS>\n"
+         << "RasterPipeline(const VS&, const FS&, ::RasterPipeline<>::State = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;\n";
 
     std::ofstream header(output);
     header << code.str();

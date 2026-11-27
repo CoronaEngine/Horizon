@@ -331,6 +331,3 @@ public:
 };
 
 extern template struct RasterPipeline<void, void>;
-
-template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
-RasterPipeline(const VS&, const FS&, RasterPipeline<>::State = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;
