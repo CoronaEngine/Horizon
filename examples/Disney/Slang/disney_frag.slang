@@ -1,4 +1,27 @@
-#include "../disney_scene.slangh"
+struct DisneyVaryings {
+    float4 position : SV_Position;
+    [[vk::location(0)]] float3 view : TEXCOORD0;
+    [[vk::location(1)]] float3 normal : TEXCOORD1;
+    [[vk::location(15)]] nointerpolation uint materialIndex : TEXCOORD15;
+};
+
+struct DisneyPbrShared {
+    column_major float4x4 proj_view;
+    float4 camPos;
+    float4 lightDir;
+    uint texCubeIndex;
+    uint texCubeIrrIndex;
+};
+
+struct DisneyDraw {
+    column_major float4x4 model;
+    float4 mat0; // baseColor.rgb, metallic
+    float4 mat1; // roughness, specular, specularTint, subsurface
+    float4 mat2; // anisotropic, sheen, sheenTint, clearcoat
+    float4 mat3; // clearcoat gloss in x; one draw occupies 128 bytes.
+};
+
+[[vk::binding(0, 3)]] ConstantBuffer<DisneyPbrShared> vsp;
 
 [[vk::binding(0, 1)]] StructuredBuffer<DisneyDraw> draws;
 [[vk::binding(0, 0)]] SamplerCube<float4> combinedCubeSamplerHandles[];

@@ -1,4 +1,27 @@
-#include "../disney_scene.slangh"
+struct DisneyVaryings {
+    float4 position : SV_Position;
+    [[vk::location(0)]] float3 view : TEXCOORD0;
+    [[vk::location(1)]] float3 normal : TEXCOORD1;
+    [[vk::location(15)]] nointerpolation uint materialIndex : TEXCOORD15;
+};
+
+struct DisneyPbrShared {
+    column_major float4x4 proj_view;
+    float4 camPos;
+    float4 lightDir;
+    uint texCubeIndex;
+    uint texCubeIrrIndex;
+};
+
+struct DisneyDraw {
+    column_major float4x4 model;
+    float4 mat0; // baseColor.rgb, metallic
+    float4 mat1; // roughness, specular, specularTint, subsurface
+    float4 mat2; // anisotropic, sheen, sheenTint, clearcoat
+    float4 mat3; // clearcoat gloss in x; one draw occupies 128 bytes.
+};
+
+[[vk::binding(0, 3)]] ConstantBuffer<DisneyPbrShared> vsp;
 
 // These layouts match the raster draw packet, geometry table, and push constants documented in README.md.
 struct HorizonDrawPacket {
@@ -38,5 +61,11 @@ DisneyVaryings main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     uint* vertex = hzPullVertex(packet, vertexID);
     float3 inPosition = *(float3*)vertex;
     DisneyDraw* draw = (DisneyDraw*)(drawRoot.parameters + packet.parameterWord);
-    return sphereVertex(inPosition, draw->model, packet.parameterWord / (sizeof(DisneyDraw) / 4));
+    float4 world = mul(draw->model, float4(inPosition, 1.0));
+    DisneyVaryings output;
+    output.position = mul(vsp.proj_view, world);
+    output.view = vsp.camPos.xyz - world.xyz;
+    output.normal = mul(draw->model, float4(inPosition, 0.0)).xyz;
+    output.materialIndex = packet.parameterWord / (sizeof(DisneyDraw) / 4);
+    return output;
 }

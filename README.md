@@ -114,7 +114,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 #### 第一次阅读渲染示例
 
-运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。从下表第一行的 `BaselineSlang` 构造函数进入 `loadBaselineAssets`，可以看到 Viking Room 的模型和纹理加载。回到构造函数可查看相机和渲染目标设置，`run(seconds)` 中是每帧的矩阵更新、绘制和呈现。各 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
+运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。在下表第一行的 `BaselineSlang` 构造函数中可以看到 Viking Room 的模型、纹理、相机和渲染目标的初始化，`run(seconds)` 中是每帧的矩阵更新、绘制和呈现。各 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
 
 | 场景和阅读重点 | EDSL 实现 | Slang 实现 | Slang Mesh 实现 |
 | --- | --- | --- | --- |

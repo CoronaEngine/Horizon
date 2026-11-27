@@ -4,13 +4,11 @@ add_executable(HorizonExamples
     Baseline/EDSL/example_baseline_edsl.cpp
     Baseline/Slang/BaselineSlang.h
     Baseline/Slang/example_baseline_slang.cpp
-    Baseline/BaselineAssets.cpp
     Baseline/Mesh/example_baseline_mesh.cpp
     Baseline/Ocarina/example_baseline_ocarina.cpp
     Disney/EDSL/example_disney_edsl.cpp
     Disney/Slang/DisneySlang.h
     Disney/Slang/example_disney_slang.cpp
-    Disney/DisneyScene.cpp
     Disney/Mesh/example_disney_mesh.cpp
     Disney/Ocarina/example_disney_ocarina.cpp
     DrawStress/EDSL/example_drawstress_edsl.cpp
@@ -45,7 +43,6 @@ target_link_libraries(HorizonExamples PRIVATE
     Horizon ocarina-native horizon::ktm horizon::glm horizon::glfw horizon::stb horizon::tinyobjloader)
 helicon_install_runtime_deps(HorizonExamples)
 helicon_compile_shaders(HorizonExamples
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Disney/disney_scene.slangh"
     RASTER_PAIRS
     Baseline/Slang/baseline.pipeline.hpp Baseline/Slang/baseline_vert.slang Baseline/Slang/baseline_frag.slang
     Disney/Slang/disney.pipeline.hpp Disney/Slang/disney_vert.slang Disney/Slang/disney_frag.slang

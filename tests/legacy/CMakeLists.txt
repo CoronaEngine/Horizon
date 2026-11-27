@@ -12,7 +12,6 @@ add_test(NAME horizon-test-legacy COMMAND horizon-test-legacy)
 add_dependencies(horizon-tests horizon-test-legacy)
 helicon_install_runtime_deps(horizon-test-legacy)
 helicon_compile_shaders(horizon-test-legacy
-    DEPENDS "${PROJECT_SOURCE_DIR}/examples/Disney/disney_scene.slangh"
     RASTER_PAIRS
     Baseline/Slang/baseline.pipeline.hpp
     "${PROJECT_SOURCE_DIR}/examples/Baseline/Slang/baseline_vert.slang"
