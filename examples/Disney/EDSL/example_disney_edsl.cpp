@@ -282,8 +282,8 @@ DisneyEdsl::DisneyEdsl(void* native_window)
                         (mapped * (Float(6.2) * mapped + Float3(1.7f)) + Float3(0.06f));
         final_output << Float4(filmic, Float(1.0));
     };
-    raster = RasterPipeline(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
-    raster.setRasterState({.topology = RasterTopology::TriangleStrip});
+    raster = RasterPipeline(edsl_vertex, edsl_fragment, {.topology = RasterTopology::TriangleStrip},
+                            {.enableMatrixColumnMajor = true});
 
     constexpr float yaw = ktm::pi<float>, pitch = 0.42f * ktm::pi<float>;
     const auto eye = 13.5f * ktm::fvec3(ktm::sin(pitch) * ktm::sin(yaw), ktm::cos(pitch), ktm::sin(pitch) * ktm::cos(yaw));

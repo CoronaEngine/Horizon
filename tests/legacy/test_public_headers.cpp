@@ -115,14 +115,15 @@ template<class V, class F, class... Args>
 concept AcceptsRasterPair = std::constructible_from<RasterPipeline<>, V, F, Args...> ||
     requires(V vertex, F fragment, Args... args) { RasterPipeline(vertex, fragment, args...); };
 static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment>);
-static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment, EmbeddedShader::CompilerOption, uint32_t, std::source_location>);
+static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment, RasterState, EmbeddedShader::CompilerOption,
+                                uint32_t, std::source_location>);
 static_assert(!AcceptsRasterPair<VectorVertex, NoStageIO> && !AcceptsRasterPair<NoStageIO, OtherVectorFragment>);
 static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
                        decltype([](ShaderVector) {}) fragment, EmbeddedShader::CompilerOption options,
                        const std::source_location& location) {
-    { RasterPipeline(vertex, fragment, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterPipeline<>>;
-    { RasterPipeline(vertex, fragment, options) } -> std::same_as<RasterPipeline<>>;
-    { RasterPipeline(vertex, fragment, {}, 2, location) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {.blend = RasterBlend::Opaque}) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {}, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {}, options, 2, location) } -> std::same_as<RasterPipeline<>>;
 });
 
 template<class T>
@@ -182,16 +183,18 @@ static_assert(!std::constructible_from<EmbeddedShader::VertexEntry, disney_frag_
               !std::constructible_from<EmbeddedShader::FragmentEntry, disney_vert_slang_t> &&
               !std::constructible_from<EmbeddedShader::ComputeEntry, disney_vert_slang_t>);
 static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO> && !AcceptsRasterPair<VectorVertex, disney_frag_slang_t>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO, RasterState> &&
+              !AcceptsRasterPair<VectorVertex, disney_frag_slang_t, RasterState>);
 using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
-using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang));
+using SharedVertexRaster = decltype(RasterPipeline(disney_vert_slang, drawstress_frag_slang, RasterState{}));
 static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
 static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
-    { DisneyRaster(2) } -> std::same_as<DisneyRaster>;
-    { RasterPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
+    { DisneyRaster({.blend = RasterBlend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
+    { RasterPipeline(disney_vert_slang, disney_frag_slang, {.blend = RasterBlend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
     { pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
     { executor << pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor&>;

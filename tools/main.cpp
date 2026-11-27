@@ -481,10 +481,10 @@ static int generateRasterPair(int argc, char** argv)
 
 public:
 )"
-         << "    RasterPipeline(uint32_t views = 1) : RasterPipeline({}, {}, views) {}\n"
+         << "    RasterPipeline(RasterState state = {}, uint32_t views = 1) : RasterPipeline({}, {}, state, views) {}\n"
          << "    RasterPipeline(const " << vertexType << "& vertex, const " << fragmentType
-         << "& fragment, uint32_t views = 1)\n"
-         << R"(        : pipeline_(::EmbeddedShader::VertexEntry{vertex}, ::EmbeddedShader::FragmentEntry{fragment}, {}, views) {}
+         << "& fragment, RasterState state = {}, uint32_t views = 1)\n"
+         << R"(        : pipeline_(::EmbeddedShader::VertexEntry{vertex}, ::EmbeddedShader::FragmentEntry{fragment}, state, {}, views) {}
 
     RasterPipeline(RasterPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
 
@@ -494,7 +494,6 @@ public:
         return *this;
     }
 
-    void setRasterState(RasterState state) { pipeline_.setRasterState(state); }
     void setDepthImage(HardwareImage& image) { pipeline_.setDepthImage(image); }
     [[nodiscard]] HardwareImage getDepthImage() { return pipeline_.getDepthImage(); }
 

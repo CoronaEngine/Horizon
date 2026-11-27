@@ -85,8 +85,8 @@ BaselineEdsl::BaselineEdsl(void* native_window)
         color << EmbeddedShader::texture(albedo, uv);
     };
 
-    raster = RasterPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
-    raster.setRasterState({.compare = RasterCompare::LessEqual});
+    raster = RasterPipeline(vertex_shader, fragment_shader, {.compare = RasterCompare::LessEqual},
+                            {.enableMatrixColumnMajor = true});
 
     view = ktm::look_at_rh<float>({2, 2, 2}, {0, 0, 0}, {0, 0, 1});
     // KTM 0.2.16's frustum_rh gives positive clip W along the camera's -Z axis.

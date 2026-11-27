@@ -51,16 +51,17 @@ void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResource
 }
 
 RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
-                                           EmbeddedShader::ShaderCodeModule fragmentSpirV, uint32_t viewCount)
-    : vertShaderCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
+                                           EmbeddedShader::ShaderCodeModule fragmentSpirV, RasterState state, uint32_t viewCount)
+    : rasterState(state), vertShaderCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
 {
     initializeStageBindings(viewCount);
 }
 
 RasterPipelineVulkan::RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders,
                                            const ConditionInfo& vertexConditions, const ConditionInfo& fragmentConditions,
-                                           uint32_t viewCount)
-    : vertShaderCode(shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexConditions)),
+                                           RasterState state, uint32_t viewCount)
+    : rasterState(state),
+      vertShaderCode(shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexConditions)),
       fragShaderCode(shaders.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragmentConditions))
 {
     EmbeddedShader::linkRasterDrawParameter(vertShaderCode, fragShaderCode);
@@ -205,7 +206,6 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     auto& graphicsPipeline = state.pipeline;
     auto& pipelineLayout = state.layout;
     const auto renderPass = state.renderPass;
-    const RasterState& raster = state.state;
     const auto mainDevice = getHardwareContext().getMainDevice();
     if (!mainDevice)
     {
@@ -247,7 +247,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     // 配置输入装配
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = raster.topology == RasterTopology::TriangleStrip
+    inputAssembly.topology = rasterState.topology == RasterTopology::TriangleStrip
         ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
@@ -278,9 +278,9 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     // RasterPipeline 默认用于 3D 几何绘制，因此开启深度测试与深度写入。
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = raster.depthTest ? VK_TRUE : VK_FALSE;
-    depthStencil.depthWriteEnable = raster.depthWrite ? VK_TRUE : VK_FALSE;
-    switch (raster.compare) {
+    depthStencil.depthTestEnable = rasterState.depthTest ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = rasterState.depthWrite ? VK_TRUE : VK_FALSE;
+    switch (rasterState.compare) {
     case RasterCompare::Less: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; break;
     case RasterCompare::LessEqual: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL; break;
     case RasterCompare::Equal: depthStencil.depthCompareOp = VK_COMPARE_OP_EQUAL; break;
@@ -293,7 +293,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = raster.blend != RasterBlend::Opaque;
+    colorBlendAttachment.blendEnable = rasterState.blend != RasterBlend::Opaque;
     colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
@@ -301,7 +301,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
-    if (raster.blend == RasterBlend::Additive) {
+    if (rasterState.blend == RasterBlend::Additive) {
         colorBlendAttachment.srcColorBlendFactor = colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     }
@@ -393,7 +393,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 
 HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
                                   std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
-    : pipeline(std::move(backend)), state(pipeline->rasterState), pass(requestedPass.value_or(RasterPass{})),
+    : pipeline(std::move(backend)), pass(requestedPass.value_or(RasterPass{})),
       startsPass(requestedPass.has_value()),
       renderTargets(pipeline->renderTargets), resourceUses(uses)
 {
@@ -426,7 +426,7 @@ HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan
 
 bool HardwareExecutor::Command::Impl::Draw::canMerge(const Draw& next) const
 {
-    if (pipeline != next.pipeline || state != next.state || uniformBytes != next.uniformBytes)
+    if (pipeline != next.pipeline || uniformBytes != next.uniformBytes)
         return false;
     if (bindings != next.bindings && !std::ranges::equal(bindings->values, next.bindings->values,
         [](const PipelineBinding& a, const PipelineBinding& b) {
@@ -476,8 +476,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
 {
     if (framebuffer) return;
     auto& lastFramebuffer = pipeline->lastFramebuffer;
-    if (lastFramebuffer && lastFramebuffer->graphics->state == state &&
-        lastFramebuffer->graphics->pass == pass &&
+    if (lastFramebuffer && lastFramebuffer->graphics->pass == pass &&
         lastFramebuffer->size.x == imageSize.x && lastFramebuffer->size.y == imageSize.y &&
         sameAttachment(lastFramebuffer->depth, depthImage) &&
         std::equal(lastFramebuffer->targets.begin(), lastFramebuffer->targets.end(),
@@ -512,7 +511,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     std::shared_ptr<RasterPipelineVulkan::GraphicsState> graphics;
     for (const auto& cached : pipeline->graphicsStates)
         if (cached->colorFormats == formats && cached->finalLayouts == finalLayouts &&
-            cached->depthFormat == depth->imageFormat && cached->state == state && cached->pass == pass)
+            cached->depthFormat == depth->imageFormat && cached->pass == pass)
         { graphics = cached; break; }
     const auto device = getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice();
     if (!graphics)
@@ -522,7 +521,6 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
         graphics->colorFormats = std::move(formats);
         graphics->finalLayouts = std::move(finalLayouts);
         graphics->depthFormat = depth->imageFormat;
-        graphics->state = state;
         graphics->pass = pass;
         pipeline->createRenderPass(*graphics);
         pipeline->createGraphicsPipeline(*graphics);
@@ -732,9 +730,8 @@ std::shared_ptr<RasterPipelineVulkan> RasterPipelineVulkan::variant(
     const EmbeddedShader::RasterPipelineObject& shaders, const ConditionInfo& vertexConditions,
     const ConditionInfo& fragmentConditions) const
 {
-    auto next = std::make_shared<RasterPipelineVulkan>(shaders, vertexConditions, fragmentConditions, multiviewCount);
+    auto next = std::make_shared<RasterPipelineVulkan>(shaders, vertexConditions, fragmentConditions, rasterState, multiviewCount);
     if (next->renderTargets.size() == renderTargets.size()) next->renderTargets = renderTargets;
-    next->rasterState = rasterState;
     next->depthImage = depthImage;
     next->explicitDepthImage = explicitDepthImage;
     return next;
@@ -764,13 +761,14 @@ RasterPipeline<VS, FS>::RasterPipeline() = default;
 
 template<class VS, class FS>
 RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::VertexEntry vertex, EmbeddedShader::FragmentEntry fragment,
-                                       EmbeddedShader::CompilerOption options, uint32_t views, std::source_location location)
+                                       RasterState state, EmbeddedShader::CompilerOption options, uint32_t views,
+                                       std::source_location location)
     : impl_(std::make_unique<Impl>())
 {
     if (vertex.module || fragment.module) {
         if (!vertex.module || !fragment.module)
             throw std::invalid_argument("Raster pipeline requires two EDSL stages or two precompiled stages");
-        impl_->backend = std::make_shared<RasterPipelineVulkan>(*vertex.module, *fragment.module, views);
+        impl_->backend = std::make_shared<RasterPipelineVulkan>(*vertex.module, *fragment.module, state, views);
         return;
     }
 
@@ -778,7 +776,7 @@ RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::VertexEntry vertex, Embed
         std::move(vertex), std::move(fragment), std::move(options), location);
     impl_->vertexConditions = shaders.vertex->getCurrentConditionInfo();
     impl_->fragmentConditions = shaders.fragment->getCurrentConditionInfo();
-    impl_->backend = std::make_shared<RasterPipelineVulkan>(shaders, impl_->vertexConditions, impl_->fragmentConditions, views);
+    impl_->backend = std::make_shared<RasterPipelineVulkan>(shaders, impl_->vertexConditions, impl_->fragmentConditions, state, views);
     impl_->autoBindEntries = std::move(shaders.autoBindEntries);
     if (!impl_->vertexConditions.empty() || !impl_->fragmentConditions.empty())
         impl_->variants = std::make_unique<EmbeddedShader::RasterPipelineObject>(std::move(shaders));
@@ -815,12 +813,6 @@ template<class VS, class FS>
 void RasterPipeline<VS, FS>::setDepthImage(HardwareImage& depthImage)
 {
     Impl::checked(impl_).backend->setDepthImage(depthImage);
-}
-
-template<class VS, class FS>
-void RasterPipeline<VS, FS>::setRasterState(RasterState rasterState)
-{
-    Impl::checked(impl_).backend->setRasterState(rasterState);
 }
 
 template<class VS, class FS>

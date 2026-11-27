@@ -18,9 +18,9 @@ struct RasterPipelineVulkan
   public:
     using ConditionInfo = EmbeddedShader::ShaderCodeCompiler::ConditionInfo;
     RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
-                         EmbeddedShader::ShaderCodeModule fragmentSpirV, uint32_t viewCount);
+                         EmbeddedShader::ShaderCodeModule fragmentSpirV, RasterState state, uint32_t viewCount);
     RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders, const ConditionInfo& vertexConditions,
-                         const ConditionInfo& fragmentConditions, uint32_t viewCount);
+                         const ConditionInfo& fragmentConditions, RasterState state, uint32_t viewCount);
     ~RasterPipelineVulkan();
 
     void setDepthImage(HardwareImage &depthImage)
@@ -29,7 +29,6 @@ struct RasterPipelineVulkan
         explicitDepthImage = static_cast<bool>(depthImage);
     }
 
-    void setRasterState(RasterState state) { rasterState = state; }
     std::shared_ptr<RasterPipelineVulkan> variant(const EmbeddedShader::RasterPipelineObject& shaders,
                                                   const ConditionInfo& vertexConditions,
                                                   const ConditionInfo& fragmentConditions) const;
@@ -62,7 +61,6 @@ struct RasterPipelineVulkan
         std::vector<VkFormat> colorFormats;
         std::vector<VkImageLayout> finalLayouts;
         VkFormat depthFormat{};
-        RasterState state;
         RasterPass pass;
         ~GraphicsState();
     };
@@ -90,7 +88,7 @@ struct RasterPipelineVulkan
     std::vector<std::shared_ptr<GraphicsState>> graphicsStates;
     std::shared_ptr<FramebufferState> lastFramebuffer;
 
-    RasterState rasterState;
+    const RasterState rasterState;
     bool explicitDepthImage{false};
 
     HardwareImage depthImage;
@@ -132,7 +130,6 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
 
     std::shared_ptr<RasterPipelineVulkan> pipeline;
     ktm::uvec2 imageSize{};
-    RasterState state;
     RasterPass pass;
     bool startsPass{};
     HardwareImage depthImage;

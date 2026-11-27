@@ -126,13 +126,12 @@ void test_cpu()
     (void)pendingRaster({}, {}, {}, 0);
     expect(throws<std::logic_error>([&] { (void)pendingRaster({}, {}, {}, 1); }),
            "a raster placeholder rejects a draw before shaders are assigned");
-    expect(throws<std::logic_error>([&] { pendingRaster.setRasterState({}); }) &&
-           throws<std::logic_error>([&] { pendingRaster.setDepthImage(image); }) &&
+    expect(throws<std::logic_error>([&] { pendingRaster.setDepthImage(image); }) &&
            throws<std::logic_error>([&] { (void)pendingRaster.getDepthImage(); }),
-           "a raster placeholder rejects state access before shaders are assigned");
-    expect(throws<std::invalid_argument>([&] { (void)RasterPipeline(vertex, fragment, {}, 0); }),
+           "a raster placeholder rejects depth access before shaders are assigned");
+    expect(throws<std::invalid_argument>([&] { (void)RasterPipeline(vertex, fragment, {}, {}, 0); }),
            "EDSL raster construction rejects zero views");
-    expect(throws<std::invalid_argument>([] { (void)RasterPipeline(baseline_vert_slang, baseline_frag_slang, 33); }),
+    expect(throws<std::invalid_argument>([] { (void)RasterPipeline(baseline_vert_slang, baseline_frag_slang, {}, 33); }),
            "Slang raster construction rejects more than 32 views");
     expect(throws<std::invalid_argument>([&] { (void)RasterPipeline(VertexEntry{baseline_vert_slang}, fragment); }),
            "a precompiled vertex stage cannot be paired with an EDSL fragment");
@@ -196,13 +195,12 @@ void test_indirect_draws(bool forceSingleDraw)
             color << value + drawColorOffset;
         };
         RasterPipeline<> pipeline;
-        pipeline = RasterPipeline(std::move(vs), std::move(fs));
+        pipeline = RasterPipeline(std::move(vs), std::move(fs), {.depthTest = false, .depthWrite = false});
         useVertexParameter = vertexFlag.lock();
         useFragmentParameter = fragmentFlag.lock();
         expect(useVertexParameter && useFragmentParameter, "both raster stages retain their condition captures");
         pipeline.bindRenderTarget(0, overrideColor);
         overrideColor = target;
-        pipeline.setRasterState({.depthTest = false, .depthWrite = false});
         // One triangle covers the screen, the other covers only the second pixel row.
         const std::array<std::array<float, 3>, 6> vertices{{
             {-1,-1,1}, {3,-1,1}, {-1,3,1}, {-1,0,1}, {3,0,1}, {-1,2,1}
@@ -290,8 +288,7 @@ void test_raster_sampled_storage_image()
     Texture2D<ktm::fvec4> texture = input, output = target;
     auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
     auto fs = [&] { output << texture.sample(Float2(0.5f)); };
-    RasterPipeline pipeline(vs, fs);
-    pipeline.setRasterState({.depthTest = false, .depthWrite = false});
+    RasterPipeline pipeline(vs, fs, {.depthTest = false, .depthWrite = false});
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
     HardwareBuffer vertexBuffer(vertices, HardwareBuffer::Usage::VertexBuffer);
     HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
@@ -329,8 +326,7 @@ void test_raster_sampled_storage_image()
             next = values[0] + Float(1.f);
             values[0] = next;
             output << Float4(next, 0, 0, 1);
-        });
-        increment.setRasterState({.depthTest = false, .depthWrite = false});
+        }, {.depthTest = false, .depthWrite = false});
         for (bool declareAccess : {false, true}) {
             if (declareAccess) increment.uses({{counter, ResourceAccess::ReadWrite}});
             executor << increment(vertexBuffer, indexBuffer, commands, 1)
@@ -347,11 +343,12 @@ void test_raster_sampled_storage_image()
     HardwareImage layers(HardwareImage::CreateInfo{.width = 2, .height = 2, .format = HardwareImage::Format::RGBA32_FLOAT,
         .usage = HardwareImage::Usage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
     std::array attachments{layers[0][1], layers[0][1], layers[1][1]};
-    pipeline.setRasterState({.depthTest = false, .depthWrite = false, .blend = RasterBlend::Additive});
+    RasterPipeline additive(vs, fs, {.depthTest = false, .depthWrite = false, .blend = RasterBlend::Additive});
+    additive.uses({{input, ResourceAccess::Read}});
     for (auto& attachment : attachments) {
         attachment.setClearColor(0, 0, 0, 0);
         output = attachment;
-        executor << pipeline(vertexBuffer, indexBuffer, commands, 1);
+        executor << additive(vertexBuffer, indexBuffer, commands, 1);
     }
     std::array<Pixel, 2> layerPixels{};
     HardwareBuffer layerReadback(sizeof(layerPixels), HardwareBuffer::Usage::StorageBuffer);
@@ -375,7 +372,7 @@ void test_shared_vertex_stage()
     HardwareBuffer fieldBuffer(sizeof(uint32_t), HardwareBuffer::Usage::StorageBuffer);
 
     HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
-    RasterPipeline raster(disney_vert_slang, drawstress_frag_slang);
+    RasterPipeline raster(disney_vert_slang, drawstress_frag_slang, {.blend = RasterBlend::Additive});
     raster.outColor = target;
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
@@ -387,8 +384,8 @@ void test_shared_vertex_stage()
     executor << raster(vertices, indices, packets, 1, parameters) << target.copyTo(readback);
     executor.commit().wait();
     // At the center of the render target, the Disney view vector equals camPos.xyz.
-    expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 1.f},
-           "DrawStress fragment reads the Disney vertex output at location zero");
+    expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 2.f},
+           "DrawStress fragment reads the Disney vertex output and adds its alpha to the clear color");
     expect(ResourceManager::get(fieldBuffer)->bindlessIndex >= 0, "a named raster field binds its storage buffer");
 }
 
@@ -400,16 +397,18 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     targetInfo.usage = HardwareImage::Usage::StorageImage;
     targetInfo.mipLevels = 2;
     HardwareImage target(targetInfo);
-    HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
     Texture2D<ktm::fvec4> output = target;
     auto vs = [] {
         position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), rasterDrawParameter<float>(4), Float(1));
         return Float4(0, 0, instanceIndex(), 0);
     };
     auto fs = [&](Float4 instanceColor) { output << rasterDrawParameter<ktm::fvec4>(0) + instanceColor; };
-    RasterPipeline pipeline(vs, fs);
-    if (explicitDepth) pipeline.setDepthImage(depth);
-    pipeline.setRasterState({true, true, RasterCompare::Less, RasterBlend::Opaque});
+    RasterPipeline opaque(vs, fs, {.blend = RasterBlend::Opaque});
+    RasterPipeline additive(vs, fs, {.depthWrite = false, .compare = RasterCompare::Equal, .blend = RasterBlend::Additive});
+    if (explicitDepth) {
+        HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
+        opaque.setDepthImage(depth);
+    }
 
     const std::array<float,2> vertices[]{{-1,-1},{3,-1},{-1,3},{0,-1},{1,-1},{1,1},{0,1}};
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
@@ -450,7 +449,9 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), HardwareBuffer::Usage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    executor << pipeline(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, {}, {}, ktm::uvec2(4, 2));
+    executor << opaque(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, ScissorRect{0,0,4,1}, {}, ktm::uvec2(4, 2));
+    auto sharedDepth = opaque.getDepthImage();
+    additive.setDepthImage(sharedDepth);
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -465,11 +466,9 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
         generate.uses({{packets, ResourceAccess::Write}, {generatedParameters, ResourceAccess::Write}});
         executor << generate(1);
     }
-    pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
-
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
-    executor << pipeline(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
+    executor << additive(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
                          RasterPass{.loadColor = true, .loadDepth = true})
              << target.copyTo(readback);
     executor.commit().wait();
@@ -477,13 +476,11 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expect(originalVertices.copyToData(copiedVertices) && std::ranges::equal(copiedVertices, vertices),
            "invalid uploads preserve the vertex data shared by the copied buffer");
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
-    // Both instances contribute green and their absolute instance indices to blue.
+    // Only the top row contains the first pass's depth. Both instances add color on its right half.
     const float instanceSum = static_cast<float>(firstInstance + (firstInstance + 1));
-    const std::array<float,4> left{1,0,0,1}, right{1,2,instanceSum,1};
-    for (size_t i = 0; i < pixels.size(); ++i) {
-        expect(pixels[i] == (i % 4 < 2 ? left : right),
-               "GPU-generated command, instance indices, color, depth or attachment load failed");
-    }
+    const std::array<float,4> red{1,0,0,1}, blended{1,2,instanceSum,1}, clear{0,0,0,1};
+    expect(pixels == std::array{red, red, blended, blended, clear, clear, clear, clear},
+           "the additive pipeline loads color and passes Equal only where the opaque pipeline wrote depth");
 }
 
 void test_compute_dispatch_snapshots()

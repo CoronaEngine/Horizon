@@ -9,7 +9,8 @@
 
 DisneySlang::DisneySlang(void* native_window)
     : ExampleBase(native_window),
-      display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT)
+      display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT),
+      pipeline({.topology = RasterTopology::TriangleStrip})
 {
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
@@ -118,7 +119,6 @@ DisneySlang::DisneySlang(void* native_window)
 
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     pipeline.outColor = final_output_image;
-    pipeline.setRasterState({.topology = RasterTopology::TriangleStrip});
     pipeline.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
 
     constexpr float yaw = ktm::pi<float>, pitch = 0.42f * ktm::pi<float>;

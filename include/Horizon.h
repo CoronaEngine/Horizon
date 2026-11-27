@@ -305,21 +305,21 @@ private:
     std::unique_ptr<Impl> impl_;
 
 public:
-    // Creates an empty handle for later assignment. Assign a pipeline before setting raster state or drawing.
+    // Creates an empty handle for later assignment. Assign a pipeline before drawing.
     RasterPipeline();
 
     RasterPipeline(EmbeddedShader::VertexEntry vertex, EmbeddedShader::FragmentEntry fragment,
-                   EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
+                   RasterState state = {}, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
                    std::source_location location = std::source_location::current());
 
     template<class V, class F> requires EmbeddedShader::RasterStagePairMismatch<V, F>
-    RasterPipeline(V&&, F&&, EmbeddedShader::CompilerOption = {}, uint32_t = 1, std::source_location = {}) = delete;
+    RasterPipeline(V&&, F&&, RasterState = {}, EmbeddedShader::CompilerOption = {}, uint32_t = 1,
+                   std::source_location = {}) = delete;
 
     ~RasterPipeline();
     RasterPipeline(RasterPipeline&&) noexcept;
     RasterPipeline& operator=(RasterPipeline&&) noexcept;
 
-    void setRasterState(RasterState state);
     void setDepthImage(HardwareImage& image);
     [[nodiscard]] HardwareImage getDepthImage();
 
@@ -343,4 +343,4 @@ public:
 extern template struct RasterPipeline<void, void>;
 
 template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
-RasterPipeline(const VS&, const FS&, uint32_t = 1) -> RasterPipeline<VS, FS>;
+RasterPipeline(const VS&, const FS&, RasterState = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;

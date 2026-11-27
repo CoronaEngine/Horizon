@@ -65,7 +65,7 @@ DrawStressEdsl::DrawStressEdsl(void* native_window)
         return color;
     };
     const auto fragment_shader = [&](Float3 color) { output << Float4(color, Float(1)); };
-    raster = RasterPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
+    raster = RasterPipeline(vertex_shader, fragment_shader, {}, {.enableMatrixColumnMajor = true});
 }
 
 void DrawStressEdsl::run(float seconds)

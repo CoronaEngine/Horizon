@@ -18,7 +18,7 @@
 
 BaselineSlang::BaselineSlang(void* native_window)
     : ExampleBase(native_window), display(native_window),
-      color(800, 600, HardwareImage::Format::RGBA16_FLOAT)
+      color(800, 600, HardwareImage::Format::RGBA16_FLOAT), pipeline({.compare = RasterCompare::LessEqual})
 {
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     {
@@ -68,7 +68,6 @@ BaselineSlang::BaselineSlang(void* native_window)
         render_executor.commit().wait();
     }
 
-    pipeline.setRasterState({.compare = RasterCompare::LessEqual});
     pipeline.outColor = color;
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
     parameters.texIndex = texture_image.storeDescriptor();
