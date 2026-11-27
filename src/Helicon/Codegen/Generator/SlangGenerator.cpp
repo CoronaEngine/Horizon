@@ -563,12 +563,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 	auto result = node->texture->type->generate() + " " + node->texture->name + ";";
 
-    bool storage = node->texture->permissions != Ast::AccessPermissions::ReadOnly;
-    // Unfiltered compute image loads and stores share the storage-image table at set 2.
-    // Filtered sampling uses a combined sampler handle from set 0.
-    auto texture = std::dynamic_pointer_cast<Ast::TextureType>(node->texture->type);
-    storage |= currentStage == Ast::ShaderStage::Compute && texture->name == "Texture2D";
-    if (storage) result = "RW" + result;
+    // Indexed access uses the storage-image table, including read-only loads.
+    if (node->texture->indexed) result = "RW" + result;
 
 	bindlessHandleMembers += "\t" + result + "\n";
 	return "";

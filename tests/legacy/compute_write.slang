@@ -10,6 +10,11 @@ public uint addIndex(uint value, uint index) {
     return value + index;
 }
 
+public void accumulateValue(inout uint total, out uint mirror) {
+    total += 2;
+    mirror = total;
+}
+
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {

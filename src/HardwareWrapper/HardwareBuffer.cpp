@@ -110,11 +110,24 @@ HardwareBuffer::operator bool() const
     return impl_ && impl_->bufferHandle != VK_NULL_HANDLE;
 }
 
-uint32_t HardwareBuffer::storeDescriptor() const
+HardwareDescriptor::HardwareDescriptor(std::variant<HardwareBuffer, HardwareImage> resource,
+                                       EmbeddedShader::Ast::AccessPermissions access, bool sampled)
+    : resource_(std::move(resource)), access_(access), sampled_(sampled)
 {
-    if (!*this) throw std::invalid_argument("Cannot bind an empty buffer");
-    return impl_->resourceManager->storeDescriptor(*impl_);
+    if (const auto* buffer = std::get_if<HardwareBuffer>(&resource_)) {
+        if (!*buffer || !(ResourceManager::get(*buffer)->bufferUsage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
+            throw std::invalid_argument("Shader descriptors require a storage buffer");
+    } else {
+        const auto& image = std::get<HardwareImage>(resource_);
+        const auto usage = sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : VK_IMAGE_USAGE_STORAGE_BIT;
+        if (!image || !(ResourceManager::get(image)->imageUsage & usage))
+            throw std::invalid_argument("Image usage does not support this shader descriptor");
+    }
 }
+
+HardwareDescriptor HardwareBuffer::storeReadDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadOnly}; }
+HardwareDescriptor HardwareBuffer::storeWriteDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::WriteOnly}; }
+HardwareDescriptor HardwareBuffer::storeReadWriteDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadAndWrite}; }
 
 bool HardwareBuffer::copyFromData(const void *inputData, const uint64_t size) const
 {

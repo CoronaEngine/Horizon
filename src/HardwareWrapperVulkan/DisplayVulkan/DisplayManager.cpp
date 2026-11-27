@@ -20,7 +20,7 @@ struct PresentImageCommand final : CommandRecordVulkan
 
     ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
 
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& uses) override
+    void resolveResourceUses(ResourceAccessList& uses) override
     {
         const auto descriptors = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
         uses.image(source, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
@@ -533,7 +533,7 @@ void DisplayManager::displayFrame(void *surface, const HardwareImage& source, Ha
         {
             // Both devices import the same memory. Finish the last read before overwriting it.
             CopyImageToBufferCommand copy(*handle, srcStaging, 0, 0, 0, 1);
-            producer.wait(*displayDeviceExecutor).record(&copy, {}, std::move(sourceOwner));
+            producer.wait(*displayDeviceExecutor).record(&copy, std::move(sourceOwner));
             try
             {
                 producer.commit();
@@ -565,7 +565,7 @@ void DisplayManager::displayFrame(void *surface, const HardwareImage& source, Ha
                 blit.record(&upload.emplace(dstStaging, displayImage, 0, 0, 0, 1));
             blit.waitSemaphores.push_back(available);
             blit.signalSemaphores.push_back(finished);
-            blit.record(&presentImage, {}, std::move(sourceOwner));
+            blit.record(&presentImage, std::move(sourceOwner));
             blit.commit();
         }
         catch (...)

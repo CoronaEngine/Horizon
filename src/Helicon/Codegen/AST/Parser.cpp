@@ -12,13 +12,29 @@ void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage)
 	currentParser->isInShaderParse = true;
 }
 
-std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPipelineParse(std::unordered_set<std::string>& sampledTextures)
+void EmbeddedShader::Ast::Parser::recordBindingUse(Variate& variable, AccessPermissions access)
+{
+    auto& parser = *currentParser;
+    if (!parser.isInShaderParse) return;
+    for (auto& use : parser.bindings) {
+        if (use.variable.get() == &variable && use.conditions == parser.bindingConditions) {
+            use.access = use.access | access;
+            return;
+        }
+    }
+    parser.bindings.push_back({variable.shared_from_this(), access, parser.bindingConditions});
+}
+
+std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPipelineParse()
 {
     endShaderParse();
 
 	auto globalOutput = Generator::SlangGenerator::getGlobalOutput(currentParser->structure);
 	for (auto& output: currentParser->parseOutputs)
 	{
+        for (auto& use : output.bindings)
+            if (auto* texture = dynamic_cast<UniversalTexture*>(use.variable.get()))
+                use.sampled = static_cast<const TextureType&>(*texture->type).name.starts_with("Sampler");
 	    if (!output.branches.empty())
 	    {
 	        output.typeHeader = globalOutput + output.typeHeader;
@@ -27,12 +43,13 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
         output.output = globalOutput + output.output;
 	}
 
+    bool mixedImageRoles = false;
 	for (const auto& global: currentParser->structure.globalStatements)
 	{
         if (auto* def = dynamic_cast<DefineUniversalTexture*>(global.get())) {
             auto& type = static_cast<TextureType&>(*def->texture->type);
             if (type.name.starts_with("Sampler")) {
-                sampledTextures.insert(def->texture->name);
+                mixedImageRoles |= def->texture->indexed;
                 // A shared proxy can be sampled here and used for storage in the next pipeline.
                 type.name.replace(0, sizeof("Sampler") - 1, "Texture");
             }
@@ -42,6 +59,10 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
 
     std::vector<ParseOutput> result;
 	currentParser->parseOutputs.swap(result);
+    if (std::exchange(currentParser->structure.hasIndirectResource, false))
+        throw std::invalid_argument("EDSL resource handles must come from a directly bound buffer or image proxy");
+    if (mixedImageRoles)
+        throw std::invalid_argument("Use separate EDSL proxies to sample and index the same image in a pipeline");
 	return result;
 }
 
@@ -59,7 +80,10 @@ void EmbeddedShader::Ast::Parser::endShaderParse()
 {
     if (currentParser->isInShaderParse)
     {
-        currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branchOutputs,currentParser->typeHeader);
+        auto source = Generator::SlangGenerator::getShaderOutput(currentParser->structure);
+        currentParser->parseOutputs.emplace_back(std::move(source), currentParser->structure.slangModuleSource,
+            currentParser->structure.stage, currentParser->branchOutputs, currentParser->typeHeader,
+            std::move(currentParser->bindings));
         currentParser->reset();
         currentParser->localStatementStack.pop();
         currentParser->isInShaderParse = false;

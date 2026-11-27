@@ -68,101 +68,18 @@ namespace EmbeddedShader
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
 		std::vector<AutoBindEntry> outputBindings;
-		std::unordered_set<std::string> sampledTextures;
+        std::vector<Ast::BindingUse> vertexBindings, fragmentBindings;
 		std::vector<Ast::ParseOutput> parse(const VertexEntry& vertex, const FragmentEntry& fragment);
 	};
 
     inline void RasterPipelineObject::updateAutoBind(ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
     {
-        // 每次分支组合变化都会重新反射并重建这张表；先清空，避免旧变体的
-        // offset/bindType 残留（否则切回旧条件时 bind_auto_resources 会写两套）。
+        auto vs = vertex->getShaderCode(ShaderLanguage::SpirV, vertConditionInfo);
+        auto fs = fragment->getShaderCode(ShaderLanguage::SpirV, fragConditionInfo);
         autoBindEntries.clear();
-
-        // Collect auto-bind entries from globalStatements (shared across VS/FS):
-		// Walk all globally-defined textures and check if they have a back-pointer
-		// to a proxy's boundResource_. Match against both vertex and fragment shader's bindInfoPool.
-		{
-			auto vsCodeModule = vertex->getShaderCode(ShaderLanguage::SpirV, vertConditionInfo);
-			auto fsCodeModule = fragment->getShaderCode(ShaderLanguage::SpirV, fragConditionInfo);
-			auto& globals = Ast::Parser::getGlobalStatements();
-			for (auto& stmt : globals)
-			{
-				if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
-				{
-					if (def->variate && def->variate->boundValueRef)
-					{
-					    auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->variate->name);
-					    auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name);
-					    if (vsInfo || fsInfo)
-					    {
-					        auto* bindInfo = vsInfo ? vsInfo : fsInfo;
-							autoBindEntries.push_back({
-								nullptr,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								def->variate->boundValueRef,
-							    def->variate->boundValueSize,
-                                &def->variate->dirtyVersion
-							});
-						}
-					}
-				}
-
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
-				{
-					if (def->texture && def->texture->boundResourceRef)
-					{
-					    auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name);
-					    auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name);
-						if (vsInfo || fsInfo)
-						{
-						    auto* bindInfo = vsInfo ? vsInfo : fsInfo;
-							const auto imageType = sampledTextures.contains(def->texture->name)
-								? ShaderCodeModule::ShaderResources::sampledImages : ShaderCodeModule::ShaderResources::storageTexture;
-							autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								imageType,
-								bindInfo->location,
-							    nullptr,
-							    0,
-							    &def->texture->dirtyVersion
-							});
-						}
-					}
-				}
-
-				if (auto* def = dynamic_cast<Ast::DefineUniversalArray*>(stmt.get()))
-				{
-					if (def->array && def->array->boundResourceRef)
-					{
-						auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->array->name);
-						auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->array->name);
-						if (vsInfo || fsInfo)
-						{
-							auto* bindInfo = vsInfo ? vsInfo : fsInfo;
-							autoBindEntries.push_back({
-								def->array->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								ShaderCodeModule::ShaderResources::storageBuffer,
-								bindInfo->location,
-								nullptr,
-								0,
-								&def->array->dirtyVersion,
-								0,
-								true
-							});
-						}
-					}
-				}
-			}
-
-            autoBindEntries.insert(autoBindEntries.end(), outputBindings.begin(), outputBindings.end());
-		}
+        AutoBindEntry::appendActive(autoBindEntries, vertexBindings, vs, vertConditionInfo, Ast::ShaderStage::Vertex);
+        AutoBindEntry::appendActive(autoBindEntries, fragmentBindings, fs, fragConditionInfo, Ast::ShaderStage::Fragment);
+        autoBindEntries.insert(autoBindEntries.end(), outputBindings.begin(), outputBindings.end());
     }
 
     inline std::string RasterPipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
@@ -181,6 +98,8 @@ namespace EmbeddedShader
 		if (!vertex.record_ || !fragment.record_)
 			throw std::invalid_argument("EDSL compilation requires vertex and fragment shader callbacks");
 		auto outputs = result.parse(vertex, fragment);
+        result.vertexBindings = std::move(outputs[0].bindings);
+        result.fragmentBindings = std::move(outputs[1].bindings);
 
 		auto compileStage = [&](Ast::ParseOutput& output, ShaderStage stage, const auto& record) {
 			auto options = compilerOption;
@@ -271,6 +190,6 @@ namespace EmbeddedShader
 		Ast::Parser::beginShaderParse(Ast::ShaderStage::Fragment);
 		if (auto value = (*fragment.record_)())
 			handleFragmentOutput(value);
-		return Ast::Parser::endPipelineParse(sampledTextures);
+		return Ast::Parser::endPipelineParse();
 	}
 }

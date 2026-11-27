@@ -3,7 +3,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <ranges>
 #include <source_location>
 #include <span>
@@ -102,7 +101,9 @@ public:
 
     ExternalHandle exportBufferMemory();
 
-    [[nodiscard]] uint32_t storeDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeReadDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeWriteDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeReadWriteDescriptor() const;
 
     // 流式拷贝命令（用于 HardwareExecutor << ）
     [[nodiscard]] HardwareExecutor::Command copyTo(const HardwareBuffer& dst, uint64_t srcOffset = 0,
@@ -177,8 +178,10 @@ public:
     HardwareImage operator[](const uint32_t index);
     explicit operator bool() const;
 
-    [[nodiscard]] uint32_t storeDescriptor() const;
-    [[nodiscard]] uint32_t storeSampledDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeReadDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeWriteDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeReadWriteDescriptor() const;
+    [[nodiscard]] HardwareDescriptor storeSampledDescriptor() const;
 
     /// Set the clear color used by the RasterPipeline render pass (LOAD_OP_CLEAR).
     /// Default is (0, 0, 0, 1).  For transparent render targets, use (0, 0, 0, 0).
@@ -198,6 +201,21 @@ private:
     std::shared_ptr<Impl> impl_;
 };
 
+// Assign to a shader index field to capture both its resource and how the shader uses it.
+class HardwareDescriptor
+{
+    friend struct HardwareBuffer;
+    friend struct HardwareImage;
+    friend struct PipelineBindings;
+    template<class> friend struct EmbeddedShader::BoundField;
+
+    HardwareDescriptor(std::variant<HardwareBuffer, HardwareImage> resource,
+                       EmbeddedShader::Ast::AccessPermissions access, bool sampled = false);
+    std::variant<HardwareBuffer, HardwareImage> resource_;
+    EmbeddedShader::Ast::AccessPermissions access_;
+    bool sampled_;
+};
+
 struct HardwareDisplayer
 {
 public:
@@ -213,19 +231,6 @@ private:
     friend class HardwareExecutor::Command;
     struct Impl;
     std::shared_ptr<Impl> impl_;
-};
-
-enum class ResourceAccess : uint8_t
-{
-    Read,
-    Write,
-    ReadWrite,
-};
-
-struct ResourceUse
-{
-    std::variant<HardwareBuffer, HardwareImage> resource;
-    ResourceAccess access;
 };
 
 template<class CS = void>
@@ -252,9 +257,6 @@ public:
     ComputePipeline& operator=(ComputePipeline&&) noexcept;
 
     [[nodiscard]] HardwareExecutor::Command operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
-
-    ComputePipeline& uses(std::span<const ResourceUse> resources);
-    ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
 };
 
 extern template struct ComputePipeline<void>;
@@ -326,8 +328,6 @@ public:
         const HardwareBuffer& parameters = {}, const HardwareImage& depth = {},
         std::optional<ScissorRect> scissor = {}, std::optional<Pass> pass = {},
         std::optional<ktm::uvec2> extent = {});
-
-    RasterPipeline& uses(std::initializer_list<ResourceUse> resources);
 };
 
 extern template struct RasterPipeline<void, void>;

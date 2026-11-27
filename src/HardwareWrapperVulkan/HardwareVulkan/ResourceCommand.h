@@ -16,7 +16,7 @@ struct CopyBufferCommand : public CommandRecordVulkan
 
     ExecutorType getExecutorType() override;
     void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
+    void resolveResourceUses(ResourceAccessList&) override;
 };
 
 struct CopyImageCommand : public CommandRecordVulkan
@@ -38,7 +38,7 @@ struct CopyImageCommand : public CommandRecordVulkan
 
     ExecutorType getExecutorType() override;
     void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
+    void resolveResourceUses(ResourceAccessList&) override;
 
 private:
     bool valid() const;
@@ -60,7 +60,7 @@ struct CopyBufferToImageCommand : public CommandRecordVulkan
 
     ExecutorType getExecutorType() override;
     void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
+    void resolveResourceUses(ResourceAccessList&) override;
 };
 
 struct CopyImageToBufferCommand : public CommandRecordVulkan
@@ -78,5 +78,5 @@ struct CopyImageToBufferCommand : public CommandRecordVulkan
 
     ExecutorType getExecutorType() override;
     void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
+    void resolveResourceUses(ResourceAccessList&) override;
 };

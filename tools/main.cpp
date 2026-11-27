@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -67,14 +68,18 @@ using ShaderResources = ShaderCodeModule::ShaderResources;
 // to their containing pipeline, including after a move.
 static void emitBoundField(std::ostream& out, const ShaderResources::ShaderBindInfo& field,
                            std::string_view stateType, std::vector<std::string>* ctorInits,
-                           std::string_view indent = "    ")
+                           std::string_view indent = "    ", bool aliased = false)
 {
     std::ostringstream args;
     const bool descriptor = isDirectResourceBindType(field.bindType);
     args << ", " << field.byteOffset << ", " << field.typeSize << ", " << static_cast<int32_t>(field.bindType)
-         << ", " << (descriptor ? field.binding : field.location);
+         << ", " << field.location;
     if (field.bindType != ShaderResources::stageOutputs)
         args << ", " << field.set << ", " << field.binding;
+    if (descriptor)
+        args << ", " << field.elementCount << ", static_cast<::EmbeddedShader::Ast::AccessPermissions>("
+             << static_cast<unsigned>(field.access) << ")";
+    if (aliased) args << ", true";
 
     out << indent << "::EmbeddedShader::BoundField<" << stateType << "> " << field.variateName;
     if (ctorInits)
@@ -94,7 +99,7 @@ static void emitBindingConstructor(std::ostream& out, const std::string& name, s
 }
 
 static void emitResourceFields(std::ostream& out, const ShaderResources& resources,
-                               std::string_view stateType)
+                               std::string_view stateType, const ShaderResources* otherStage = nullptr)
 {
     auto emitBlock = [&](const std::string& name, ShaderResources::BindType kind) {
         if (name.empty()) return;
@@ -108,9 +113,34 @@ static void emitResourceFields(std::ostream& out, const ShaderResources& resourc
     };
     emitBlock(resources.pushConstantName, ShaderResources::pushConstantMembers);
     emitBlock(resources.uniformBufferName, ShaderResources::uniformBufferMembers);
-    for (const auto& field : resources.bindInfoPool)
-        if (isDirectResourceBindType(field.bindType))
-            emitBoundField(out, field, stateType, nullptr);
+    // All aliases of a descriptor binding must cover the accesses declared by both stages.
+    std::vector<ShaderResources::ShaderBindInfo> fields;
+    std::map<std::pair<uint32_t, uint32_t>, Ast::AccessPermissions> accessByBinding;
+    for (const auto* stage : {&resources, otherStage})
+    {
+        if (!stage) continue;
+        for (const auto& field : stage->bindInfoPool)
+        {
+            if (!isDirectResourceBindType(field.bindType)) continue;
+            auto& access = accessByBinding[{field.set, field.binding}];
+            access = access | field.access;
+            const auto previous = std::ranges::find(fields, field.variateName,
+                                                    &ShaderResources::ShaderBindInfo::variateName);
+            if (previous == fields.end()) fields.push_back(field);
+            else if (previous->set != field.set || previous->binding != field.binding)
+                throw std::runtime_error("Ambiguous descriptor binding for shader field " + field.variateName);
+            else if (!previous->elementCount || (field.elementCount && field.elementCount < previous->elementCount))
+                previous->elementCount = field.elementCount;
+        }
+    }
+    for (auto& field : fields)
+    {
+        field.access = accessByBinding.at({field.set, field.binding});
+        const bool aliased = std::ranges::any_of(fields, [&](const auto& other) {
+            return other.set == field.set && other.binding == field.binding && other.variateName != field.variateName;
+        });
+        emitBoundField(out, field, stateType, nullptr, "    ", aliased);
+    }
 }
 
 static void emitOutputFields(std::ostream& out, const ShaderResources& resources,
@@ -145,13 +175,6 @@ public:
     {
         return pipeline_(x, y, z);
     }
-
-    ComputePipeline& uses(std::span<const ResourceUse> resources)
-    {
-        pipeline_.uses(resources);
-        return *this;
-    }
-    ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
 
 )";
     emitResourceFields(out, resources, "::ComputePipeline<>");
@@ -340,7 +363,10 @@ void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection)
     for (int i = 0; i < reflection->getParameterCount(); ++i)
     {
         auto child = reflection->getParameterByIndex(i);
-        ss << "{\"" << typeNameToSlang(procType(child->getType())) << "\",\"" << child->getName() << "\"},";
+        ss << "{\"";
+        if (child->findModifier(slang::Modifier::InOut)) ss << "inout ";
+        else if (child->findModifier(slang::Modifier::Out)) ss << "out ";
+        ss << typeNameToSlang(procType(child->getType())) << "\",\"" << child->getName() << "\"},";
     }
     ss << "},&slangModule};\n";
 }
@@ -503,15 +529,9 @@ public:
         return pipeline_(vertices, indices, packets, count, parameters, depth, scissor, pass, extent);
     }
 
-    RasterPipeline& uses(std::initializer_list<ResourceUse> resources)
-    {
-        pipeline_.uses(resources);
-        return *this;
-    }
-
 )";
-    const auto& resources = !vs.uniformBufferSize && fs.uniformBufferSize ? fs : vs;
-    emitResourceFields(code, resources, "::RasterPipeline<>");
+    const bool useFragmentBlock = !vs.uniformBufferSize && fs.uniformBufferSize;
+    emitResourceFields(code, useFragmentBlock ? fs : vs, "::RasterPipeline<>", useFragmentBlock ? &vs : &fs);
     emitOutputFields(code, fs, "::RasterPipeline<>");
     code << "};\n\ntemplate<std::same_as<" << vertexType << "> VS, std::same_as<" << fragmentType << "> FS>\n"
          << "RasterPipeline(const VS&, const FS&, ::RasterPipeline<>::State = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;\n";

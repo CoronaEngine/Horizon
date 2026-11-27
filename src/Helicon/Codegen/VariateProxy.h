@@ -19,6 +19,7 @@
 // Forward declarations for Level 2 resource binding (defined in Horizon.h)
 struct HardwareImage;
 struct HardwareBuffer;
+class HardwareDescriptor;
 
 namespace EmbeddedShader
 {
@@ -731,7 +732,7 @@ namespace EmbeddedShader
 			if constexpr (Texture2DProxyTraits<Type>::value)
 			{
 				auto textureType = std::make_shared<Ast::TextureType>();
-				textureType->texelType = Ast::AST::createType<Type::value_type>();
+				textureType->texelType = Ast::AST::createType<typename Type::value_type>();
 				node = Ast::AST::defineUniversalArray(std::move(textureType));
 			}
 			else node = Ast::AST::defineUniversalArray<Type>();
@@ -808,6 +809,7 @@ namespace EmbeddedShader
 			return "";
 		}
 	private:
+        friend std::shared_ptr<Ast::Value> proxy_wrap(const ArrayProxy& proxy) { return proxy.node; }
 		std::shared_ptr<Ast::Value> node;
 		void* boundResource_ = nullptr;
 		size_t* dirtyVersion = nullptr;
@@ -819,13 +821,6 @@ namespace EmbeddedShader
 
 	struct SamplerProxy
 	{
-		static bool usesCombinedComputeDescriptor()
-		{
-			const auto& stage = Ast::AST::getEmbeddedShaderStructure();
-			// Horizon stores the image and its sampler together in descriptor set 0.
-			return stage.stage == Ast::ShaderStage::Compute;
-		}
-
 		SamplerProxy()
 		{
 			if (auto parent = ParseHelper::getAggregateParent())
@@ -938,17 +933,9 @@ namespace EmbeddedShader
 			return {Ast::AST::at(node, index.node)};
 		}
 
-		VariateProxy<Type> sample(SamplerProxy& sampler,const VariateProxy<ktm::fvec2>& location)
+		VariateProxy<Type> sample(SamplerProxy&, const VariateProxy<ktm::fvec2>& location)
 		{
-			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
-			assert(!isHybrid);
-			if (SamplerProxy::usesCombinedComputeDescriptor())
-				return sample(location);
-			sampler.init("SamplerState");
-			sampler.node->access(Ast::AccessPermissions::ReadOnly);
-			node->access(Ast::AccessPermissions::ReadOnly);
-			auto func = Ast::AST::callFunc("Sample",Ast::AST::createType<Type>(),{sampler.node,location.node});
-			return {Ast::AST::access(node,func->parse(), func->type)};
+			return sample(location);
 		}
 
 		VariateProxy<Type> sample(const VariateProxy<ktm::fvec2>& location)
@@ -1056,29 +1043,14 @@ namespace EmbeddedShader
 		// 	std::reinterpret_pointer_cast<Ast::Texture2DType>(node->type)->name = "Sampler2D";
 		// }
 
-		VariateProxy<Type> sample(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir)
+		VariateProxy<Type> sample(SamplerProxy&, const VariateProxy<ktm::fvec3>& dir)
 		{
-			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
-			assert(!isHybrid);
-			if (SamplerProxy::usesCombinedComputeDescriptor())
-				return sample(dir);
-			sampler.init("SamplerState");
-			sampler.node->access(Ast::AccessPermissions::ReadOnly);
-			node->access(Ast::AccessPermissions::ReadOnly);
-			auto func = Ast::AST::callFunc("Sample",Ast::AST::createType<Type>(),{sampler.node,dir.node});
-			return {Ast::AST::access(node,func->parse(), func->type)};
+			return sample(dir);
 		}
 
-        VariateProxy<Type> sampleLevel(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
+        VariateProxy<Type> sampleLevel(SamplerProxy&, const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
 		{
-		    assert(!isHybrid);
-		    if (SamplerProxy::usesCombinedComputeDescriptor())
-		        return sampleLevel(dir, lod);
-		    sampler.init("SamplerState");
-		    sampler.node->access(Ast::AccessPermissions::ReadOnly);
-		    node->access(Ast::AccessPermissions::ReadOnly);
-		    auto func = Ast::AST::callFunc("SampleLevel",Ast::AST::createType<Type>(),{sampler.node,dir.node,lod.node});
-		    return {Ast::AST::access(node,func->parse(), func->type)};
+			return sampleLevel(dir, lod);
 		}
 
 		VariateProxy<Type> sample(const VariateProxy<ktm::fvec3>& dir)
@@ -1173,7 +1145,7 @@ namespace EmbeddedShader
 	    FunctionProxy(std::string funcName, std::string returnType, std::vector<std::pair<std::string,std::string>> args,SlangModule* sourceModule)
         : node(Ast::AST::functionDeclaration(std::move(funcName),std::move(returnType),std::move(args))),sourceModule(std::move(sourceModule)) {}
 
-		Ret operator()(Args... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
+		Ret operator()(const Args&... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
 				ParseHelper::IsArrayProxy<Ret>::value ||
 				ParseHelper::IsTexture2DProxy<Ret>::value ||
 				(!std::same_as<void,Ret>))
@@ -1185,11 +1157,11 @@ namespace EmbeddedShader
 				//Ast::AST::addGlobalStatement(node);
 				isBuildDeclaration = true;
 			}
-			Ret ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<typename Ret::value_type>(),{proxy_wrap(args)...})};
+			Ret ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<typename Ret::value_type>(),{proxy_wrap(args)...}, node.get())};
 			return ret;
 		}
 
-		void operator()(Args... args) requires std::same_as<void,Ret>
+		void operator()(const Args&... args) requires std::same_as<void,Ret>
 		{
 		    if (sourceModule) Ast::AST::getEmbeddedShaderStructure().slangModuleSource.insert(sourceModule);
 			if (!isBuildDeclaration)
@@ -1197,7 +1169,7 @@ namespace EmbeddedShader
 				//Ast::AST::addGlobalStatement(node);
 				isBuildDeclaration = true;
 			}
-			Ast::AST::addLocalUniversalStatement(Ast::AST::callFunc(node->funcName,nullptr,{proxy_wrap(args)...}));
+			Ast::AST::addLocalUniversalStatement(Ast::AST::callFunc(node->funcName,nullptr,{proxy_wrap(args)...}, node.get()));
 		}
 	private:
 		std::shared_ptr<Ast::FunctionDeclaration> node;
@@ -1215,7 +1187,7 @@ namespace EmbeddedShader
 	    FunctionProxy(std::string funcName, std::string returnType, std::vector<std::pair<std::string,std::string>> args,SlangModule* sourceModule)
         : node(Ast::AST::functionDeclaration(std::move(funcName),std::move(returnType),std::move(args))),sourceModule(std::move(sourceModule)) {}
 
-		VariateProxy<Ret> operator()(Args... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
+		VariateProxy<Ret> operator()(const Args&... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
 				ParseHelper::IsArrayProxy<Ret>::value ||
 				ParseHelper::IsTexture2DProxy<Ret>::value ||
 				(!std::same_as<void,Ret>))
@@ -1226,7 +1198,7 @@ namespace EmbeddedShader
 				//Ast::AST::addGlobalStatement(node);//需要处理当返回值被忽略时，函数调用未被生成的问题
 				isBuildDeclaration = true;
 			}
-			VariateProxy<Ret> ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<Ret>(),{proxy_wrap(args)...})};
+			VariateProxy<Ret> ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<Ret>(),{proxy_wrap(args)...}, node.get())};
 			return ret;
 		}
 	private:
@@ -1249,25 +1221,34 @@ namespace EmbeddedShader
 		uint32_t binding;
 
 		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc,
-		           uint32_t set_ = 0, uint32_t binding_ = 0)
+		           uint32_t set_ = 0, uint32_t binding_ = 0, uint64_t descriptorCount = UINT64_MAX,
+		           Ast::AccessPermissions access = Ast::AccessPermissions::None, bool aliased = false)
 			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc),
-			  set(set_), binding(binding_) {}
+			  set(set_), binding(binding_), descriptorCount_(descriptorCount), access_(access), aliased_(aliased) {}
+
+		BoundField operator[](uint32_t element) const;
 
 		template<typename T>
 		BoundField& operator=(const T& value)
 		{
 			if (!pipeline_) return *this;
 			if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareImage> ||
-			              std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer>)
+			              std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer> ||
+			              std::is_same_v<std::remove_cvref_t<T>, ::HardwareDescriptor>)
 				writeResource(value);
 			else
 				writeValue(&value, sizeof(T));
 			return *this;
 		}
 	private:
+		uint64_t descriptorCount_; // 0 for unbounded arrays, UINT64_MAX for ordinary value/output fields.
+		Ast::AccessPermissions access_;
+		bool aliased_;
+		uint32_t element_{};
 		void writeValue(const void* data, size_t size);
 		void writeResource(const ::HardwareBuffer& buffer);
 		void writeResource(const ::HardwareImage& image);
+		void writeResource(const ::HardwareDescriptor& descriptor);
 	};
 
 	template<typename ElementType>

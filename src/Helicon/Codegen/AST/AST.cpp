@@ -24,8 +24,6 @@ std::shared_ptr<EmbeddedShader::Ast::LocalVariate> EmbeddedShader::Ast::AST::def
 std::shared_ptr<EmbeddedShader::Ast::Value> EmbeddedShader::Ast::AST::binaryOperator(std::shared_ptr<Value> value1, std::shared_ptr<Value> value2,
 	std::string operatorType,std::shared_ptr<Type> type)
 {
-	value1->access(AccessPermissions::ReadOnly);
-	value2->access(AccessPermissions::ReadOnly);
 	auto binaryOp = std::make_shared<BinaryOperator>();
 	binaryOp->value1 = std::move(value1);
 	binaryOp->value2 = std::move(value2);
@@ -95,7 +93,9 @@ std::shared_ptr<EmbeddedShader::Ast::IfStatement> EmbeddedShader::Ast::AST::begi
     if (conditionDetector.has_value())
     {
         ifStatement->index = Parser::getCurrentBranchIndex();
+        Parser::currentParser->bindingConditions.emplace_back(ifStatement->index, true);
     }
+    else condition->access(AccessPermissions::ReadOnly);
     ifStatement->condition = std::move(condition);
 	ifStatement->conditionDetector = std::move(conditionDetector);
 	addLocalStatement(ifStatement);
@@ -103,23 +103,21 @@ std::shared_ptr<EmbeddedShader::Ast::IfStatement> EmbeddedShader::Ast::AST::begi
     return ifStatement;
 }
 
-void EmbeddedShader::Ast::AST::endIf()
+void EmbeddedShader::Ast::AST::endBranch(bool hostCondition)
 {
+    if (hostCondition) Parser::currentParser->bindingConditions.pop_back();
 	getLocalStatementStack().pop();
 }
 
 void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 {
 	auto elseStatement = std::make_shared<ElseStatement>();
+    if (followIf->conditionDetector)
+        Parser::currentParser->bindingConditions.emplace_back(followIf->index, false);
     elseStatement->followIf = std::move(followIf);
     elseStatement->followIf->hasElse = true;
 	addLocalStatement(elseStatement);
 	getLocalStatementStack().push(&elseStatement->statements);
-}
-
-void EmbeddedShader::Ast::AST::endElse()
-{
-	getLocalStatementStack().pop();
 }
 
 void EmbeddedShader::Ast::AST::beginWhile(std::shared_ptr<Value> condition)
@@ -274,7 +272,6 @@ std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(
 std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(std::shared_ptr<Value> array,
 	const std::shared_ptr<Value>& index)
 {
-	index->access(AccessPermissions::ReadOnly);
 	auto element = std::make_shared<ElementValue>();
 	element->type = array->type;
 	element->index = index;
@@ -291,9 +288,27 @@ void EmbeddedShader::Ast::AST::addLocalUniversalStatement(
 }
 
 std::shared_ptr<EmbeddedShader::Ast::CallFunc> EmbeddedShader::Ast::AST::callFunc(std::string funcName,
-	std::shared_ptr<Type> returnType, std::vector<std::shared_ptr<Value>> args)
+	std::shared_ptr<Type> returnType, std::vector<std::shared_ptr<Value>> args, const FunctionDeclaration* declaration)
 {
-	Node::accessAll(args, AccessPermissions::ReadOnly);
+    for (size_t i = 0; i < args.size(); ++i) {
+        auto access = AccessPermissions::ReadOnly;
+        if (declaration) {
+            const std::string_view parameter = declaration->args.at(i).first;
+            if (parameter.starts_with("out ")) access = AccessPermissions::WriteOnly;
+            if (parameter.starts_with("inout ")) access = AccessPermissions::ReadAndWrite;
+            if (auto* image = dynamic_cast<UniversalTexture*>(args[i].get())) {
+                if (parameter.starts_with("Sampler2D") || parameter.starts_with("SamplerCube")) {
+                    static_cast<TextureType&>(*image->type).name = parameter.substr(0, parameter.find('<'));
+                } else {
+                    image->indexed = true;
+                    access = AccessPermissions::ReadAndWrite;
+                }
+            } else if (dynamic_cast<UniversalArray*>(args[i].get()) && !parameter.starts_with("StructuredBuffer")) {
+                access = AccessPermissions::ReadAndWrite;
+            }
+        }
+        args[i]->access(access);
+    }
 	auto func = std::make_shared<CallFunc>();
 	func->type = std::move(returnType);
 	func->args = std::move(args);

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <span>
+#include <variant>
 
 #include "HardwareWrapperVulkan/HardwareContext.h"
 #include "Horizon.h"
@@ -29,7 +29,7 @@ struct CommandRecordVulkan
 
     virtual ~CommandRecordVulkan() = default;
     virtual void commitCommand(HardwareExecutorVulkan &executor) = 0;
-    virtual void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) = 0;
+    virtual void resolveResourceUses(ResourceAccessList&) = 0;
     virtual ExecutorType getExecutorType() = 0;
 };
 } // namespace horizon::detail
@@ -40,14 +40,12 @@ using horizon::detail::CommandRecordVulkan;
 struct RecordedCommand
 {
     CommandRecordVulkan* command{};
-    std::vector<ResourceUse> resourceUses;
     std::shared_ptr<void> owner;
     CommandRecordVulkan::ExecutorType type{CommandRecordVulkan::ExecutorType::Invalid};
 
     RecordedCommand() = default;
-    explicit RecordedCommand(CommandRecordVulkan& record, std::shared_ptr<void> owner = {},
-                             std::vector<ResourceUse> resources = {})
-        : command(&record), resourceUses(std::move(resources)), owner(std::move(owner)), type(record.getExecutorType()) {}
+    explicit RecordedCommand(CommandRecordVulkan& record, std::shared_ptr<void> owner = {})
+        : command(&record), owner(std::move(owner)), type(record.getExecutorType()) {}
 };
 
 struct HardwareExecutor::Command::Impl
@@ -132,11 +130,10 @@ struct HardwareExecutorVulkan
     // Borrowed commands must outlive recording; their GPU resources must outlive execution.
     // Supply an owner when the queue should retain the command.
     HardwareExecutorVulkan &record(CommandRecordVulkan *commandRecord,
-                                  const std::vector<ResourceUse>& resources = {},
                                   std::shared_ptr<void> owner = {})
     {
         if (commandRecord) {
-            RecordedCommand entry(*commandRecord, std::move(owner), resources);
+            RecordedCommand entry(*commandRecord, std::move(owner));
             if (entry.type != CommandRecordVulkan::ExecutorType::Invalid)
                 commandList.push_back(std::move(entry));
         }

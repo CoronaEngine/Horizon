@@ -83,8 +83,8 @@ void RasterPipelineVulkan::initializeStageBindings(uint32_t viewCount)
     extractStageBindings(vertex, vertexStageInputs, vertexStageOutputs);
     extractStageBindings(fragment, fragmentStageInputs, fragmentStageOutputs);
     renderTargets.resize(fragmentStageOutputs.size());
-    mergeWithoutUses = EmbeddedShader::rasterShaderCanMergeWithoutUses(vertShaderCode) &&
-                       EmbeddedShader::rasterShaderCanMergeWithoutUses(fragShaderCode);
+    bindings.addLayout(vertex);
+    bindings.addLayout(fragment);
     multiviewCount = viewCount;
     uboSize = std::max(vertex.uniformBufferSize, fragment.uniformBufferSize);
     if (uboSize) tempUBO = std::make_unique<uint8_t[]>(uboSize);
@@ -400,11 +400,10 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 }
 
 HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth,
-                                            std::optional<ktm::uvec2> extent, std::optional<Raster::Pass> requestedPass,
-                                            const std::vector<ResourceUse>& uses)
+                                            std::optional<ktm::uvec2> extent, std::optional<Raster::Pass> requestedPass)
     : pipeline(std::move(backend)), pass(requestedPass.value_or(Raster::Pass{})),
       startsPass(requestedPass.has_value()), depthImage(depth),
-      renderTargets(pipeline->renderTargets), resourceUses(uses)
+      renderTargets(pipeline->renderTargets)
 {
     if (!extent) {
         const auto color = std::find_if(renderTargets.begin(), renderTargets.end(), [](const HardwareImage& image) { return bool(image); });
@@ -429,49 +428,22 @@ HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan
     } else {
         pass.loadDepth = false;
     }
-    uniformBytes = copyParameterBytes(pipeline->tempUBO.get(), pipeline->uboSize);
-    bindings = pipeline->bindings.snapshot();
 }
 
 bool HardwareExecutor::Command::Impl::Draw::canMerge(const Draw& next) const
 {
-    if (pipeline != next.pipeline || uniformBytes != next.uniformBytes)
+    if (!bindings || !next.bindings || pipeline != next.pipeline || uniformBytes != next.uniformBytes)
         return false;
     if (bindings != next.bindings && !std::ranges::equal(bindings->values, next.bindings->values,
         [](const PipelineBinding& a, const PipelineBinding& b) {
             return a.offset == b.offset && a.size == b.size && a.uniform == b.uniform &&
-                   a.fixedSlot == b.fixedSlot && a.sampled == b.sampled && sameResource(a.resource, b.resource);
+                   a.fixedSlot == b.fixedSlot && a.table == b.table && a.stages == b.stages &&
+                   a.access == b.access && sameResource(a.resource, b.resource);
         })) return false;
 
-    // With equal read-only shader resources, each group's geometry, packets and parameters
-    // add only buffer reads. Storage writes and opaque bindless accesses need a pass boundary.
-    if (!pipeline->mergeWithoutUses && resourceUses.empty()) return false;
-    if (!std::ranges::equal(resourceUses, next.resourceUses, [](const ResourceUse& a, const ResourceUse& b) {
-        return a.access == ResourceAccess::Read && b.access == ResourceAccess::Read && sameResource(a.resource, b.resource);
-    })) return false;
-
-    const auto readsAttachment = [&](const PipelineResource& resource) {
-        const auto* image = std::get_if<HardwareImage>(&resource);
-        if (!image || !*image) return false;
-        const auto handle = ResourceManager::get(*image)->imageHandle;
-        const auto aliases = [handle](const HardwareImage& attachment) {
-            return attachment && ResourceManager::get(attachment)->imageHandle == handle;
-        };
-        return aliases(depthImage) || std::ranges::any_of(renderTargets, aliases);
-    };
-    for (const auto& use : resourceUses)
-        if (!std::visit([](const auto& resource) { return bool(resource); }, use.resource) || readsAttachment(use.resource))
-            return false;
-    for (const auto& binding : bindings->values) {
-        if (readsAttachment(binding.resource)) return false;
-        if (pipeline->mergeWithoutUses || binding.sampled) continue;
-        if (const auto* image = std::get_if<HardwareImage>(&binding.resource);
-            image && *image && !(ResourceManager::get(*image)->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) continue;
-        if (!std::ranges::any_of(resourceUses, [&](const ResourceUse& use) {
-                return sameResource(binding.resource, use.resource);
-            })) return false;
-    }
-    return true;
+    return std::ranges::none_of(bindings->values, [](const PipelineBinding& binding) {
+        return (binding.access & VK_ACCESS_2_SHADER_WRITE_BIT) != 0;
+    });
 }
 
 bool HardwareExecutor::Command::Impl::Draw::sameAttachments(const Draw& next) const
@@ -554,21 +526,16 @@ void RasterPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void
                         bindType, byteOffset, data, size);
 }
 
-void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+                                            int32_t bindType, uint32_t slot)
 {
-    bindings.writeResource({}, {tempUBO.get(), uboSize},
-                           bindType, byteOffset, typeSize, buffer);
+    bindings.writeResource({}, {tempUBO.get(), uboSize}, bindType, byteOffset, typeSize, descriptor,
+                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, slot);
 }
 
-void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
+void RasterPipelineVulkan::setRenderTarget(uint32_t location, const HardwareImage& image)
 {
-    if (bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
-    {
-        if (location < renderTargets.size()) renderTargets[location] = image;
-        return;
-    }
-    bindings.writeResource({}, {tempUBO.get(), uboSize},
-                           bindType, byteOffset, typeSize, image, location);
+    renderTargets.at(location) = image;
 }
 
 namespace {
@@ -589,7 +556,8 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 
 void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                                 const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                                                std::optional<Raster::ScissorRect> scissor)
+                                                std::optional<Raster::ScissorRect> scissor,
+                                                std::span<const EmbeddedShader::AutoBindEntry> entries)
 {
     if (!count) return;
     if (!packets || packets.getElementSize() != sizeof(Raster::IndirectPacket) || count > packets.getElementCount() ||
@@ -607,6 +575,10 @@ void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer&
         if (right <= x || bottom <= y) return;
         clip = {{x, y}, {uint32_t(right - x), uint32_t(bottom - y)}};
     }
+    for (const auto& entry : entries)
+        if (entry.bindType != EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
+            pipeline->bindings.bindAuto({}, {pipeline->tempUBO.get(), pipeline->uboSize}, entry);
+    uniformBytes = copyParameterBytes(pipeline->tempUBO.get(), pipeline->uboSize);
     IndirectGroup group{vertices, indices, packets, parameters, {}, clip, count, {}};
     auto& pool = pipeline->uploadPool;
     {
@@ -628,13 +600,14 @@ void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer&
     const auto parameterAddress = parameters ? addressOf(parameters) : geometryAddress + offsetof(GeometryEntry, reserved);
     group.root = {addressOf(packets), geometryAddress, parameterAddress, 0, 0};
     groups.push_back(std::move(group));
+    bindings = pipeline->bindings.snapshot();
     drawCount = count;
 }
 
-void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
+void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(ResourceAccessList& result)
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    resolveShaderBindings(result, bindings->values, shaderStages);
+    if (bindings) bindings->resolveResourceUses(result);
     for (const auto& group : groups) {
         result.buffer(*ResourceManager::get(group.packets), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -642,8 +615,7 @@ void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(std::span<const 
         if (group.parameters)
             result.buffer(*ResourceManager::get(group.parameters), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
         for (const auto* buffer : {&group.vertices, &group.indices})
-            result.buffer(*ResourceManager::get(*buffer), VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                          VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+            result.buffer(*ResourceManager::get(*buffer), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     }
     for (const auto& target : renderTargets)
         if (target)
@@ -666,13 +638,6 @@ void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(std::span<const 
                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, range);
     }
-    if (declarations.empty()) {
-        resolveDeclaredUses(result, resourceUses, shaderStages);
-    } else {
-        auto uses = resourceUses;
-        uses.insert(uses.end(), declarations.begin(), declarations.end());
-        resolveDeclaredUses(result, uses, shaderStages);
-    }
 }
 
 void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
@@ -681,9 +646,11 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
     const auto& graphics = *framebuffer->graphics;
     const auto pipelineLayout = graphics.layout;
     const auto commandBuffer = hardwareExecutor.currentRecordQueue->commandBuffer;
-    bindings->prepareDescriptors();
-    bindings->writeParameters({}, uniformBytes);
-    if (!uniform) uniform = pipeline->uniformPool.acquire(uniformBytes, pipeline->uboDescriptorSetLayout);
+    if (bindings) {
+        bindings->prepareDescriptors();
+        bindings->writeParameters({}, uniformBytes);
+        if (!uniform) uniform = pipeline->uniformPool.acquire(uniformBytes, pipeline->uboDescriptorSetLayout);
+    }
     VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     info.renderPass = graphics.renderPass;
     info.framebuffer = framebuffer->framebuffer;
@@ -698,7 +665,7 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
     std::array<VkDescriptorSet, 4> sets{};
     const auto& tables = getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors;
     for (size_t i = 0; i < 3; ++i)
-        sets[i] = bindings->sets[i] ? bindings->sets[i] : tables[i].descriptorSet;
+        sets[i] = bindings && bindings->sets[i] ? bindings->sets[i] : tables[i].descriptorSet;
     sets[3] = uniform ? uniform->set : VK_NULL_HANDLE;
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                             0, sets[3] ? 4 : 3, sets.data(), 0, nullptr);
@@ -747,7 +714,6 @@ struct RasterPipeline<VS, FS>::Impl
     std::unique_ptr<EmbeddedShader::RasterPipelineObject> variants;
     EmbeddedShader::ShaderCodeCompiler::ConditionInfo vertexConditions, fragmentConditions;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
-    std::vector<ResourceUse> resourceUses;
 
     static Impl& checked(const std::unique_ptr<Impl>& impl)
     {
@@ -794,14 +760,6 @@ template<class VS, class FS>
 RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::operator=(RasterPipeline&&) noexcept = default;
 
 template<class VS, class FS>
-RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::uses(std::initializer_list<ResourceUse> resources)
-{
-    if (!impl_) impl_ = std::make_unique<Impl>();
-    impl_->resourceUses.assign(resources);
-    return *this;
-}
-
-template<class VS, class FS>
 HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
     const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
     const HardwareBuffer& parameters, const HardwareImage& depth, std::optional<ScissorRect> scissor,
@@ -811,24 +769,14 @@ HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
     auto& pipeline = Impl::checked(impl_);
     if (pipeline.variants) pipeline.refreshShaderVariant();
     auto& backend = *pipeline.backend;
-    // Auto-bind: read current resource from each EDSL proxy's back-pointer
-    for (const auto& entry : pipeline.autoBindEntries)
-    {
-        if (entry.boundValueRef)
-        {
-            backend.setPushConstantDirect(entry.byteOffset, entry.boundValueRef, entry.boundValueSize, entry.bindType);
-        }
-        else if (entry.boundResourceRef && *entry.boundResourceRef)
-        {
-            void* res = *entry.boundResourceRef;
-            if (entry.boundResourceIsBuffer)
-                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareBuffer*>(res), entry.bindType);
-            else
-                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
+    for (const auto& entry : pipeline.autoBindEntries) {
+        if (entry.bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs && entry.boundResourceRef) {
+            auto* image = static_cast<HardwareImage*>(*entry.boundResourceRef);
+            backend.setRenderTarget(entry.location, image ? *image : HardwareImage{});
         }
     }
-    auto draw = std::make_shared<HardwareExecutor::Command::Impl::Draw>(pipeline.backend, depth, extent, pass, pipeline.resourceUses);
-    draw->appendIndirect(vertices, indices, packets, count, parameters, scissor);
+    auto draw = std::make_shared<HardwareExecutor::Command::Impl::Draw>(pipeline.backend, depth, extent, pass);
+    draw->appendIndirect(vertices, indices, packets, count, parameters, scissor, pipeline.autoBindEntries);
     if (!draw->drawCount && !pass) return HardwareExecutor::Command(nullptr);
     return HardwareExecutor::Command(std::move(draw));
 }

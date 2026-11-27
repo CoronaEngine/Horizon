@@ -66,8 +66,6 @@ EdslFeature::EdslFeature(void* native_window)
         shaded[pixel] = Float4(mix(background, lit, material->w), 1.0f);
     };
     lighting = ComputePipeline(compute_shader, ktm::uvec3(group_size, group_size, 1), {.compileHLSL = false});
-    lighting.uses({{albedo_image, ResourceAccess::Read}, {normal_image, ResourceAccess::Read},
-                   {shaded_image, ResourceAccess::Write}});
 }
 
 void EdslFeature::run(float)

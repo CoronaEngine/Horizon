@@ -15,20 +15,16 @@ struct ResolvedResourceUse
     VkPipelineStageFlags2 stages{};
     VkAccessFlags2 access{};
     VkImageLayout layout{VK_IMAGE_LAYOUT_UNDEFINED};
-    // Kept separate until overlapping image ranges have been merged.
-    VkPipelineStageFlags2 declaredStages{};
-    VkAccessFlags2 declaredAccess{};
     bool hostMapped{};
 };
 
 struct ResourceAccessList
 {
-    bool conservative{false};
     std::vector<ResolvedResourceUse> uses;
     void clear();
-    ResolvedResourceUse& buffer(ResourceManager::BufferHardwareWrap& value, VkPipelineStageFlags2 stages, VkAccessFlags2 access);
-    ResolvedResourceUse& image(ResourceManager::ImageHardwareWrap& value, VkPipelineStageFlags2 stages, VkAccessFlags2 access,
-                               VkImageLayout layout, VkImageSubresourceRange range);
+    void buffer(ResourceManager::BufferHardwareWrap& value, VkPipelineStageFlags2 stages, VkAccessFlags2 access);
+    void image(ResourceManager::ImageHardwareWrap& value, VkPipelineStageFlags2 stages, VkAccessFlags2 access,
+               VkImageLayout layout, VkImageSubresourceRange range);
 private:
     std::unordered_map<VkBuffer, size_t> bufferIndices;
     using RangeKey = std::tuple<VkImage, VkImageAspectFlags, uint32_t, uint32_t, uint32_t, uint32_t>;
@@ -56,7 +52,6 @@ class ResourceBarrierPlanner
 public:
     void plan(const ResourceAccessList& accesses, ResourceBarriers& result, bool finalCommand);
     void recordHostReadBarrier(VkCommandBuffer commandBuffer) const;
-    void invalidate(); // An opaque command is a conservative boundary on both sides.
 
 private:
     struct AccessState

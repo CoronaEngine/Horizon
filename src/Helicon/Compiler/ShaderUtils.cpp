@@ -1,66 +1,14 @@
 #include "ShaderUtils.h"
 #include <Compiler/ShaderCommon.h>
-#include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/optimizer.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <sstream>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace EmbeddedShader
 {
-    bool rasterShaderCanMergeWithoutUses(const ShaderCodeModule& module)
-    {
-        const auto* code = std::get_if<std::vector<uint32_t>>(&module.shaderCode);
-        if (!code || code->empty()) return false;
-
-        // Pointer types and the values of those types share one SPIR-V ID namespace.
-        enum Storage : uint32_t { Input = 1, Uniform = 2, Output = 3, Private = 6, Function = 7,
-                                  PushConstant = 9, StorageBuffer = 12, PhysicalStorageBuffer = 5349 };
-        std::unordered_map<uint32_t, Storage> pointerStorage;
-        bool inFunction = false;
-        spvtools::SpirvTools parser(SPV_ENV_VULKAN_1_4);
-        return parser.Parse(*code, [](auto, const auto&) { return SPV_SUCCESS; },
-            [&](const spv_parsed_instruction_t& inst) {
-                const std::string_view op = spvOpcodeString(inst.opcode);
-                if (op == "TypePointer")
-                    pointerStorage.emplace(inst.result_id, static_cast<Storage>(inst.words[2]));
-                else if (const auto type = pointerStorage.find(inst.type_id); type != pointerStorage.end())
-                    pointerStorage.emplace(inst.result_id, type->second);
-
-                if (op == "Function") { inFunction = true; return SPV_SUCCESS; }
-                if (op == "FunctionEnd") { inFunction = false; return SPV_SUCCESS; }
-                if (!inFunction) return SPV_SUCCESS;
-
-                if (op == "Store" || op == "Load") {
-                    const auto ptr = pointerStorage.find(inst.words[op == "Store" ? 1 : 3]);
-                    if (ptr == pointerStorage.end()) return SPV_REQUESTED_TERMINATION;
-                    const auto storage = ptr->second;
-                    if (storage == Output || storage == Private || storage == Function) return SPV_SUCCESS;
-                    if (op == "Load" && (storage == Input || storage == Uniform || storage == PushConstant ||
-                                         storage == StorageBuffer || storage == PhysicalStorageBuffer)) return SPV_SUCCESS;
-                    return SPV_REQUESTED_TERMINATION;
-                }
-                if (op == "ExtInst") {
-                    // GLSL.std.450 includes two instructions with output pointer operands (Modf and Frexp).
-                    if (inst.ext_inst_type == SPV_EXT_INST_TYPE_GLSL_STD_450 && inst.words[4] <= 81 &&
-                        inst.words[4] != 35 && inst.words[4] != 51) return SPV_SUCCESS;
-                    return SPV_REQUESTED_TERMINATION;
-                }
-                // Core SPIR-V opcode groups: composites; conversions, arithmetic and derivatives; control flow.
-                if ((inst.opcode >= 77 && inst.opcode <= 84) || (inst.opcode >= 109 && inst.opcode <= 215) ||
-                    (inst.opcode >= 245 && inst.opcode <= 255)) return SPV_SUCCESS;
-                if (op == "Variable" || op == "FunctionParameter" || op == "FunctionCall" ||
-                    op == "AccessChain" || op == "InBoundsAccessChain" || op == "PtrAccessChain" ||
-                    op == "InBoundsPtrAccessChain" || op == "CopyLogical" || op == "Nop" ||
-                    op == "Line" || op == "NoLine") return SPV_SUCCESS;
-                // Image accesses may alias an attachment. Atomics, copies and unknown operations need a boundary.
-                return SPV_REQUESTED_TERMINATION;
-            });
-    }
-
     void linkRasterDrawParameter(ShaderCodeModule& vertex, ShaderCodeModule& fragment)
     {
         using Resources = ShaderCodeModule::ShaderResources;
@@ -211,6 +159,8 @@ namespace EmbeddedShader
 			result << bindInfo.typeSize << ",";
 			result << bindInfo.byteOffset << ",";
 			result << "static_cast<::EmbeddedShader::ShaderCodeModule::ShaderResources::BindType>(" << bindInfo.bindType << ")";
+			if (bindInfo.access != Ast::AccessPermissions::None)
+				result << ",static_cast<::EmbeddedShader::Ast::AccessPermissions>(" << static_cast<unsigned>(bindInfo.access) << ")";
 			result << "},";
 		}
 		result << "}";

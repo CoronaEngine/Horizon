@@ -53,7 +53,7 @@ void CopyBufferCommand::commitCommand(HardwareExecutorVulkan &hardwareExecutor)
                     srcBuffer.bufferHandle, dstBuffer.bufferHandle, 1, &region);
 }
 
-void CopyBufferCommand::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
+void CopyBufferCommand::resolveResourceUses(ResourceAccessList& result)
 {
     result.buffer(srcBuffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     result.buffer(dstBuffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
@@ -123,7 +123,7 @@ void CopyImageCommand::commitCommand(HardwareExecutorVulkan &hardwareExecutor)
     }
 }
 
-void CopyImageCommand::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
+void CopyImageCommand::resolveResourceUses(ResourceAccessList& result)
 {
     if (!valid()) return;
 
@@ -182,7 +182,7 @@ void CopyBufferToImageCommand::commitCommand(HardwareExecutorVulkan &hardwareExe
     }
 }
 
-void CopyBufferToImageCommand::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
+void CopyBufferToImageCommand::resolveResourceUses(ResourceAccessList& result)
 {
     result.buffer(srcBuffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     result.image(dstImage, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -227,7 +227,7 @@ void CopyImageToBufferCommand::commitCommand(HardwareExecutorVulkan &hardwareExe
     }
 }
 
-void CopyImageToBufferCommand::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
+void CopyImageToBufferCommand::resolveResourceUses(ResourceAccessList& result)
 {
     result.image(srcImage, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
         transferLayout(srcImage, layerCount, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),

@@ -14,8 +14,7 @@ bool sameResource(const PipelineResource& a, const PipelineResource& b);
 // A cleared draw parameter remains zero and must not be patched on replay.
 inline constexpr uint32_t pendingDescriptorIndex = UINT32_MAX;
 
-// CPU binding state retains resources and parameter locations independently of
-// descriptor allocation and the caller's dependency declaration.
+// A captured binding owns the resource and its reflected access in this shader variant.
 struct PipelineBinding
 {
     uint64_t offset{};
@@ -23,12 +22,16 @@ struct PipelineBinding
     bool uniform{};
     PipelineResource resource;
     uint32_t fixedSlot{UINT32_MAX};
-    bool sampled{};
+    uint32_t table{};
+    uint32_t privateSlot{UINT32_MAX};
+    VkPipelineStageFlags2 stages{};
+    VkAccessFlags2 access{};
 };
 
 struct BindingSnapshot
 {
     std::vector<PipelineBinding> values;
+    std::array<uint32_t, 3> tableLimits{UINT32_MAX, UINT32_MAX, UINT32_MAX};
     VkDevice device{VK_NULL_HANDLE};
     std::array<VkDescriptorPool, 3> pools{};
     std::array<VkDescriptorSet, 3> sets{};
@@ -36,7 +39,8 @@ struct BindingSnapshot
     BindingSnapshot() = default;
     BindingSnapshot(const BindingSnapshot&) = delete;
     ~BindingSnapshot();
-    // Automatic descriptors are shared; fixed-slot bindings get private tables.
+    // Fixed slots and bounded shader arrays use private descriptor tables.
+    void resolveResourceUses(ResourceAccessList& result) const;
     void prepareDescriptors();
     void writeParameters(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes) const;
 };
@@ -44,11 +48,14 @@ struct BindingSnapshot
 struct PipelineBindings
 {
     std::vector<PipelineBinding> values;
+    std::array<uint32_t, 3> tableLimits{UINT32_MAX, UINT32_MAX, UINT32_MAX};
     std::shared_ptr<BindingSnapshot> cached;
+    void addLayout(const EmbeddedShader::ShaderCodeModule::ShaderResources& resources);
+    void bindAuto(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, const EmbeddedShader::AutoBindEntry& entry);
     void writeValue(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, int32_t bindType,
                     uint64_t offset, const void* data, size_t size);
     void writeResource(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, int32_t bindType,
-                       uint64_t offset, uint32_t typeSize, PipelineResource resource,
+                       uint64_t offset, uint32_t typeSize, const HardwareDescriptor& descriptor, VkPipelineStageFlags2 stages,
                        std::optional<uint32_t> fixedSlot = std::nullopt);
     void erase(uint64_t offset, size_t size, bool uniform);
     void set(PipelineBinding binding);
@@ -56,6 +63,17 @@ struct PipelineBindings
 };
 
 namespace EmbeddedShader {
+template<class PipelineType>
+BoundField<PipelineType> BoundField<PipelineType>::operator[](uint32_t element) const
+{
+    if (descriptorCount_ == UINT64_MAX) throw std::invalid_argument("Only descriptor fields support indexing");
+    if (element == UINT32_MAX || (descriptorCount_ && element >= descriptorCount_))
+        throw std::out_of_range("Shader descriptor array index is out of range");
+    auto field = *this;
+    field.element_ = element;
+    return field;
+}
+
 template<class PipelineType>
 void BoundField<PipelineType>::writeValue(const void* data, size_t size)
 {
@@ -66,18 +84,50 @@ void BoundField<PipelineType>::writeValue(const void* data, size_t size)
 template<class PipelineType>
 void BoundField<PipelineType>::writeResource(const ::HardwareBuffer& buffer)
 {
-    auto& state = PipelineType::Impl::checked(pipeline_->impl_);
-    state.backend->setResourceDirect(byteOffset, typeSize, buffer, bindType);
+    using Bind = ShaderCodeModule::ShaderResources;
+    if (bindType != Bind::storageBuffer && bindType != Bind::rawBuffer)
+        throw std::invalid_argument("Assign a buffer descriptor to a shader index field");
+    const auto access = access_ != Ast::AccessPermissions::None ? access_
+        : bindType == Bind::rawBuffer ? Ast::AccessPermissions::ReadOnly : Ast::AccessPermissions::ReadAndWrite;
+    writeResource(HardwareDescriptor(buffer, access));
 }
 
 template<class PipelineType>
 void BoundField<PipelineType>::writeResource(const ::HardwareImage& image)
 {
+    using Bind = ShaderCodeModule::ShaderResources;
+    if constexpr (std::is_same_v<PipelineType, ::RasterPipeline<>>) {
+        if (bindType == Bind::stageOutputs) {
+            PipelineType::Impl::checked(pipeline_->impl_).backend->setRenderTarget(location, image);
+            return;
+        }
+    }
+    if (bindType == Bind::storageTexture)
+        writeResource(HardwareDescriptor(image, access_ == Ast::AccessPermissions::None ? Ast::AccessPermissions::ReadAndWrite : access_));
+    else if (bindType == Bind::texture || bindType == Bind::sampledImages || bindType == Bind::sampler)
+        writeResource(image.storeSampledDescriptor());
+    else throw std::invalid_argument("Assign an image descriptor to a shader index field");
+}
+
+template<class PipelineType>
+void BoundField<PipelineType>::writeResource(const ::HardwareDescriptor& descriptor)
+{
+    if (descriptorCount_ != UINT64_MAX) {
+        const uint32_t table = std::holds_alternative<HardwareBuffer>(descriptor.resource_) ? 1u : descriptor.sampled_ ? 0u : 2u;
+        if (binding != 0 || set != table)
+            throw std::invalid_argument("Descriptor does not match the shader field's table");
+        if (access_ != Ast::AccessPermissions::None && (access_ & descriptor.access_) != descriptor.access_)
+            throw std::invalid_argument("Descriptor access is incompatible with the shader field");
+    }
     auto& state = PipelineType::Impl::checked(pipeline_->impl_);
-    if constexpr (std::is_same_v<PipelineType, ::RasterPipeline<>>)
-        state.backend->setResourceDirect(byteOffset, typeSize, image, bindType, location);
-    else
-        state.backend->setResourceDirect(byteOffset, typeSize, image, bindType);
+    // Several Slang names can refer to this single physical slot across shader stages.
+    if (aliased_ && descriptor.access_ != access_) {
+        auto shared = descriptor;
+        shared.access_ = access_;
+        state.backend->setResourceDirect(byteOffset, typeSize, shared, bindType, element_);
+    } else {
+        state.backend->setResourceDirect(byteOffset, typeSize, descriptor, bindType, element_);
+    }
 }
 
 // Only the pipeline implementation files have the complete Impl needed for these writes.
@@ -111,7 +161,3 @@ struct UniformSnapshotPool {
 
 VkDescriptorSetLayout createUniformSnapshotLayout(VkDevice device);
 std::vector<uint8_t> copyParameterBytes(const uint8_t* data, size_t size);
-void resolveShaderBindings(ResourceAccessList& result, std::span<const PipelineBinding> bindings,
-                           VkPipelineStageFlags2 stages);
-void resolveDeclaredUses(ResourceAccessList& result, std::span<const ResourceUse> declarations,
-                         VkPipelineStageFlags2 stages);

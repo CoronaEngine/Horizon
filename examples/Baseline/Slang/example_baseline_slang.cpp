@@ -71,10 +71,9 @@ BaselineSlang::BaselineSlang(void* native_window)
     }
 
     pipeline.outColor = color;
-    // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
-    parameters.texIndex = texture_image.storeDescriptor();
+    pipeline.vp.texIndex = texture_image.storeSampledDescriptor();
     for (auto& buffer : parameter_buffers)
-        buffer = HardwareBuffer(sizeof(DrawParameters), HardwareBuffer::Usage::StorageBuffer);
+        buffer = HardwareBuffer(sizeof(ktm::fmat4x4), HardwareBuffer::Usage::StorageBuffer);
 
     pipeline.vp.view = ktm::look_at_rh<float>({2, 2, 2}, {0, 0, 0}, {0, 0, 1});
     // KTM 0.2.16's frustum_rh gives positive clip W along the camera's -Z axis.
@@ -88,13 +87,13 @@ BaselineSlang::BaselineSlang(void* native_window)
 
 void BaselineSlang::run(float seconds)
 {
-    parameters.model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
+    const auto model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
     if (next_parameter_buffer == parameter_buffers.size()) {
         render_executor.wait();
         next_parameter_buffer = 0;
     }
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
-    parameter_buffer.copyFromData(&parameters, sizeof(parameters));
+    parameter_buffer.copyFromData(&model, sizeof(model));
 
     render_executor << pipeline(vertex_buffer, index_buffer, commands, 1, parameter_buffer, depth)
                     << display(color);

@@ -270,7 +270,7 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 手写着色器通过 `#include SLANG(...)`、`HLSL(...)` 或 `GLSL(...)` 引入。构建时生成的阶段对象自带 SPIR-V 和反射。计算管线写作 `ComputePipeline pipeline(compute_write_slang)`，光栅管线传入顶点和片元两个阶段对象。EDSL 在相同的构造位置传入 lambda。
 
-拷贝、绘制、计算和呈现都返回 `HardwareExecutor::Command`，可以直接用 `executor <<` 入队，也可以先保存，再按需要的顺序入队。同一条命令可以多次入队。调用计算管线时，命令会保存本次 dispatch 的工作组数量、着色器变体、参数、资源绑定和 `uses()` 声明。
+拷贝、绘制、计算和呈现都返回 `HardwareExecutor::Command`，可以直接用 `executor <<` 入队，也可以先保存，再按需要的顺序入队。同一条命令可以多次入队。调用计算管线时，命令会保存本次 dispatch 的工作组数量、着色器变体、参数，以及该变体使用的资源和图像视图。之后给管线重新赋值，可以为下一条命令选择其他资源。
 
 ```cpp
 const auto dispatch = compute(groupsX, groupsY, groupsZ);
@@ -324,7 +324,13 @@ executor.commit();
 
 首次绘制默认清除已绑定的附件。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 `scissor` 之后显式传入 `RasterPipeline<>::Pass{}`。两遍绘制可以传入同一张深度图，第二遍用 `RasterPipeline<>::Pass{.loadColor = true, .loadDepth = true}` 保留上一遍的颜色和深度。只清除颜色时写 `executor << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPipeline<>::Pass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
 
-执行器可以把管线状态和绑定相同的相邻绘制录入一个物理 pass。对于通过描述符索引采样的纹理，可用 `pipeline.uses({{texture, ResourceAccess::Read}})` 声明实际读取的资源。存在存储写入或无法确认资源访问时，执行器会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。
+手写 Slang 通过参数索引描述符表时，给字段赋一个 `HardwareDescriptor`。例如 Baseline 使用 `pipeline.vp.texIndex = texture_image.storeSampledDescriptor()`。缓冲和存储图像分别用 `storeReadDescriptor()`、`storeWriteDescriptor()` 或 `storeReadWriteDescriptor()` 表达本次访问。图像的过滤采样用 `storeSampledDescriptor()`，按坐标读取存储图像用 `storeReadDescriptor()`。这些值可以保存和复制，持有对应的资源或图像视图。Slang 反射出的直接资源字段和固定槽位仍可写成 `pipeline.outputs[3] = buffer`，读写范围由 shader 声明决定。EDSL 从代理的赋值、读取和采样处记录用途。
+
+命令创建时保存绑定及其访问方式。EDSL 会按当前主机条件选择变体，GPU 条件会合并各条可能执行的路径。希望某个采样或导入函数的资源只在特定变体中登记时，把调用也写在对应的 `$IF` 分支里。同一张图在一条管线里同时用于采样和存储时，给两个 EDSL 代理绑定同一张图，分别用于 `sample()` 和下标访问。
+
+普通整数赋值会清除该字段先前的描述符绑定。手写 shader 通过整数选择槽位时，应先绑定所有可能访问的资源，并覆盖实际的读写权限，包括间接查表和导入函数中的访问。原子读改写使用 `storeReadWriteDescriptor()`。同步跟踪整个 buffer 或图像视图覆盖的 mip 和图层。光栅间接绘制的顶点、索引、命令、参数和附件由绘制命令捕获。
+
+执行器根据命令捕获的访问安排屏障。管线状态和绑定相同、只有着色器读取的相邻绘制仍可合并到同一物理 pass。涉及 shader 存储写入时会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。跨执行器的提交依赖仍由调用方显式登记。
 
 将旧写法 `a << b << cmd` 改为 `b << cmd` 即可保留原有的入队行为。如果 `b` 的工作依赖 `a` 的提交，先调用 `a.commit()`，再用 `b.wait(&a)` 让 `b` 的下一次提交等待 `a` 最近一次成功提交。调用 `b.wait()`、`b.wait(nullptr)` 或 `b.wait(&b)` 会阻塞 CPU，直到 `b` 已提交的工作完成。排队中的命令留到下一次 `commit()` 提交。
 
@@ -388,7 +394,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
 - **读取 draw 参数**。有逐 draw 参数时，使用 `executor << pipeline(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `HardwareBuffer::Usage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。绘制命令持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
 - **首实例**。每个 packet 的 `firstInstance` 指定起始实例编号。设备未启用 `drawIndirectFirstInstance` 时，生成 packet 的 CPU 或 GPU 代码必须将该字段设为零。
-- **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
+- **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`disney_slang` 和 EDSL 的自动取数使用 15。`baseline_slang` 只在顶点阶段读取逐 draw 参数，片元阶段直接从共享 UBO 取得纹理索引。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
 
 ### Descriptor Set 约定

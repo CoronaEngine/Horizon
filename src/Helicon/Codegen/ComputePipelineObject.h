@@ -1,6 +1,7 @@
 #pragma once
 #include <Compiler/ShaderCommon.h>
 
+#include <algorithm>
 #include <concepts>
 #include <functional>
 #include <type_traits>
@@ -32,6 +33,54 @@ namespace EmbeddedShader
 	    // 消费端(bind_auto_resources)靠它选 set_resource_direct 的重载 ——
 	    // 不靠 bindType 隐式判别,免得以后 bindType 的映射一改就静默转错类型。
 	    bool boundResourceIsBuffer = false;
+        bool sampled = false;
+        Ast::AccessPermissions access = Ast::AccessPermissions::None;
+        uint8_t stages = 0;
+
+        static void appendActive(std::vector<AutoBindEntry>& entries, const std::vector<Ast::BindingUse>& uses,
+                                 ShaderCodeModule& module, const ShaderCodeCompiler::ConditionInfo& conditions,
+                                 Ast::ShaderStage stage)
+        {
+            for (const auto& use : uses) {
+                if (std::ranges::any_of(use.conditions, [&](const auto& branch) {
+                    return conditions.at(branch.first) != branch.second;
+                })) continue;
+                auto* info = module.shaderResources.findShaderBindInfo(use.variable->name);
+                if (!info) continue;
+                AutoBindEntry entry{};
+                entry.byteOffset = info->byteOffset;
+                entry.typeSize = info->typeSize;
+                entry.bindType = static_cast<int32_t>(info->bindType);
+                entry.location = info->location;
+                if (auto* value = dynamic_cast<Ast::UniformVariate*>(use.variable.get())) {
+                    entry.dirtyVersion = &value->dirtyVersion;
+                    entry.boundValueRef = value->boundValueRef;
+                    entry.boundValueSize = value->boundValueSize;
+                } else if (auto* buffer = dynamic_cast<Ast::UniversalArray*>(use.variable.get())) {
+                    entry.dirtyVersion = &buffer->dirtyVersion;
+                    entry.boundResourceRef = buffer->boundResourceRef;
+                    entry.boundResourceIsBuffer = true;
+                } else {
+                    auto& image = static_cast<Ast::UniversalTexture&>(*use.variable);
+                    entry.dirtyVersion = &image.dirtyVersion;
+                    entry.boundResourceRef = image.boundResourceRef;
+                    entry.sampled = use.sampled;
+                }
+                if (entry.boundResourceRef) {
+                    entry.access = use.access;
+                    entry.stages = uint8_t(1u << static_cast<unsigned>(stage));
+                }
+                auto matching = std::ranges::find_if(entries, [&](const AutoBindEntry& previous) {
+                    return previous.dirtyVersion == entry.dirtyVersion && previous.bindType == entry.bindType &&
+                           previous.byteOffset == entry.byteOffset;
+                });
+                if (matching == entries.end()) entries.push_back(entry);
+                else {
+                    matching->access = matching->access | entry.access;
+                    matching->stages |= entry.stages;
+                }
+            }
+        }
 	};
 
 	class ComputePipelineObject
@@ -44,7 +93,7 @@ namespace EmbeddedShader
 		ShaderCodeCompiler::ConditionInfo conditions;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
-		std::unordered_set<std::string> sampledTextures;
+		std::vector<Ast::BindingUse> bindings;
 		std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode);
 	};
 
@@ -56,81 +105,8 @@ namespace EmbeddedShader
     inline ShaderCodeModule ComputePipelineObject::updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
     {
         auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, compConditionInfo);
-        // 分支组合变化时重新反射；清空旧表，避免旧 offset 残留。
         autoBindEntries.clear();
-
-        // Collect auto-bind entries from globalStatements:
-        // Walk all globally-defined textures and check if they have a back-pointer
-        // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
-        {
-            auto& globals = Ast::Parser::getGlobalStatements();
-            for (auto& stmt : globals)
-            {
-                if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
-                {
-                    if (def->variate && def->variate->boundValueRef)
-                    {
-                        if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->variate->name))
-                        {
-                            autoBindEntries.push_back({
-                                nullptr,
-                                bindInfo->byteOffset,
-                                bindInfo->typeSize,
-                                static_cast<int32_t>(bindInfo->bindType),
-                                bindInfo->location,
-                                def->variate->boundValueRef,
-                                def->variate->boundValueSize,
-                                &def->variate->dirtyVersion
-                            });
-                        }
-                    }
-                }
-
-                if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
-                {
-                    if (def->texture && def->texture->boundResourceRef)
-                    {
-                        if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->texture->name))
-                        {
-                            const auto imageType = sampledTextures.contains(def->texture->name)
-                                ? ShaderCodeModule::ShaderResources::sampledImages : ShaderCodeModule::ShaderResources::storageTexture;
-                            autoBindEntries.push_back({
-                                def->texture->boundResourceRef,
-                                bindInfo->byteOffset,
-                                bindInfo->typeSize,
-                                imageType,
-                                bindInfo->location,
-                                nullptr,
-                                0,
-                                &def->texture->dirtyVersion
-                            });
-                        }
-                    }
-                }
-
-                if (auto* def = dynamic_cast<Ast::DefineUniversalArray*>(stmt.get()))
-                {
-                    if (def->array && def->array->boundResourceRef)
-                    {
-                        if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->array->name))
-                        {
-                            autoBindEntries.push_back({
-                                def->array->boundResourceRef,
-                                bindInfo->byteOffset,
-                                bindInfo->typeSize,
-                                ShaderCodeModule::ShaderResources::storageBuffer,
-                                bindInfo->location,
-                                nullptr,
-                                0,
-                                &def->array->dirtyVersion,
-                                0,
-                                true
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        AutoBindEntry::appendActive(autoBindEntries, bindings, codeModule, compConditionInfo, Ast::ShaderStage::Compute);
         return codeModule;
     }
 
@@ -144,6 +120,7 @@ namespace EmbeddedShader
 
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
+	    result.bindings = std::move(outputs[0].bindings);
 	    compilerOption.branches.swap(outputs[0].branches);
 	    compilerOption.typeHeader = outputs[0].typeHeader;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, compilerOption, sourceLocation);
@@ -165,7 +142,7 @@ namespace EmbeddedShader
 			throw std::logic_error("Compute shader function doesn't have return value");
 		auto csParams = ParseHelper::createParamTuple(csFunc);
 		ParseHelper::callLambda(csFunc,std::move(csParams));
-		auto outputs = Ast::Parser::endPipelineParse(sampledTextures);
+		auto outputs = Ast::Parser::endPipelineParse();
 		// Host condition callbacks can reference captures inside the shader lambda.
 		for (auto& branch : outputs.front().branches)
 			branch.conditionDetector = [shader, detect = std::move(branch.conditionDetector)] { return detect(); };

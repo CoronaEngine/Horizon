@@ -120,7 +120,6 @@ DisneySlang::DisneySlang(void* native_window)
 
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     pipeline.outColor = final_output_image;
-    pipeline.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
 
     constexpr float yaw = ktm::pi<float>, pitch = 0.42f * ktm::pi<float>;
     const auto eye = 13.5f * ktm::fvec3(ktm::sin(pitch) * ktm::sin(yaw), ktm::cos(pitch), ktm::sin(pitch) * ktm::cos(yaw));
@@ -130,8 +129,8 @@ DisneySlang::DisneySlang(void* native_window)
     pipeline.vsp.proj_view = projection * view;
     pipeline.vsp.camPos = ktm::fvec4(eye, 1.0f);
     pipeline.vsp.lightDir = ktm::fvec4(ktm::normalize(ktm::fvec3(-0.35f, 0.55f, -0.75f)), 0.0f);
-    pipeline.vsp.texCubeIndex = radiance;
-    pipeline.vsp.texCubeIrrIndex = irradiance;
+    pipeline.vsp.texCubeIndex = radiance.storeSampledDescriptor();
+    pipeline.vsp.texCubeIrrIndex = irradiance.storeSampledDescriptor();
 }
 
 void DisneySlang::run(float)

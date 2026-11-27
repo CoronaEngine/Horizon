@@ -66,6 +66,25 @@ namespace EmbeddedShader
 
     namespace
     {
+        Ast::AccessPermissions descriptorAccess(slang::TypeLayoutReflection* layout, ShaderCodeModule::ShaderResources::BindType type)
+        {
+            using Resources = ShaderCodeModule::ShaderResources;
+            using Access = Ast::AccessPermissions;
+            switch (type)
+            {
+                case Resources::sampledImages:
+                case Resources::sampler:
+                case Resources::texture:
+                case Resources::rawBuffer: return Access::ReadOnly;
+                case Resources::storageTexture:
+                case Resources::storageBuffer:
+                    if (layout->getResourceAccess() == SLANG_RESOURCE_ACCESS_WRITE) return Access::WriteOnly;
+                    if (layout->getResourceAccess() == SLANG_RESOURCE_ACCESS_READ) return Access::ReadOnly;
+                    return Access::ReadAndWrite;
+                default: return Access::None;
+            }
+        }
+
         uint32_t scalarSizeInBytes(slang::TypeReflection::ScalarType st)
         {
             switch (st)
@@ -293,6 +312,7 @@ namespace EmbeddedShader
                                         ? 0
                                         : elemCount;
                 info.bindType = elemBindType;
+                info.access = descriptorAccess(elemTypeLayout, elemBindType);
                 fillSemanticAndLocation(info);
                 resources.bindInfoPool.push_back(info);
                 return;
@@ -320,6 +340,7 @@ namespace EmbeddedShader
             info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
             info.elementCount = 1;
             info.bindType = bindType;
+            info.access = descriptorAccess(m_typeLayout, bindType);
 
             // varying(顶点输入/输出)不占 uniform 存储, getSize()=0 且分量数需从向量宽度推导。
             // 下游 vertex_attribute_format 依赖 elementCount(分量数)+typeName 决定 VkFormat,
@@ -579,7 +600,8 @@ namespace EmbeddedShader
 
         slang::SessionDesc sessionDesc{};
 	    slang::TargetDesc targetDesc{};
-	    targetDesc.format = SLANG_CPP_SOURCE;
+	    targetDesc.format = SLANG_SPIRV;
+	    targetDesc.profile = slangGlobalSession->findProfile("spirv_1_6");
 	    sessionDesc.targets = &targetDesc;
 	    sessionDesc.targetCount = 1;
 

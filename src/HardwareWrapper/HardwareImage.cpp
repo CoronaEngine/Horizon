@@ -212,17 +212,10 @@ HardwareImage::operator bool() const
     return impl_ && impl_->imageHandle != VK_NULL_HANDLE;
 }
 
-uint32_t HardwareImage::storeSampledDescriptor() const
-{
-    if (!*this) throw std::invalid_argument("Cannot bind an empty image");
-    return impl_->resourceManager->storeSampledDescriptor(*impl_);
-}
-
-uint32_t HardwareImage::storeDescriptor() const
-{
-    if (!*this) throw std::invalid_argument("Cannot bind an empty image");
-    return impl_->resourceManager->storeDescriptor(*impl_);
-}
+HardwareDescriptor HardwareImage::storeReadDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadOnly}; }
+HardwareDescriptor HardwareImage::storeWriteDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::WriteOnly}; }
+HardwareDescriptor HardwareImage::storeReadWriteDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadAndWrite}; }
+HardwareDescriptor HardwareImage::storeSampledDescriptor() const { return {*this, EmbeddedShader::Ast::AccessPermissions::ReadOnly, true}; }
 
 void HardwareImage::setClearColor(float r, float g, float b, float a)
 {

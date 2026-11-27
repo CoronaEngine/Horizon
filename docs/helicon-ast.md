@@ -290,26 +290,15 @@ SlangStageModules bindlessStageModules;
 
 #### 1.6 反射与 auto-bind
 
-编译完成后，`RasterPipelineObject::updateAutoBind()` /
-`ComputePipelineObject::updateAutoBind()` 会遍历全局 statement，把代理侧记录的
-资源指针和反射表对应起来：
+EDSL 在解析每个 shader stage 时记录代理的访问方向和所在的主机条件分支。
+`ComputePipelineObject::updateAutoBind()` 和 `RasterPipelineObject::updateAutoBind()`
+根据当前变体选择记录，再按变量名查 Slang 反射，取得参数字段的偏移、大小和绑定类型。
+GPU 条件的各条路径都在同一个变体内，因此会合并这些路径可能访问的资源。
 
-- `UniformVariate::boundValueRef`：指向代理保存的宿主值；
-- `UniversalTexture::boundResourceRef`：指向代理保存的 `HardwareImage*`；
-- `UniversalArray::boundResourceRef`：指向代理保存的 `HardwareBuffer*`；
-- `dirtyVersion`：宿主值变化时递增，供绑定时判断是否需要重写；
-- `renderTargetLocation >= 0`：该纹理在 FS 中被 `<<` 当作渲染目标使用。
-
-生成 `AutoBindEntry` 时会读取反射得到的 `byteOffset`、`typeSize`、`bindType`、
-`location`。bindless 下，push constant 中的 handle 在反射里会报成
-`pushConstantMembers`，因此需要按资源种类重映射：
-
-| 反射结果 | 资源 | 重映射后的 bind type |
-| --- | --- | --- |
-| `pushConstantMembers` | 采样纹理 | `sampledImages` |
-| `pushConstantMembers` | 读写纹理 | `storageTexture` |
-| `pushConstantMembers` | `Array<T>` | `storageBuffer` |
-| `stageOutputs` | `texture << value` 的输出 | `stageOutputs`，location 为 `SV_TARGET` 序号 |
+`AutoBindEntry` 引用代理保存的宿主值、缓冲或图像。创建命令时，后端将宿主值写入参数块，
+捕获资源及其访问方向，并根据用途选择采样图像表、存储缓冲表或存储图像表。
+参数索引在提交时写入命令快照。片元 shader 中 `texture << value` 的目标按
+`renderTargetLocation` 绑定为颜色附件。
 
 `ShaderCodeModule::ShaderResources` 保存反射结果，主要字段包括
 `pushConstantSize/Name`、`uniformBufferSize/Name`、`bindInfoPool` 和

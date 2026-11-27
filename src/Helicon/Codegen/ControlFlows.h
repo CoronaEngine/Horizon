@@ -29,6 +29,7 @@ namespace EmbeddedShader
 
 	struct GPU_IF_BRANCH
 	{
+        bool hostCondition = false;
 		GPU_IF_BRANCH(GPU_IF& gpuIf,const VariateProxy<bool>& condition, const std::function<bool()>&)
 		{
 			gpuIf.node = Ast::AST::beginIf(condition.node);
@@ -36,6 +37,7 @@ namespace EmbeddedShader
 		}
 
 		GPU_IF_BRANCH(GPU_IF& gpuIf,bool condition, std::function<bool()> pruningDetector)
+            : hostCondition(true)
 		{
             gpuIf.node = Ast::AST::beginIf(Ast::AST::createValue(condition), std::move(pruningDetector));
             //elseif begin pattern
@@ -43,7 +45,7 @@ namespace EmbeddedShader
 
 		~GPU_IF_BRANCH()
 		{
-			Ast::AST::endIf();
+			Ast::AST::endBranch(hostCondition);
 			//if end pattern
 		}
 
@@ -56,7 +58,9 @@ GPU_PUSH_VARIATE(GPU_IF_BRANCH gpuIfBranchJ6hF4rT9mK2zV8cX5bN1pQ3{TheIfElseState
 
 	struct GPU_ELSE_BRANCH
 	{
+        bool hostCondition;
 		GPU_ELSE_BRANCH(const GPU_IF& gpuIf)
+            : hostCondition(gpuIf.node->conditionDetector.has_value())
 		{
 			Ast::AST::beginElse(gpuIf.node);
 			//else begin pattern
@@ -64,7 +68,7 @@ GPU_PUSH_VARIATE(GPU_IF_BRANCH gpuIfBranchJ6hF4rT9mK2zV8cX5bN1pQ3{TheIfElseState
 
 		~GPU_ELSE_BRANCH()
 		{
-			Ast::AST::endElse();
+			Ast::AST::endBranch(hostCondition);
 			//else end pattern
 		}
 		int8_t index = 0;

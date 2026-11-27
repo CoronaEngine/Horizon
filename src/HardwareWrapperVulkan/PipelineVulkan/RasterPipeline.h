@@ -29,8 +29,9 @@ struct RasterPipelineVulkan
 
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location = 0);
+    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+                           int32_t bindType, uint32_t slot);
+    void setRenderTarget(uint32_t location, const HardwareImage& image);
 
     struct Root {
         VkDeviceAddress packets, geometries, parameters;
@@ -72,7 +73,6 @@ struct RasterPipelineVulkan
     void createGraphicsPipeline(GraphicsState& state);
 
     int multiviewCount{1};
-    bool mergeWithoutUses{};
 
     std::vector<std::shared_ptr<GraphicsState>> graphicsStates;
     std::shared_ptr<FramebufferState> lastFramebuffer;
@@ -123,22 +123,22 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
     std::vector<VkClearValue> clearValues;
     std::vector<IndirectGroup> groups;
     uint32_t drawCount{};
-    std::vector<ResourceUse> resourceUses;
     std::vector<uint8_t> uniformBytes;
     std::shared_ptr<BindingSnapshot> bindings;
     std::shared_ptr<UniformSnapshot> uniform;
     std::shared_ptr<RasterPipelineVulkan::FramebufferState> framebuffer;
 
     Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth, std::optional<ktm::uvec2> extent,
-         std::optional<RasterPipeline<>::Pass> pass, const std::vector<ResourceUse>& uses);
+         std::optional<RasterPipeline<>::Pass> pass);
     bool sameAttachments(const Draw& next) const;
     bool canMerge(const Draw& next) const;
     void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                        std::optional<RasterPipeline<>::ScissorRect> scissor);
+                        std::optional<RasterPipeline<>::ScissorRect> scissor,
+                        std::span<const EmbeddedShader::AutoBindEntry> entries);
     void prepareFramebuffer();
     Entry queueEntry(std::shared_ptr<Impl> owner) override { return RecordedCommand(*this, std::move(owner)); }
     ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
-    void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
+    void resolveResourceUses(ResourceAccessList& result) override;
     void commitCommand(HardwareExecutorVulkan& executor) override;
 };

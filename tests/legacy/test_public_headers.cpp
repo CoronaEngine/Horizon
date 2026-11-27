@@ -24,6 +24,16 @@ static_assert(!ExposesResourceID<HardwareBuffer> && !ExposesResourceID<HardwareI
               !ExposesResourceID<HardwareExecutor> && !ExposesResourceID<HardwareDisplayer>);
 static_assert(std::copyable<HardwareBuffer> && std::is_nothrow_move_constructible_v<HardwareBuffer> &&
               std::is_nothrow_move_assignable_v<HardwareBuffer>);
+static_assert(std::copyable<HardwareDescriptor> && !std::convertible_to<HardwareDescriptor, uint32_t>);
+static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image) {
+    { buffer.storeReadDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { buffer.storeWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { buffer.storeReadWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { image.storeSampledDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { image.storeReadDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { image.storeWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
+    { image.storeReadWriteDescriptor() } -> std::same_as<HardwareDescriptor>;
+});
 static_assert(requires(HardwareBuffer& buffer) {
     { buffer.exportBufferMemory() } -> std::same_as<HardwareBuffer::ExternalHandle>;
     HardwareBuffer(buffer.exportBufferMemory(), 1, 4, 4, HardwareBuffer::Usage::StorageBuffer);
@@ -166,12 +176,11 @@ static_assert(std::same_as<decltype(&NamedCompute::params), decltype(NamedComput
 static_assert(std::same_as<decltype(&NamedCompute::outputs), decltype(NamedCompute::outputs) NamedCompute::*>);
 static_assert(MoveOnlyHandle<NamedCompute>);
 static_assert(!CanEnqueue<NamedCompute&>);
-static_assert(requires(NamedCompute& pipeline, HardwareBuffer& buffer, std::span<const ResourceUse> resources) {
+static_assert(requires(NamedCompute& pipeline, HardwareBuffer& buffer) {
     { NamedCompute{} } -> std::same_as<NamedCompute>;
     { ComputePipeline(compute_write_slang) } -> std::same_as<NamedCompute>;
     pipeline.outputs = buffer;
-    { pipeline.uses(resources)(1, 2, 3) } -> std::same_as<HardwareExecutor::Command>;
-    { pipeline.uses({{buffer, ResourceAccess::Write}})(1) } -> std::same_as<HardwareExecutor::Command>;
+    { pipeline(1, 2, 3) } -> std::same_as<HardwareExecutor::Command>;
 });
 
 #include SLANG(examples/Disney/Slang/disney_frag.slang)
@@ -198,6 +207,10 @@ static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO, Raster::State> 
 using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
 using SharedVertexRaster = RasterPipeline<disney_vert_slang_t, drawstress_frag_slang_t>;
 static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
+template<class T>
+concept HasManualResourceUses = requires(T& pipeline) { pipeline.uses({}); };
+static_assert(!HasManualResourceUses<ComputePipeline<>> && !HasManualResourceUses<NamedCompute>);
+static_assert(!HasManualResourceUses<Raster> && !HasManualResourceUses<DisneyRaster>);
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);

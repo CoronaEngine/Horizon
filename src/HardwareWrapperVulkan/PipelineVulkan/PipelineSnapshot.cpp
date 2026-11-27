@@ -31,16 +31,6 @@ inline bool writeBytes(std::span<uint8_t> target, uint64_t offset, const void* d
     return true;
 }
 
-uint32_t descriptorTable(const PipelineBinding& binding)
-{
-    if (binding.sampled) return 0;
-    const auto& resource = binding.resource;
-    if (std::holds_alternative<HardwareBuffer>(resource)) return 1;
-    const auto* image = ResourceManager::get(std::get<HardwareImage>(resource));
-    if (!image) throw std::runtime_error("Empty HardwareImage handle");
-    return (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? 2 : 0;
-}
-
 int32_t descriptorIndex(const PipelineBinding& binding)
 {
     return std::visit([&](const auto& value) -> int32_t {
@@ -49,7 +39,7 @@ int32_t descriptorIndex(const PipelineBinding& binding)
             return ResourceManager::get(value)->bindlessIndex;
         else {
             const auto* image = ResourceManager::get(value);
-            return binding.sampled && (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
+            return binding.table == 0 && (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
                        ? image->sampledIndex : image->bindlessIndex;
         }
     }, binding.resource);
@@ -60,13 +50,14 @@ void PipelineBindings::set(PipelineBinding next)
 {
     for (const auto& binding : values)
         if (binding.offset == next.offset && binding.size == next.size && binding.uniform == next.uniform &&
-            binding.fixedSlot == next.fixedSlot && binding.sampled == next.sampled &&
+            binding.fixedSlot == next.fixedSlot && binding.table == next.table &&
+            binding.access == next.access && binding.stages == next.stages &&
             sameResource(binding.resource, next.resource)) return;
     if (next.fixedSlot == UINT32_MAX)
         erase(next.offset, next.size, next.uniform);
     else
         std::erase_if(values, [&](const PipelineBinding& binding) {
-            return binding.fixedSlot == next.fixedSlot && descriptorTable(binding) == descriptorTable(next);
+            return binding.fixedSlot == next.fixedSlot && binding.table == next.table;
         });
     values.push_back(std::move(next));
     cached.reset();
@@ -76,51 +67,93 @@ void PipelineBindings::writeValue(std::span<uint8_t> pushConstants, std::span<ui
                                   uint64_t offset, const void* data, size_t size)
 {
     const bool uniform = bindType == BindType::uniformBufferMembers;
-    if ((uniform || bindType == BindType::pushConstantMembers) &&
-        writeBytes(uniform ? uniformBytes : pushConstants, offset, data, size))
-        erase(offset, size, uniform);
+    if (!uniform && bindType != BindType::pushConstantMembers)
+        throw std::invalid_argument("A descriptor field requires a resource object");
+    if (!writeBytes(uniform ? uniformBytes : pushConstants, offset, data, size))
+        throw std::invalid_argument("Shader parameter write exceeds its parameter block");
+    erase(offset, size, uniform);
 }
 
 void PipelineBindings::writeResource(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes, int32_t bindType,
-                                     uint64_t offset, uint32_t typeSize, PipelineResource resource,
-                                     std::optional<uint32_t> fixedSlot)
+                                     uint64_t offset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+                                     VkPipelineStageFlags2 stages, std::optional<uint32_t> fixedSlot)
 {
-    const uint32_t handle[] = {pendingDescriptorIndex, 0};
-    const bool sampled = bindType == BindType::sampledImages;
-    const uint32_t size = typeSize == 0 || typeSize >= sizeof(handle) ? sizeof(handle) : sizeof(handle[0]);
-    const auto write = [&](std::span<uint8_t> target, bool uniform) {
-        if (!writeBytes(target, offset, handle, size)) return false;
-        set({offset, size, uniform, std::move(resource), UINT32_MAX, sampled});
-        return true;
-    };
+    using Access = EmbeddedShader::Ast::AccessPermissions;
+    if (!std::visit([](const auto& handle) { return bool(handle); }, descriptor.resource_))
+        throw std::invalid_argument("Cannot bind a descriptor without a resource");
+    PipelineBinding value;
+    value.resource = descriptor.resource_;
+    value.table = std::holds_alternative<HardwareBuffer>(value.resource) ? 1u : descriptor.sampled_ ? 0u : 2u;
+    value.stages = stages;
+    if ((descriptor.access_ & Access::ReadOnly) != Access::None) value.access |= VK_ACCESS_2_SHADER_READ_BIT;
+    if ((descriptor.access_ & Access::WriteOnly) != Access::None) value.access |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    if (!value.access || !stages) throw std::invalid_argument("Shader descriptor has no access or stage");
 
-    switch (bindType)
-    {
-    case BindType::pushConstantMembers:  write(pushConstants, false); return;
-    case BindType::uniformBufferMembers: write(uniformBytes, true); return;
-    case BindType::rawBuffer:
-    case BindType::storageBuffer:
-        if (!std::holds_alternative<HardwareBuffer>(resource)) return;
-        break;
-    case BindType::sampledImages:
-    case BindType::texture:
-    case BindType::sampler:
-    case BindType::storageTexture:
-        if (!std::holds_alternative<HardwareImage>(resource)) return;
-        break;
-    default: return;
+    if (bindType == BindType::uniformBufferMembers || bindType == BindType::pushConstantMembers) {
+        const uint32_t marker[] = {pendingDescriptorIndex, 0};
+        if (typeSize != sizeof(uint32_t) && typeSize != sizeof(marker))
+            throw std::invalid_argument("A shader descriptor index must occupy four or eight bytes");
+        value.uniform = bindType == BindType::uniformBufferMembers;
+        value.offset = offset;
+        value.size = typeSize;
+        if (!writeBytes(value.uniform ? uniformBytes : pushConstants, offset, marker, typeSize))
+            throw std::invalid_argument("Shader descriptor exceeds its parameter block");
+    } else {
+        uint32_t expectedTable;
+        switch (bindType) {
+        case BindType::storageBuffer: case BindType::rawBuffer: expectedTable = 1; break;
+        case BindType::storageTexture: expectedTable = 2; break;
+        case BindType::sampledImages: case BindType::texture: case BindType::sampler: expectedTable = 0; break;
+        default: throw std::invalid_argument("Shader field cannot bind a descriptor");
+        }
+        if (value.table != expectedTable || !fixedSlot)
+            throw std::invalid_argument("Descriptor does not match the shader field");
+        value.fixedSlot = *fixedSlot;
     }
+    set(std::move(value));
+}
 
-    if (write(pushConstants, false) || write(uniformBytes, true)) return;
-    if (fixedSlot) set({offset, size, false, std::move(resource), *fixedSlot, sampled});
+void PipelineBindings::bindAuto(std::span<uint8_t> pushConstants, std::span<uint8_t> uniformBytes,
+                                const EmbeddedShader::AutoBindEntry& entry)
+{
+    if (entry.boundValueRef) {
+        writeValue(pushConstants, uniformBytes, entry.bindType, entry.byteOffset, entry.boundValueRef, entry.boundValueSize);
+        return;
+    }
+    if (!entry.boundResourceRef) return;
+    void* resource = *entry.boundResourceRef;
+    if (!resource) throw std::invalid_argument("An active EDSL shader resource has no binding");
+    auto handle = entry.boundResourceIsBuffer ? PipelineResource(*static_cast<HardwareBuffer*>(resource))
+                                              : PipelineResource(*static_cast<HardwareImage*>(resource));
+    VkPipelineStageFlags2 stages{};
+    if (entry.stages & 1) stages |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    if (entry.stages & 2) stages |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    if (entry.stages & 4) stages |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    writeResource(pushConstants, uniformBytes, entry.bindType, entry.byteOffset, entry.typeSize,
+                  HardwareDescriptor(std::move(handle), entry.access, entry.sampled), stages);
+}
+
+void PipelineBindings::addLayout(const EmbeddedShader::ShaderCodeModule::ShaderResources& resources)
+{
+    for (const auto& info : resources.bindInfoPool) {
+        switch (info.bindType) {
+        case BindType::sampledImages: case BindType::texture: case BindType::sampler:
+        case BindType::storageBuffer: case BindType::rawBuffer: case BindType::storageTexture: break;
+        default: continue;
+        }
+        if (!info.binding && info.set < tableLimits.size() && info.elementCount &&
+            info.elementCount < tableLimits[info.set])
+            tableLimits[info.set] = static_cast<uint32_t>(info.elementCount);
+    }
 }
 
 std::shared_ptr<BindingSnapshot> PipelineBindings::snapshot()
 {
-    if (!cached)
-    {
-        cached = std::make_shared<BindingSnapshot>();
-        cached->values = values;
+    if (!cached) {
+        auto next = std::make_shared<BindingSnapshot>();
+        next->values = values;
+        next->tableLimits = tableLimits;
+        cached = std::move(next);
     }
     return cached;
 }
@@ -135,12 +168,17 @@ void BindingSnapshot::prepareDescriptors()
     if (prepared) return;
     // An automatic slot belongs to its resource wrapper until retirement;
     // fixed bindings cannot overwrite it. Reuse it across binding snapshots.
-    for (auto& binding : values)
-        if (descriptorIndex(binding) < 0) {
-            if (binding.sampled) (void)std::get<HardwareImage>(binding.resource).storeSampledDescriptor();
-            else std::visit([](auto& value) { (void)value.storeDescriptor(); }, binding.resource);
-        }
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    for (auto& binding : values) {
+        if (descriptorIndex(binding) >= 0) continue;
+        if (auto buffer = std::get_if<HardwareBuffer>(&binding.resource))
+            (void)manager.storeDescriptor(*ResourceManager::get(*buffer));
+        else {
+            auto& image = *ResourceManager::get(std::get<HardwareImage>(binding.resource));
+            if (binding.table == 0) manager.storeSampledDescriptor(image);
+            else (void)manager.storeDescriptor(image);
+        }
+    }
     device = getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice();
     constexpr VkDescriptorType types[] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
@@ -148,45 +186,64 @@ void BindingSnapshot::prepareDescriptors()
     {
         if (sets[tableIndex]) continue;
         const bool used = std::any_of(values.begin(), values.end(), [&](const auto& binding) {
-            return binding.fixedSlot != UINT32_MAX && descriptorTable(binding) == tableIndex;
+            return binding.table == tableIndex && (binding.fixedSlot != UINT32_MAX || tableLimits[tableIndex] != UINT32_MAX);
         });
         if (!used) continue;
         const auto& table = manager.bindlessDescriptors[tableIndex];
-        for (const auto& binding : values)
-            if (binding.fixedSlot != UINT32_MAX && descriptorTable(binding) == tableIndex && binding.fixedSlot >= table.capacity)
-                throw std::out_of_range("Fixed descriptor slot exceeds table capacity");
-        VkDescriptorPoolSize size{types[tableIndex], table.capacity};
+        // Private tables hold only descriptors dereferenced by this invocation.
+        // Reserve fixed slots first so a managed parameter can never alias a different resource.
+        const uint32_t managedLimit = std::min(table.capacity, tableLimits[tableIndex]);
+        std::vector<int32_t> slots(managedLimit, -1);
+        for (const auto& binding : values) {
+            if (binding.table != tableIndex || binding.fixedSlot == UINT32_MAX) continue;
+            if (binding.fixedSlot >= table.capacity) throw std::out_of_range("Fixed descriptor slot exceeds table capacity");
+            // A named field may refer to a longer alias of this table in another shader stage.
+            if (binding.fixedSlot >= slots.size()) slots.resize(binding.fixedSlot + 1, -1);
+            slots[binding.fixedSlot] = descriptorIndex(binding);
+        }
+        auto managed = std::span(slots).first(managedLimit);
+        for (auto& binding : values) {
+            if (binding.table != tableIndex || binding.fixedSlot != UINT32_MAX) continue;
+            const int32_t index = descriptorIndex(binding);
+            auto position = std::ranges::find(managed, index);
+            if (position == managed.end()) position = std::ranges::find(managed, -1);
+            if (position == managed.end()) throw std::length_error("Private descriptor table is full");
+            *position = index;
+            binding.privateSlot = static_cast<uint32_t>(position - managed.begin());
+        }
+        const auto capacity = static_cast<uint32_t>(slots.size());
+        VkDescriptorPoolSize size{types[tableIndex], capacity};
         VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
         poolInfo.maxSets = 1;
         poolInfo.poolSizeCount = 1;
         poolInfo.pPoolSizes = &size;
-        coronaHardwareCheck(vkCreateDescriptorPool(device, &poolInfo, nullptr, &pools[tableIndex]));
+        VkDescriptorPool pool{};
+        coronaHardwareCheck(vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool));
         VkDescriptorSetVariableDescriptorCountAllocateInfo count{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO};
         count.descriptorSetCount = 1;
-        count.pDescriptorCounts = &table.capacity;
+        count.pDescriptorCounts = &capacity;
         VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         allocate.pNext = &count;
-        allocate.descriptorPool = pools[tableIndex];
+        allocate.descriptorPool = pool;
         allocate.descriptorSetCount = 1;
         allocate.pSetLayouts = &table.descriptorSetLayout;
-        coronaHardwareCheck(vkAllocateDescriptorSets(device, &allocate, &sets[tableIndex]));
-        VkCopyDescriptorSet copy{VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
-        copy.srcSet = table.descriptorSet;
-        copy.dstSet = sets[tableIndex];
-        copy.descriptorCount = table.capacity;
-        vkUpdateDescriptorSets(device, 0, nullptr, 1, &copy);
-        for (const auto& binding : values)
+        VkDescriptorSet set{};
+        const VkResult result = vkAllocateDescriptorSets(device, &allocate, &set);
+        if (result != VK_SUCCESS) {
+            vkDestroyDescriptorPool(device, pool, nullptr);
+            coronaHardwareCheck(result);
+        }
+        pools[tableIndex] = pool;
+        sets[tableIndex] = set;
+        for (uint32_t destination = 0; destination < slots.size(); ++destination)
         {
-            if (binding.fixedSlot == UINT32_MAX || descriptorTable(binding) != tableIndex) continue;
-            if (binding.fixedSlot >= table.capacity) throw std::out_of_range("Fixed descriptor slot exceeds table capacity");
-            const int32_t index = descriptorIndex(binding);
-            if (index < 0) throw std::runtime_error("Fixed binding has no resource descriptor");
+            if (slots[destination] < 0) continue;
             VkCopyDescriptorSet slot{VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
             slot.srcSet = table.descriptorSet;
-            slot.srcArrayElement = static_cast<uint32_t>(index);
+            slot.srcArrayElement = static_cast<uint32_t>(slots[destination]);
             slot.dstSet = sets[tableIndex];
-            slot.dstArrayElement = binding.fixedSlot;
+            slot.dstArrayElement = destination;
             slot.descriptorCount = 1;
             vkUpdateDescriptorSets(device, 0, nullptr, 1, &slot);
         }
@@ -204,7 +261,7 @@ void BindingSnapshot::writeParameters(std::span<uint8_t> pushConstants, std::spa
         uint32_t stored{};
         std::memcpy(&stored, target.data() + binding.offset, sizeof(stored));
         if (stored != pendingDescriptorIndex) continue;
-        const int32_t index = descriptorIndex(binding);
+        const int32_t index = binding.privateSlot == UINT32_MAX ? descriptorIndex(binding) : static_cast<int32_t>(binding.privateSlot);
         if (index < 0) throw std::runtime_error("Pipeline descriptors have not been prepared");
         std::memcpy(target.data() + binding.offset, &index, sizeof(index));
     }
@@ -292,51 +349,15 @@ std::shared_ptr<UniformSnapshot> UniformSnapshotPool::acquire(std::span<const ui
     return slot;
 }
 
-namespace {
-VkAccessFlags2 shaderAccess(ResourceAccess access)
+void BindingSnapshot::resolveResourceUses(ResourceAccessList& result) const
 {
-    return (access != ResourceAccess::Write ? VK_ACCESS_2_SHADER_READ_BIT : 0) |
-           (access != ResourceAccess::Read ? VK_ACCESS_2_SHADER_WRITE_BIT : 0);
-}
-
-bool addShaderUse(ResourceAccessList& result, const PipelineResource& resource,
-                  VkPipelineStageFlags2 stages, VkAccessFlags2 access, bool declaration = false)
-{
-    ResolvedResourceUse* use;
-    if (const auto* buffer = std::get_if<HardwareBuffer>(&resource))
-    {
-        if (!*buffer) return false;
-        use = &result.buffer(*ResourceManager::get(*buffer), declaration ? 0 : stages, declaration ? 0 : access);
+    for (const auto& binding : values) {
+        if (!binding.access) continue;
+        if (const auto* buffer = std::get_if<HardwareBuffer>(&binding.resource))
+            result.buffer(*ResourceManager::get(*buffer), binding.stages, binding.access);
+        else {
+            auto* image = ResourceManager::get(std::get<HardwareImage>(binding.resource));
+            result.image(*image, binding.stages, binding.access, VK_IMAGE_LAYOUT_GENERAL, imageViewRange(*image));
+        }
     }
-    else if (const auto& image = std::get<HardwareImage>(resource); image)
-    {
-        auto* native = ResourceManager::get(image);
-        if (!(native->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) access = VK_ACCESS_2_SHADER_READ_BIT;
-        use = &result.image(*native, declaration ? 0 : stages, declaration ? 0 : access,
-                            declaration ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL, imageViewRange(*native));
-    }
-    else return false;
-    if (declaration)
-    {
-        use->declaredStages |= stages;
-        use->declaredAccess |= access;
-    }
-    return true;
-}
-}
-
-void resolveShaderBindings(ResourceAccessList& result, std::span<const PipelineBinding> bindings,
-                            VkPipelineStageFlags2 stages)
-{
-    for (const auto& binding : bindings)
-        addShaderUse(result, binding.resource, stages, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
-}
-
-void resolveDeclaredUses(ResourceAccessList& result, std::span<const ResourceUse> declarations,
-                         VkPipelineStageFlags2 stages)
-{
-    result.conservative = declarations.empty();
-    for (const auto& declared : declarations)
-        if (!addShaderUse(result, declared.resource, stages, shaderAccess(declared.access), true))
-            result.conservative = true;
 }

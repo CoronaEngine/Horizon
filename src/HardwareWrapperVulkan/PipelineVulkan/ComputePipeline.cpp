@@ -12,7 +12,6 @@ struct ComputePipeline<CS>::Impl
     std::shared_ptr<ComputePipelineVulkan> backend;
     std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
-    std::vector<ResourceUse> resourceUses;
 
     static Impl& checked(const std::unique_ptr<Impl>& impl)
     {
@@ -50,14 +49,6 @@ template<class CS>
 ComputePipeline<CS>& ComputePipeline<CS>::operator=(ComputePipeline&&) noexcept = default;
 
 template<class CS>
-ComputePipeline<CS>& ComputePipeline<CS>::uses(std::span<const ResourceUse> resources)
-{
-    if (!impl_) impl_ = std::make_unique<Impl>();
-    impl_->resourceUses.assign(resources.begin(), resources.end());
-    return *this;
-}
-
-template<class CS>
 HardwareExecutor::Command ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
     auto& impl = Impl::checked(impl_);
@@ -72,25 +63,9 @@ HardwareExecutor::Command ComputePipeline<CS>::operator()(uint16_t x, uint16_t y
         }
     }
 
-    // Auto-bind: read current resource from each EDSL proxy's back-pointer
-    auto& backend = *impl.backend;
-    for (const auto& entry : impl.autoBindEntries)
-    {
-        if (entry.boundValueRef)
-        {
-            backend.setPushConstantDirect(entry.byteOffset, entry.boundValueRef, entry.boundValueSize, entry.bindType);
-        }
-        else if (entry.boundResourceRef && *entry.boundResourceRef)
-        {
-            void* res = *entry.boundResourceRef;
-            if (entry.boundResourceIsBuffer)
-                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareBuffer*>(res), entry.bindType);
-            else
-                backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType);
-        }
-    }
+    for (const auto& entry : impl.autoBindEntries) impl.backend->bindAuto(entry);
     return HardwareExecutor::Command(std::make_shared<HardwareExecutor::Command::Impl::Dispatch>(
-        impl.backend, ktm::uvec3{x, y, z}, impl.resourceUses));
+        impl.backend, ktm::uvec3{x, y, z}));
 }
 
 template struct ComputePipeline<void>;
@@ -102,6 +77,7 @@ ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ComputePipeli
 ComputePipelineVulkan::ComputePipelineVulkan(EmbeddedShader::ShaderCodeModule module)
     : shaderCode(std::move(module))
 {
+    bindings.addLayout(shaderCode.shaderResources);
     const auto &resources = shaderCode.shaderResources;
 
     const uint32_t pushConstantSize = resources.pushConstantSize;
@@ -155,16 +131,16 @@ void ComputePipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const voi
                         bindType, byteOffset, data, size);
 }
 
-void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareDescriptor& descriptor,
+                                              int32_t bindType, uint32_t slot)
 {
     bindings.writeResource({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize},
-                           bindType, byteOffset, typeSize, buffer);
+                           bindType, byteOffset, typeSize, descriptor, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, slot);
 }
 
-void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
+void ComputePipelineVulkan::bindAuto(const EmbeddedShader::AutoBindEntry& entry)
 {
-    bindings.writeResource({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize},
-                           bindType, byteOffset, typeSize, image);
+    bindings.bindAuto({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize}, entry);
 }
 
 void ComputePipelineVulkan::createComputePipeline()
@@ -234,17 +210,15 @@ void ComputePipelineVulkan::createComputePipeline()
     vkDestroyShaderModule(device, shaderModule, nullptr);
 }
 
-HardwareExecutor::Command::Impl::Dispatch::Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
-                                          const std::vector<ResourceUse>& resources)
+HardwareExecutor::Command::Impl::Dispatch::Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups)
     : backend(std::move(pipeline)), groupCount(groups),
       pushConstant(copyParameterBytes(backend->pushConstant.get(), backend->shaderCode.shaderResources.pushConstantSize)),
       uniformBytes(copyParameterBytes(backend->tempUBO.get(), backend->uboSize)),
-      bindings(backend->bindings.snapshot()), resourceUses(resources) {}
+      bindings(backend->bindings.snapshot()) {}
 
-void HardwareExecutor::Command::Impl::Dispatch::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
+void HardwareExecutor::Command::Impl::Dispatch::resolveResourceUses(ResourceAccessList& result)
 {
-    resolveShaderBindings(result, bindings->values, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-    resolveDeclaredUses(result, resourceUses, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    bindings->resolveResourceUses(result);
 }
 
 void HardwareExecutor::Command::Impl::Dispatch::commitCommand(HardwareExecutorVulkan& executor)

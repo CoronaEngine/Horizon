@@ -112,6 +112,13 @@ std::string EmbeddedShader::Ast::DefineLocalVariate::parse()
 	return Generator::SlangGenerator::getParseOutput(this);
 }
 
+void EmbeddedShader::Ast::BinaryOperator::access(AccessPermissions permissions)
+{
+    Value::access(permissions);
+    value1->access(AccessPermissions::ReadOnly);
+    value2->access(AccessPermissions::ReadOnly);
+}
+
 std::string EmbeddedShader::Ast::BinaryOperator::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
@@ -149,6 +156,8 @@ std::string EmbeddedShader::Ast::MemberAccess::parse()
 
 void EmbeddedShader::Ast::MemberAccess::access(AccessPermissions permissions)
 {
+    if (dynamic_cast<TextureType*>(type.get()) || dynamic_cast<ArrayType*>(type.get()))
+        AST::getEmbeddedShaderStructure().hasIndirectResource = true;
 	Value::access(permissions);
 	value->access(permissions);
 }
@@ -208,6 +217,7 @@ EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniversalArray::getA
 
 void EmbeddedShader::Ast::UniversalArray::access(AccessPermissions permissions)
 {
+    if (boundResourceRef) Parser::recordBindingUse(*this, permissions);
 	Value::access(permissions);
 	this->permissions = this->permissions | permissions;
 }
@@ -223,6 +233,11 @@ const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalArray::getRoot
 
 void EmbeddedShader::Ast::ElementValue::access(AccessPermissions permissions)
 {
+    index->access(AccessPermissions::ReadOnly);
+    if (auto* image = dynamic_cast<UniversalTexture*>(array.get())) image->indexed = true;
+    if (auto* source = dynamic_cast<ArrayType*>(array->type.get());
+        source && dynamic_cast<TextureType*>(source->elementType.get()))
+        AST::getEmbeddedShaderStructure().hasIndirectResource = true;
 	Value::access(permissions);
 	array->access(permissions);
 }
@@ -255,6 +270,7 @@ std::string EmbeddedShader::Ast::UniformVariate::parse()
 
 void EmbeddedShader::Ast::UniformVariate::access(AccessPermissions permissions)
 {
+    if (boundValueRef) Parser::recordBindingUse(*this, permissions);
 	Value::access(permissions);
 	this->permissions = this->permissions | permissions;
 }
@@ -299,6 +315,7 @@ EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniversalTexture::ge
 
 void EmbeddedShader::Ast::UniversalTexture::access(AccessPermissions permissions)
 {
+    if (boundResourceRef) Parser::recordBindingUse(*this, permissions);
 	Value::access(permissions);
     this->permissions = this->permissions | permissions;
 }
@@ -320,6 +337,7 @@ std::string EmbeddedShader::Ast::DefineUniversalTexture::parse()
 void EmbeddedShader::Ast::DefineUniversalTexture::resetAccessPermissions()
 {
     texture->permissions = AccessPermissions::None;
+    texture->indexed = false;
 }
 
 std::string EmbeddedShader::Ast::MatValue::parse()

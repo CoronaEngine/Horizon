@@ -4,6 +4,7 @@
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/TypeAlias.h"
 #include "Compiler/ShaderUtils.h"
+#include "Compiler/ShaderLanguageConverter.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceAccess.h"
 #include SLANG(examples/Baseline/Slang/baseline_vert.slang)
@@ -18,6 +19,7 @@
 #include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <spirv-tools/libspirv.hpp>
 
@@ -42,6 +44,34 @@ bool throws(auto operation)
     return false;
 }
 
+EmbeddedShader::ShaderCodeModule compileBufferAccess(std::string body, uint32_t descriptorCount = 0)
+{
+    using namespace EmbeddedShader;
+    using Compiler = ShaderLanguageConverter;
+    const auto global = Compiler::getGlobalSession();
+    slang::TargetDesc target{};
+    target.format = SLANG_SPIRV;
+    target.profile = global->findProfile("spirv_1_6");
+    std::array targets{target};
+    auto session = Compiler::createSession(global, targets, {});
+    auto library = Compiler::slangModuleCompiler({.moduleName = "access_test", .shaderCode = R"(
+        struct Params { uint index; uint alternate; };
+        [[vk::push_constant]] ConstantBuffer<Params> params;
+        [[vk::binding(0, 1)]] RWStructuredBuffer<uint> buffers[)" +
+        (descriptorCount ? std::to_string(descriptorCount) : "") + R"(];
+        [shader("compute")] [numthreads(1, 1, 1)]
+        void main(uint3 id : SV_DispatchThreadID) {
+    )" + body + "}", .sourceLanguage = ShaderLanguage::Slang});
+    auto module = Compiler::loadModule(session, library);
+    auto entry = Compiler::findEntryPoint(module, "main");
+    std::array<slang::IComponentType*, 2> components{module.get(), entry.get()};
+    auto program = Compiler::link(session, components);
+    SlangCompileResult result;
+    Compiler::fillCompileResult(result, program, 0, SLANG_SPIRV, true);
+    return {std::move(result.binaryTargets.at(ShaderLanguage::SpirV)),
+            std::move(result.reflections.at(ShaderLanguage::SpirV))};
+}
+
 void test_cpu()
 {
     DeviceFeaturesChain original;
@@ -64,6 +94,11 @@ void test_cpu()
            std::ranges::any_of(computeResources.bindInfoPool, [](const auto& binding) {
                return binding.variateName == "value" && binding.byteOffset == sizeof(uint32_t);
            }), "generated compute reflection preserves push constant size and member offset");
+    expect(std::ranges::any_of(computeResources.bindInfoPool, [](const auto& binding) {
+        return binding.variateName == "outputs" && binding.access == Ast::AccessPermissions::ReadAndWrite;
+    }), "Slang reflection preserves the declared access of an RW buffer");
+    using Baseline = RasterPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
+    static_assert(requires(Baseline& pipeline) { pipeline.combinedTextureSamplerHandles[0]; });
 
     int vertexParses = 0, fragmentParses = 0, computeParses = 0;
     auto vertex = [&](Float3 pos) { ++vertexParses; position() = Float4(pos, Float(1)); };
@@ -75,6 +110,33 @@ void test_cpu()
         target[dispatchThreadID()->xy()] = Float4(1, 0, 0, 1);
     }, ktm::uvec3(4, 2, 1));
     expect(vertexParses == 1 && fragmentParses == 1 && computeParses == 1, "each EDSL stage is parsed once");
+    Texture2D<ktm::fvec4> mixed;
+    bool filter = true;
+    expect(throws<std::invalid_argument>([&] {
+        (void)ComputePipelineObject::compile([&] {
+            const auto xy = dispatchThreadID()->xy();
+            $IF(filter) { target[xy] = mixed.sample(Float2(0.5f)); }
+            $ELSE { target[xy] = mixed[xy] + Float4(0.f); };
+        });
+    }), "even mutually exclusive host branches need separate proxies for sampling and indexed image access");
+    ArrayProxy<Texture2D<ktm::fvec4>> indirectTextures;
+    expect(throws<std::invalid_argument>([&] {
+        (void)ComputePipelineObject::compile([&] {
+            const auto xy = dispatchThreadID()->xy();
+            target[xy] = indirectTextures[0][xy];
+        });
+    }), "an image handle obtained from GPU buffer contents cannot be inferred as a direct EDSL binding");
+    ArrayProxy<uint32_t> lazyInput, lazyOutput;
+    auto lazy = ComputePipelineObject::compile([&] {
+        auto value = lazyInput[0] + Uint(1);
+        $IF(filter) { lazyOutput[0] = value; };
+    });
+    for (bool enabled : {false, true, false}) {
+        filter = enabled;
+        lazy.updateAutoBind(lazy.compute->getCurrentConditionInfo());
+        expect(lazy.autoBindEntries.size() == (enabled ? 2 : 0),
+               "a deferred arithmetic read belongs to the host branch that consumes it");
+    }
     auto cs = compute.compute->getShaderCode(ShaderLanguage::SpirV);
     auto* storageTable = cs.shaderResources.findShaderBindInfo("textureHandles");
     expect(storageTable && storageTable->set == 2 && storageTable->binding == 0 &&
@@ -119,12 +181,10 @@ void test_cpu()
     expect(!empty && !image, "default resources must be empty");
 
     ComputePipeline<> pendingCompute;
-    pendingCompute.uses({});
     expect(throws<std::runtime_error>([&] { (void)pendingCompute(1); }),
            "a compute placeholder rejects dispatch before a shader is assigned");
 
     RasterPipeline<> pendingRaster;
-    pendingRaster.uses({});
     (void)pendingRaster({}, {}, {}, 0);
     expect(throws<std::logic_error>([&] { (void)pendingRaster({}, {}, {}, 1); }),
            "a raster placeholder rejects a draw before shaders are assigned");
@@ -279,6 +339,13 @@ void test_indirect_draws(bool forceSingleDraw)
            "draws keep their original attachment after rebinding and the skipped display resets clear and draw index");
 }
 
+std::vector<ResolvedResourceUse> commandAccesses(const RecordedCommand& recorded)
+{
+    ResourceAccessList accesses;
+    recorded.command->resolveResourceUses(accesses);
+    return std::move(accesses.uses);
+}
+
 void test_raster_sampled_storage_image()
 {
     using namespace EmbeddedShader;
@@ -288,9 +355,9 @@ void test_raster_sampled_storage_image()
     HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     HardwareBuffer upload(source, HardwareBuffer::Usage::StorageBuffer);
     HardwareBuffer readback(sizeof(source), HardwareBuffer::Usage::StorageBuffer);
-    Texture2D<ktm::fvec4> texture = input, output = target;
+    Texture2D<ktm::fvec4> texture = input, storage = input, output = target;
     auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
-    auto fs = [&] { output << texture.sample(Float2(0.5f)); };
+    auto fs = [&] { output << (texture.sample(Float2(0.5f)) + storage[Uint2(0, 0)]) * Float(0.5f); };
     RasterPipeline pipeline(vs, fs);
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
     HardwareBuffer vertexBuffer(vertices, HardwareBuffer::Usage::VertexBuffer);
@@ -298,9 +365,24 @@ void test_raster_sampled_storage_image()
     HardwareBuffer commands(std::array{Raster::IndirectPacket{.vertexCount=3, .instanceCount=1}},
                             HardwareBuffer::Usage::RasterIndirect);
     HardwareExecutor executor;
-    pipeline.uses({{input, ResourceAccess::Read}});
-    executor << upload.copyTo(input)
-             << pipeline(vertexBuffer, indexBuffer, commands, 1)
+    HardwareImage albedo(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+    HardwareImage normal(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+    Texture2D<ktm::fvec4> albedoTexture = albedo, normalTexture = normal, shaded = input;
+    ComputePipeline shade([&] {
+        const auto xy = dispatchThreadID()->xy();
+        shaded[xy] = (albedoTexture[xy] + normalTexture[xy]) * Float(0.5f);
+    });
+    executor << upload.copyTo(albedo) << upload.copyTo(normal) << shade(1);
+    const auto accesses = commandAccesses(std::get<RecordedCommand>(HardwareBackendAccess::state(executor).pending.back()));
+    auto hasAccess = [&](const HardwareImage& image, VkAccessFlags2 access) {
+        return std::ranges::any_of(accesses, [&](const auto& use) {
+            return use.image == ResourceManager::get(image) && use.access == access;
+        });
+    };
+    expect(accesses.size() == 3 && hasAccess(albedo, VK_ACCESS_2_SHADER_READ_BIT) &&
+           hasAccess(normal, VK_ACCESS_2_SHADER_READ_BIT) && hasAccess(input, VK_ACCESS_2_SHADER_WRITE_BIT),
+           "storage image loads and stores infer two reads and one write");
+    executor << pipeline(vertexBuffer, indexBuffer, commands, 1)
              << pipeline(vertexBuffer, indexBuffer, commands, 1)
              << target.copyTo(readback);
     executor.commit().wait();
@@ -308,7 +390,7 @@ void test_raster_sampled_storage_image()
     expect(backend.recordedRasterPassCount == 1, "two draws sampling the same texture share one render pass");
     std::array<Pixel, 1> pixel{};
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == source,
-           "fragment UBO handle samples a sampled/storage image from set 0");
+           "the fragment shader samples and storage-loads the same image through separate proxies");
 
     target.setClearColor(0, 1, 0, 1);
     executor << pipeline(vertexBuffer, indexBuffer, commands, 1)
@@ -330,24 +412,19 @@ void test_raster_sampled_storage_image()
             values[0] = next;
             output << Float4(next, 0, 0, 1);
         });
-        for (bool declareAccess : {false, true}) {
-            if (declareAccess) increment.uses({{counter, ResourceAccess::ReadWrite}});
-            executor << increment(vertexBuffer, indexBuffer, commands, 1)
-                     << increment(vertexBuffer, indexBuffer, commands, 1)
-                     << target.copyTo(readback);
-            executor.commit().wait();
-            const Pixel expected{declareAccess ? 4.f : 2.f, 0, 0, 1};
-            expect(backend.recordedRasterPassCount == 2 &&
-                   readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == expected,
-                   "successive fragment storage writes require a pass boundary even without declared accesses");
-        }
+        executor << increment(vertexBuffer, indexBuffer, commands, 1)
+                 << increment(vertexBuffer, indexBuffer, commands, 1)
+                 << target.copyTo(readback);
+        executor.commit().wait();
+        expect(backend.recordedRasterPassCount == 2 && readback.copyToData(pixel.data(), sizeof(pixel)) &&
+               pixel[0] == Pixel{2.f, 0, 0, 1},
+               "successive fragment storage writes split passes and the second draw sees the first write");
     }
 
     HardwareImage layers(HardwareImage::CreateInfo{.width = 2, .height = 2, .format = HardwareImage::Format::RGBA32_FLOAT,
         .usage = HardwareImage::Usage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
     std::array attachments{layers[0][1], layers[0][1], layers[1][1]};
     RasterPipeline additive(vs, fs, {.blend = Raster::Blend::Additive});
-    additive.uses({{input, ResourceAccess::Read}});
     for (auto& attachment : attachments) {
         attachment.setClearColor(0, 0, 0, 0);
         output = attachment;
@@ -380,7 +457,7 @@ void test_shared_vertex_stage()
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
     // This VS/FS pair leaves the reflected uint slot available for a descriptor index.
-    raster.vsp.texCubeIndex = fieldBuffer;
+    raster.vsp.texCubeIndex = fieldBuffer.storeReadDescriptor();
     std::array<float, 4> pixel{};
     HardwareBuffer readback(sizeof(pixel), HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
@@ -464,7 +541,6 @@ void test_generated_packet_and_attachment_load(bool use16BitIndices)
             parameters[1] = Float4(0, 1, 0, 0);
             parameters[2] = Float4(0.5f, 0, 0, 0);
         });
-        generate.uses({{packets, ResourceAccess::Write}, {generatedParameters, ResourceAccess::Write}});
         executor << generate(1);
     }
     std::array<std::array<float,4>,8> pixels{};
@@ -488,7 +564,7 @@ void test_generated_packet_and_attachment_load(bool use16BitIndices)
              << opaque(vertexBuffer, indexBuffer, firstCommands, 1, farBlue);
     const auto& draw = std::get<RecordedCommand>(HardwareBackendAccess::state(executor).pending.back());
     ResourceAccessList accesses;
-    draw.command->resolveResourceUses(draw.resourceUses, accesses);
+    draw.command->resolveResourceUses(accesses);
     expect(std::ranges::none_of(accesses.uses, [](const auto& use) { return use.range.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT; }),
            "a draw without depth has no depth attachment access");
     executor << target.copyTo(readback);
@@ -510,32 +586,30 @@ void test_compute_dispatch_snapshots()
         static_assert(std::same_as<decltype(original), ComputePipeline<compute_write_slang_t>>);
         static_assert(!std::is_base_of_v<ComputePipeline<>, decltype(original)>);
         auto moved = std::move(original);
-        moved.params.outputIndex = firstOutput;
+        moved.params.outputIndex = firstOutput.storeWriteDescriptor();
         moved.params.value = 10u;
-        const auto writeFirst = moved.uses({{firstOutput, ResourceAccess::Write}})(2, 1, 2);
+        const auto writeFirst = moved(2, 1, 2);
 
-        other.params.outputIndex = secondOutput;
+        other.params.outputIndex = secondOutput.storeWriteDescriptor();
         other.params.value = 30u;
-        const auto overwrite = other.uses({{secondOutput, ResourceAccess::Write}})(1);
+        const auto overwrite = other(1);
 
         other = std::move(moved);
-        other.params.outputIndex = secondOutput;
+        other.params.outputIndex = secondOutput.storeWriteDescriptor();
         other.params.value = 20u;
-        const auto writeSecond = other.uses({{secondOutput, ResourceAccess::Write}})(1, 2, 1);
+        const auto writeSecond = other(1, 2, 1);
         other.params.value = 99u;
-        other.uses({});
 
         executor << writeFirst << writeSecond << overwrite;
     }
     const auto& pending = HardwareBackendAccess::state(executor).pending;
     expect(pending.size() == 3, "all three saved dispatches are queued");
-    for (const auto& item : pending) {
-        const auto& entry = std::get<RecordedCommand>(item);
-        ResourceAccessList accesses;
-        entry.command->resolveResourceUses(entry.resourceUses, accesses);
-        expect(!accesses.conservative && accesses.uses.size() == 1 &&
-               accesses.uses.front().declaredAccess == VK_ACCESS_2_SHADER_WRITE_BIT,
-               "each saved dispatch retains its explicit write declaration for its bound buffer");
+    for (size_t i = 0; i < pending.size(); ++i) {
+        const auto accesses = commandAccesses(std::get<RecordedCommand>(pending[i]));
+        const auto& expected = i == 0 ? firstOutput : secondOutput;
+        expect(accesses.size() == 1 && accesses.front().buffer == ResourceManager::get(expected)->bufferHandle &&
+               accesses.front().access == VK_ACCESS_2_SHADER_WRITE_BIT,
+               "each saved dispatch infers a write to its original bound buffer");
     }
     executor.commit().wait();
     expect(firstOutput.copyToData(words) && words == std::array{10u, 11u, 0u, 0u, 14u, 15u, 0u, 0u},
@@ -543,15 +617,146 @@ void test_compute_dispatch_snapshots()
     expect(secondOutput.copyToData(words) && words == std::array{30u, 0u, 22u, 0u, 0u, 0u, 0u, 0u},
            "saved Slang dispatches retain their Y group counts and execute in enqueue order");
 
-    HardwareImage image(1, 1, HardwareImage::Format::RGBA8_UNORM, HardwareImage::Usage::StorageImage);
+    HardwareImage image(1, 1, HardwareImage::Format::RGBA8_UNORM, HardwareImage::Usage::SampledStorageImage, 2);
+    auto layer = image[1];
     ComputePipeline<compute_write_slang_t> write;
-    write.params.outputIndex = firstOutput;
-    write.params.value = UINT32_MAX;
-    write.params.value = image;
+    write.params.outputIndex = firstOutput.storeWriteDescriptor();
+    write.params.value = layer.storeSampledDescriptor();
     executor << write(1);
+    const auto sampled = commandAccesses(std::get<RecordedCommand>(pending.back()));
+    expect(std::ranges::any_of(sampled, [&](const auto& use) {
+        return use.image == ResourceManager::get(layer) && use.range.baseArrayLayer == 1 &&
+               use.range.layerCount == 1 && use.access == VK_ACCESS_2_SHADER_READ_BIT;
+    }), "a sampled descriptor retains its image view and read access");
+    write.params.value = 17u;
+    executor << write(1);
+    const auto accesses = commandAccesses(std::get<RecordedCommand>(pending.back()));
+    expect(accesses.size() == 1 && accesses.front().buffer == ResourceManager::get(firstOutput)->bufferHandle,
+           "overwriting a descriptor with an ordinary scalar clears the old resource binding");
     executor.commit().wait();
-    expect(firstOutput.copyToData(words) && words[0] == image.storeDescriptor(),
-           "a named compute field writes its image descriptor index into the push constants");
+    expect(firstOutput.copyToData(words) && words[0] == 17u, "a scalar overwrite reaches the shader unchanged");
+
+    write.params.outputIndex = 7u;
+    expect(throws<std::invalid_argument>([&] { write.outputs[7] = layer.storeSampledDescriptor(); }),
+           "a sampled image cannot occupy a fixed storage buffer slot");
+    write.outputs[7] = secondOutput;
+    write.params.value = 23u;
+    executor << write(1);
+    const auto fixed = commandAccesses(std::get<RecordedCommand>(pending.back()));
+    expect(fixed.size() == 1 && fixed.front().buffer == ResourceManager::get(secondOutput)->bufferHandle &&
+           fixed.front().access == (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT),
+           "a generated direct RW buffer field uses the access declared by Slang");
+    executor.commit().wait();
+    expect(secondOutput.copyToData(words) && words[0] == 23u, "the shader can select a bound fixed slot by number");
+}
+
+template<const EmbeddedShader::ShaderCodeModule& Module>
+struct TestComputeStage {
+    static constexpr auto shaderStage = EmbeddedShader::ShaderStage::ComputeShader;
+    static constexpr auto& shaderModule = Module;
+};
+
+void test_mixed_descriptor_slots()
+{
+    using namespace EmbeddedShader;
+    using Bind = ShaderCodeModule::ShaderResources::BindType;
+    HardwareBuffer destination(std::array{0u}, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer source(std::array{41u}, HardwareBuffer::Usage::StorageBuffer);
+    // Make the fixed read slot coincide with the destination's actual global descriptor.
+    auto* native = ResourceManager::get(destination);
+    const uint32_t slot = native->resourceManager->storeDescriptor(*native);
+    static const auto module = compileBufferAccess(
+        "buffers[params.index][0] = buffers[" + std::to_string(slot) + "][0] + 1;");
+    ComputePipeline<> pipeline(ComputeEntry{TestComputeStage<module>{}});
+    BoundField<ComputePipeline<>> index(&pipeline, 0, sizeof(uint32_t), Bind::pushConstantMembers, 0);
+    BoundField<ComputePipeline<>> fixed(&pipeline, 0, 0, Bind::storageBuffer, 0, 1, 0, 0);
+    index = destination.storeWriteDescriptor();
+    fixed[slot] = source.storeReadDescriptor();
+    expect(throws<std::invalid_argument>([&] { (void)index[0]; }), "a push constant cannot bind a descriptor array element");
+    BoundField<ComputePipeline<>> bounded(&pipeline, 0, 0, Bind::storageBuffer, 0, 1, 0, 2);
+    expect(throws<std::out_of_range>([&] { (void)bounded[2]; }), "finite descriptor arrays enforce the reflected extent");
+    const auto command = pipeline(1);
+    HardwareExecutor executor;
+    for (const uint32_t value : {41u, 8u}) {
+        expect(source.copyFromData(&value, sizeof(value)), "update the fixed slot before replay");
+        executor << command;
+        executor.commit().wait();
+        std::array<uint32_t, 1> result{};
+        expect(destination.copyToData(result) && result[0] == value + 1 &&
+               source.copyToData(result) && result[0] == value,
+               "fixed reads and managed writes retain distinct resources through a private descriptor collision");
+    }
+    const auto owned = HardwareBuffer(std::array{50u}, HardwareBuffer::Usage::StorageBuffer).storeReadDescriptor();
+    fixed[slot] = owned;
+    const auto detached = pipeline(1);
+    fixed[slot] = source.storeReadDescriptor();
+    executor << detached;
+    executor.commit().wait();
+    std::array<uint32_t, 1> result{};
+    expect(destination.copyToData(result) && result[0] == 51, "a descriptor owns the temporary buffer used on replay");
+
+    BoundField<ComputePipeline<>> readAlias(&pipeline, 0, 0, Bind::storageBuffer, 0, 1, 0, 0,
+                                            Ast::AccessPermissions::ReadAndWrite, true);
+    auto writeAlias = readAlias;
+    readAlias[slot] = source.storeReadDescriptor();
+    writeAlias[slot] = source.storeWriteDescriptor();
+    executor << pipeline(1);
+    const auto aliases = commandAccesses(std::get<RecordedCommand>(HardwareBackendAccess::state(executor).pending.back()));
+    expect(std::ranges::any_of(aliases, [&](const auto& use) {
+        return use.buffer == ResourceManager::get(source)->bufferHandle &&
+               use.access == (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+    }), "assigning either name of a shared fixed slot preserves access through all aliases");
+    executor.commit().wait();
+}
+
+void test_bounded_descriptor_replay()
+{
+    using namespace EmbeddedShader;
+    using Bind = ShaderCodeModule::ShaderResources::BindType;
+    static const auto module = compileBufferAccess(
+        "uint old; InterlockedAdd(buffers[params.index][0], buffers[params.alternate][0], old);", 2);
+    ComputePipeline<> pipeline(ComputeEntry{TestComputeStage<module>{}});
+    BoundField<ComputePipeline<>> target(&pipeline, 0, sizeof(uint32_t), Bind::pushConstantMembers, 0);
+    BoundField<ComputePipeline<>> source(&pipeline, sizeof(uint32_t), sizeof(uint32_t), Bind::pushConstantMembers, 0);
+
+    // At least one of three live global slots cannot index the shader's two-element table.
+    std::array<HardwareBuffer, 3> buffers;
+    for (auto& buffer : buffers) {
+        buffer = HardwareBuffer(std::array{2u}, HardwareBuffer::Usage::StorageBuffer);
+        auto* native = ResourceManager::get(buffer);
+        (void)native->resourceManager->storeDescriptor(*native);
+    }
+    std::ranges::sort(buffers, {}, [](const auto& buffer) { return ResourceManager::get(buffer)->bindlessIndex; });
+    auto& a = buffers.back();
+    auto& b = buffers.front();
+    const uint32_t initial = 3;
+    expect(b.copyFromData(&initial, sizeof(initial)), "initialize the second atomic operand");
+    target = a.storeReadWriteDescriptor();
+    source = b.storeReadDescriptor();
+    const auto forward = pipeline(1);
+    target = b.storeReadWriteDescriptor();
+    source = a.storeReadDescriptor();
+    const auto reverse = pipeline(1);
+
+    HardwareExecutor executor;
+    executor << forward << reverse << forward;
+    const auto& pending = HardwareBackendAccess::state(executor).pending;
+    for (size_t i = 0; i < pending.size(); ++i) {
+        const auto uses = commandAccesses(std::get<RecordedCommand>(pending[i]));
+        const auto has = [&](const HardwareBuffer& buffer, VkAccessFlags2 access) {
+            return std::ranges::any_of(uses, [&](const auto& use) {
+                return use.buffer == ResourceManager::get(buffer)->bufferHandle &&
+                       use.stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT && use.access == access;
+            });
+        };
+        expect(uses.size() == 2 && has(i == 1 ? a : b, VK_ACCESS_2_SHADER_READ_BIT) &&
+               has(i == 1 ? b : a, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT),
+               "saved atomic dispatches keep the direction and identity of both descriptors");
+    }
+    executor.commit().wait();
+    std::array<uint32_t, 1> word{};
+    expect(a.copyToData(word) && word[0] == 13 && b.copyToData(word) && word[0] == 8,
+           "finite descriptor tables remap managed indices and synchronize write/read reversals on replay");
 }
 
 void test_compute_shader_variants()
@@ -586,6 +791,18 @@ void test_compute_shader_variants()
         executor << first << withInput << last;
         return withInput;
     }();
+    const auto& pending = HardwareBackendAccess::state(executor).pending;
+    for (size_t i = 0; i < pending.size(); ++i) {
+        const auto accesses = commandAccesses(std::get<RecordedCommand>(pending[i]));
+        const bool readsInput = i == 1;
+        expect(accesses.size() == (readsInput ? 2 : 1) &&
+               std::ranges::any_of(accesses, [&](const auto& use) {
+                   return use.buffer == ResourceManager::get(outputBuffer)->bufferHandle && use.access == VK_ACCESS_2_SHADER_WRITE_BIT;
+               }) &&
+               (!readsInput || std::ranges::any_of(accesses, [&](const auto& use) {
+                   return use.buffer == ResourceManager::get(inputBuffer)->bufferHandle && use.access == VK_ACCESS_2_SHADER_READ_BIT;
+               })), "the saved access list follows the selected EDSL variant");
+    }
     executor.commit().wait();
     expect(outputBuffer.copyToData(words) && words == std::array{10u, 53u, 12u},
            "queued false/true/false dispatches retain their shader variant, buffer bindings and slot");
@@ -596,6 +813,27 @@ void test_compute_shader_variants()
     executor.commit().wait();
     expect(outputBuffer.copyToData(words) && words == std::array{10u, 18u, 12u},
            "a saved dispatch reuses its shader variant, input buffer and slot after pipeline destruction");
+
+    HardwareBuffer counter(std::array{3u}, HardwareBuffer::Usage::StorageBuffer);
+    ArrayProxy<uint32_t> total(counter), output(outputBuffer), input(inputBuffer);
+    ComputePipeline branched([&] {
+        Uint index = dispatchThreadID()->x;
+        $IF(index == Uint(0)) { compute_write_slang.accumulateValue(total[0], output[index]); }
+        $ELSE { output[index] = input[0]; };
+    });
+    executor << branched(2);
+    const auto gpuBranches = commandAccesses(std::get<RecordedCommand>(pending.back()));
+    const auto has = [&](HardwareBuffer& buffer, VkAccessFlags2 access) {
+        return std::ranges::any_of(gpuBranches, [&](const auto& use) {
+            return use.buffer == ResourceManager::get(buffer)->bufferHandle && use.access == access;
+        });
+    };
+    expect(gpuBranches.size() == 3 && has(counter, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT) &&
+           has(outputBuffer, VK_ACCESS_2_SHADER_WRITE_BIT) && has(inputBuffer, VK_ACCESS_2_SHADER_READ_BIT),
+           "GPU branches capture both paths and imported Slang out/inout arguments retain their access");
+    executor.commit().wait();
+    expect(outputBuffer.copyToData(words) && words == std::array{5u, 7u, 12u},
+           "both GPU paths write through the captured bindings");
 }
 
 void test_compute_sampling()
@@ -860,7 +1098,7 @@ void test_gpu()
     struct RetryCommand : CommandRecordVulkan {
         bool fail = true;
         ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
-        void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override {}
+        void resolveResourceUses(ResourceAccessList&) override {}
         void commitCommand(HardwareExecutorVulkan&) override {
             if (fail) throw std::runtime_error("injected recording failure");
         }
@@ -937,7 +1175,7 @@ void test_gpu()
         EmbeddedShader::Uint index = EmbeddedShader::dispatchThreadID()->x;
         importedOutput[index] = compute_write_slang.addIndex(importedInput[index], index);
     }, ktm::uvec3(1), options);
-    const auto dispatch = edsl.uses({{source, ResourceAccess::Read}, {destination, ResourceAccess::Write}})(8);
+    const auto dispatch = edsl(8);
     executor << dispatch;
     executor.commit().wait();
     expect(destination.copyToData(output) && output == std::array{10u, 21u, 32u, 43u, 54u, 65u, 76u, 87u},
@@ -953,7 +1191,7 @@ void test_gpu()
     HardwareImage first(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     HardwareImage second(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     second.setClearColor(0.75f, 0.f, 0.f, 1.f);
-    HardwareImage texture(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::SampledImage);
+    HardwareImage texture(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::SampledStorageImage);
     const std::array texel{0.25f, 0.f, 0.f, 1.f};
     executor << texture.copyFrom(texel.data());
     using Vertex = std::array<float, 5>; // xyz, uv in the Baseline shader.
@@ -961,11 +1199,11 @@ void test_gpu()
     HardwareBuffer vertices(triangle, HardwareBuffer::Usage::VertexBuffer);
     HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
     HardwareBuffer packets(std::array{Raster::IndirectPacket{.vertexCount = 3, .instanceCount = 1}}, HardwareBuffer::Usage::RasterIndirect);
-    const struct { ktm::fmat4x4 model; uint32_t textureIndex; } draw{ktm::fmat4x4::from_eye(), texture.storeDescriptor()};
-    HardwareBuffer drawParameters(sizeof(draw), HardwareBuffer::Usage::StorageBuffer, &draw);
+    const auto model = ktm::fmat4x4::from_eye();
+    HardwareBuffer drawParameters(sizeof(model), HardwareBuffer::Usage::StorageBuffer, &model);
 
     auto movedRaster = std::move(raster);
-    movedRaster.uses({{texture, ResourceAccess::Read}});
+    movedRaster.vp.texIndex = texture.storeSampledDescriptor();
     movedRaster.outColor = first;
     movedRaster.vp.proj = ktm::fmat4x4::from_eye();
     movedRaster.vp.view = ktm::fmat4x4::from_eye();
@@ -1010,6 +1248,8 @@ int main(int argc, char** argv)
             test_generated_packet_and_attachment_load(true);
             test_generated_packet_and_attachment_load(false);
             test_compute_dispatch_snapshots();
+            test_mixed_descriptor_slots();
+            test_bounded_descriptor_replay();
             test_compute_shader_variants();
             test_compute_sampling();
         }

@@ -191,7 +191,7 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit(bool submitPendingWaits)
     for (auto& recorded : commandList)
     {
         accesses.clear();
-        recorded.command->resolveResourceUses(recorded.resourceUses, accesses);
+        recorded.command->resolveResourceUses(accesses);
         layouts.capture(accesses);
         planner.plan(accesses, barriers, &recorded == &commandList.back());
         if (!barriers.memoryBarriers.empty() || !barriers.bufferBarriers.empty() || !barriers.imageBarriers.empty())

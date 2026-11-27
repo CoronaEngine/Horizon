@@ -59,6 +59,7 @@ struct ShaderCodeModule
                 uint64_t byteOffset = 0;
 
                 BindType bindType = none;
+                Ast::AccessPermissions access = Ast::AccessPermissions::None;
             };
 
             struct EntryPointInfo

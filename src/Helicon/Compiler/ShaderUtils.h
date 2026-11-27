@@ -12,7 +12,6 @@ namespace EmbeddedShader
 {
     // Match the indirect raster offset to the inputs of the selected fragment variant.
     void linkRasterDrawParameter(ShaderCodeModule& vertex, ShaderCodeModule& fragment);
-    bool rasterShaderCanMergeWithoutUses(const ShaderCodeModule& module);
 
 	// ---- 路径清理 ----
 

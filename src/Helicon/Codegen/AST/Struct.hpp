@@ -34,6 +34,7 @@ namespace EmbeddedShader::Ast
 	struct EmbeddedShaderStructure
 	{
 		ShaderStage stage{};
+        bool hasIndirectResource = false;
 		std::vector<std::shared_ptr<Statement>> globalStatements;
 		std::deque<std::shared_ptr<Statement>> inputStatements;
 		std::vector<std::shared_ptr<Statement>> outputStatements;

@@ -26,19 +26,18 @@ uint* hzPullVertex(HorizonDrawPacket packet, uint corner) {
 
 struct DrawParameters {
     column_major float4x4 model;
-    uint texIndex;
 };
 
 struct ViewProj {
     column_major float4x4 view;
     column_major float4x4 proj;
+    uint texIndex;
 };
 [[vk::binding(0, 3)]] ConstantBuffer<ViewProj> vp;
 
 struct VertexOutput {
     float4 position : SV_Position;
     float2 texCoord : TEXCOORD0;
-    nointerpolation uint parameterWord : TEXCOORD1;
 };
 
 [shader("vertex")]
@@ -52,6 +51,5 @@ VertexOutput main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     float4x4 mvp = mul(mul(vp.proj, vp.view), draw->model);
     output.position = mul(mvp, float4(position, 1.0));
     output.texCoord = *(float2*)(vertex + 3);
-    output.parameterWord = packet.parameterWord;
     return output;
 }
