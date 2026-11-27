@@ -360,7 +360,7 @@ executor.commit();
 | 层次 | 发现的问题 | 修复方式 |
 | --- | --- | --- |
 | 公共接口 | 旧文件名、缺少有效头文件保护和标准头文件 | 将渲染接口和拷贝命令合并到 `Horizon.h`，由实现显式包含 |
-| 资源池与日志 | 引用已移除的 Corona Kernel 路径 | 使用已有 `horizon::core::Storage` 和 Core/Quill 日志 |
+| 日志 | 引用已移除的 Corona Kernel 路径 | 使用 Core/Quill 日志 |
 | 宿主内存 | 引用旧的对齐分配器 | 使用 C++ 对齐 `operator new/delete`，保存分配对齐值，先销毁导入缓冲区再释放内存 |
 | 着色器 | `getShaderCode` 已改为可变操作，SPIRV-Cross 反射已移除 | 适配当前 Helicon API，使用 Slang 产生的二进制和反射 |
 | 资源自动绑定 | 新版反射条目可能表示常量或缓冲区，旧代码统一按图像解引用 | 分别处理值、缓冲区和图像，并检查空的回指针 |
@@ -368,7 +368,7 @@ executor.commit();
 | 拷贝与所有权 | 偏移和长度被丢弃；同一资源重复锁定；部分图像 barrier 与整体布局记录不一致 | 传递并校验拷贝范围；修复同槽锁定；图像转换与整体布局记录保持一致 |
 | 图像释放 | `destroyImage` 的释放代码被注释，退出时触发 VMA 泄漏断言 | 分配和缓存视图由共享所有权管理，最后一个图像/子视图释放时销毁 |
 
-旧版仍采用“原子 ID → Storage 槽位 → Vulkan 资源”的引用计数模型。
+旧版 RHI 的 `HardwareBuffer` 和 `HardwareImage` 通过 `std::shared_ptr` 持有各自的 Vulkan 资源包装对象。
 拷贝命令持有资源包装对象，executor 通过 timeline semaphore 保留资源到 GPU 完成。
 测试覆盖头文件独立包含、无窗口 displayer 的移动语义、
 临时缓冲区保活、整块/局部/同缓冲区拷贝、越界拒绝、图像 mip/数组层/偏移往返和子视图保活，

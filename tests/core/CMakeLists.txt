@@ -67,8 +67,8 @@ add_test(NAME horizon.core.logging_configuration COMMAND horizon-test-logging-co
 add_test(NAME horizon.core.logging_relative_file COMMAND horizon-test-logging-configuration relative-file)
 
 add_executable(horizon-test-core-public-headers test_public_headers.cpp)
-target_link_libraries(horizon-test-core-public-headers PRIVATE horizon-logging)
-target_compile_definitions(horizon-test-core-public-headers PRIVATE CFW_ENABLE_LOCK_TIMEOUT=1)
+target_include_directories(horizon-test-core-public-headers PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_compile_features(horizon-test-core-public-headers PRIVATE cxx_std_20)
 if(WIN32)
     target_link_libraries(horizon-test-core-public-headers PRIVATE dbghelp)
 endif()
