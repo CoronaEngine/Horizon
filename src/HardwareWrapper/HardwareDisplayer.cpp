@@ -15,10 +15,6 @@ HardwareDisplayer::HardwareDisplayer(void* surface)
 {
 }
 
-HardwareDisplayer::HardwareDisplayer(HardwareDisplayer&&) noexcept = default;
-HardwareDisplayer::~HardwareDisplayer() = default;
-HardwareDisplayer& HardwareDisplayer::operator=(HardwareDisplayer&&) noexcept = default;
-
 HardwareExecutor::Command HardwareDisplayer::operator()(const HardwareImage& image) const
 {
     return HardwareExecutor::Command(std::make_shared<HardwareExecutor::Command::Impl::Display>(impl_, image));

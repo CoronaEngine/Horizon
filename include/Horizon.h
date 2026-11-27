@@ -203,10 +203,9 @@ struct HardwareDisplayer
 public:
     // Prefer the render device when it can present to the surface.
     explicit HardwareDisplayer(void* surface = nullptr);
-    HardwareDisplayer(HardwareDisplayer&& other) noexcept;
-    ~HardwareDisplayer();
+    HardwareDisplayer(HardwareDisplayer&&) noexcept = default;
+    HardwareDisplayer& operator=(HardwareDisplayer&&) noexcept = default;
 
-    HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept;
     // Each execution presents the current contents of the captured image. The native window must remain valid.
     [[nodiscard]] HardwareExecutor::Command operator()(const HardwareImage& image) const;
 
