@@ -55,7 +55,7 @@ HardwareExecutor& HardwareExecutor::operator<<(Command command)
     }
     pending.push_back(std::move(entry));
     if (continuesPass) {
-        draw->pass = {.loadColor = true, .loadDepth = true};
+        draw->pass = {.loadColor = true, .loadDepth = static_cast<bool>(draw->depthImage)};
         draw->groups.front().root.drawBase = previous->drawCount;
         draw->drawCount += previous->drawCount;
     }

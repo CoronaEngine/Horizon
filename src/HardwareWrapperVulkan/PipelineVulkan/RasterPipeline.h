@@ -23,20 +23,9 @@ struct RasterPipelineVulkan
                          const ConditionInfo& fragmentConditions, RasterState state, uint32_t viewCount);
     ~RasterPipelineVulkan();
 
-    void setDepthImage(HardwareImage &depthImage)
-    {
-        this->depthImage = depthImage;
-        explicitDepthImage = static_cast<bool>(depthImage);
-    }
-
     std::shared_ptr<RasterPipelineVulkan> variant(const EmbeddedShader::RasterPipelineObject& shaders,
                                                   const ConditionInfo& vertexConditions,
                                                   const ConditionInfo& fragmentConditions) const;
-
-    [[nodiscard]] HardwareImage &getDepthImage()
-    {
-        return depthImage;
-    }
 
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);
@@ -60,7 +49,7 @@ struct RasterPipelineVulkan
         VkPipelineLayout layout{};
         std::vector<VkFormat> colorFormats;
         std::vector<VkImageLayout> finalLayouts;
-        VkFormat depthFormat{};
+        VkFormat depthFormat{VK_FORMAT_UNDEFINED};
         RasterPass pass;
         ~GraphicsState();
     };
@@ -89,9 +78,6 @@ struct RasterPipelineVulkan
     std::shared_ptr<FramebufferState> lastFramebuffer;
 
     const RasterState rasterState;
-    bool explicitDepthImage{false};
-
-    HardwareImage depthImage;
     std::vector<HardwareImage> renderTargets;
 
     EmbeddedShader::ShaderCodeModule vertShaderCode;
@@ -143,8 +129,8 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
     std::shared_ptr<UniformSnapshot> uniform;
     std::shared_ptr<RasterPipelineVulkan::FramebufferState> framebuffer;
 
-    Draw(std::shared_ptr<RasterPipelineVulkan> backend, std::optional<ktm::uvec2> extent, std::optional<RasterPass> pass,
-         const std::vector<ResourceUse>& uses);
+    Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth, std::optional<ktm::uvec2> extent,
+         std::optional<RasterPass> pass, const std::vector<ResourceUse>& uses);
     bool sameAttachments(const Draw& next) const;
     bool canMerge(const Draw& next) const;
     void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,

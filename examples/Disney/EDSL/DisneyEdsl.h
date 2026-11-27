@@ -28,7 +28,7 @@ private:
 
     static constexpr int rows = 10, columns = 11;
     HardwareDisplayer display;
-    HardwareImage radiance_image, irradiance_image, final_output_image;
+    HardwareImage radiance_image, irradiance_image, final_output_image, depth_image;
     EmbeddedShader::TextureCube<ktm::fvec4> radiance_map{radiance_image}, irradiance_map{irradiance_image};
     HardwareBuffer vertex_buffer, index_buffer, commands, parameter_buffer;
     EmbeddedShader::Float4x4 proj_view;

@@ -136,6 +136,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
     using EmbeddedShader::sqrt;
 
     final_output_image = HardwareImage(width, height, HardwareImage::Format::RGBA16_FLOAT);
+    depth_image = HardwareImage(width, height, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
     auto edsl_vertex = [&](Float3 pos) {
@@ -297,7 +298,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
 
 void DisneyEdsl::run(float)
 {
-    render_executor << raster(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
+    render_executor << raster(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer, depth_image)
                     << display(final_output_image);
     render_executor.commit();
 }

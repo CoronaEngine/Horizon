@@ -240,7 +240,7 @@ enum class RasterCompare { Less, LessEqual, Equal, Always };
 enum class RasterBlend { Alpha, Opaque, Additive };
 enum class RasterTopology { TriangleList, TriangleStrip };
 struct RasterState {
-    bool depthTest{true}, depthWrite{true};
+    bool depthWrite{true};
     RasterCompare compare{RasterCompare::Less};
     RasterBlend blend{RasterBlend::Alpha};
     RasterTopology topology{RasterTopology::TriangleList};
@@ -318,16 +318,15 @@ public:
     RasterPipeline(RasterPipeline&&) noexcept;
     RasterPipeline& operator=(RasterPipeline&&) noexcept;
 
-    void setDepthImage(HardwareImage& image);
-    [[nodiscard]] HardwareImage getDepthImage();
-
     // Capture the current bindings for an indirect draw of the first count packets.
+    // Supplying a depth attachment enables depth testing with the pipeline's compare and write settings.
     // An explicit pass starts a new drawIndex sequence and applies its attachment load/clear operations,
     // even with zero draws. Adjacent draws on the same attachments and extent otherwise continue the pass.
     [[nodiscard]] HardwareExecutor::Command operator()(
         const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
-        const HardwareBuffer& parameters = {}, std::optional<ScissorRect> scissor = {},
-        std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});
+        const HardwareBuffer& parameters = {}, const HardwareImage& depth = {},
+        std::optional<ScissorRect> scissor = {}, std::optional<RasterPass> pass = {},
+        std::optional<ktm::uvec2> extent = {});
 
     RasterPipeline& uses(std::initializer_list<ResourceUse> resources);
 };

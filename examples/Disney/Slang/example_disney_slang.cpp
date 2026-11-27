@@ -10,6 +10,7 @@
 DisneySlang::DisneySlang(void* native_window)
     : ExampleBase(native_window),
       display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT),
+      depth_image(800, 600, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage),
       pipeline({.topology = RasterTopology::TriangleStrip})
 {
     // Upload the six faces and all prefiltered mips of each environment map.
@@ -135,7 +136,7 @@ DisneySlang::DisneySlang(void* native_window)
 
 void DisneySlang::run(float)
 {
-    render_executor << pipeline(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
+    render_executor << pipeline(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer, depth_image)
                     << display(final_output_image);
     render_executor.commit();
 }

@@ -72,7 +72,7 @@ EdslFeature::EdslFeature(void* native_window)
 
 void EdslFeature::run(float)
 {
-    executor << geometry(vertex_buffer, index_buffer, commands, 1)
+    executor << geometry(vertex_buffer, index_buffer, commands, 1, {}, depth_image)
              << lighting(width / group_size, height / group_size)
              << display(shaded_image);
     executor.commit();

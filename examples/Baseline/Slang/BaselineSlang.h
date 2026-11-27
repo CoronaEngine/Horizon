@@ -21,7 +21,7 @@ private:
     HardwareDisplayer display;
     HardwareBuffer vertex_buffer, index_buffer, commands;
     HardwareImage texture_image;
-    HardwareImage color;
+    HardwareImage color, depth;
     RasterPipeline<baseline_vert_slang_t, baseline_frag_slang_t> pipeline;
     struct DrawParameters {
         ktm::fmat4x4 model{};

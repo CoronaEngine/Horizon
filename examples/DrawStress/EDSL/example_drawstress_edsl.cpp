@@ -55,6 +55,7 @@ DrawStressEdsl::DrawStressEdsl(void* native_window)
 
     using EmbeddedShader::Float, EmbeddedShader::Float3, EmbeddedShader::Float4, EmbeddedShader::Uint;
     output_image = HardwareImage(width, height, HardwareImage::Format::RGBA16_FLOAT);
+    depth_image = HardwareImage(width, height, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
     output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
     const auto vertex_shader = []() {
         const auto corner = EmbeddedShader::vertexIndex();
@@ -110,7 +111,7 @@ void DrawStressEdsl::run(float seconds)
     }
     parameters.flushMapped();
 
-    render_executor << raster(vertex_buffer, index_buffer, commands, draw_count, parameters)
+    render_executor << raster(vertex_buffer, index_buffer, commands, draw_count, parameters, depth_image)
                     << display(output_image);
     render_executor.commit();
 }

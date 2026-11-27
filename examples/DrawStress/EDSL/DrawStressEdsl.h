@@ -25,7 +25,7 @@ private:
     std::size_t next_parameter_buffer{};
     ktm::fvec4 axis_projection;
     std::array<ktm::fvec4, dim> translations;
-    HardwareImage output_image;
+    HardwareImage output_image, depth_image;
     EmbeddedShader::Texture2D<ktm::fvec4> output{output_image};
     RasterPipeline<> raster;
     HardwareExecutor render_executor;

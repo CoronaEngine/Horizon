@@ -18,7 +18,9 @@
 
 BaselineSlang::BaselineSlang(void* native_window)
     : ExampleBase(native_window), display(native_window),
-      color(800, 600, HardwareImage::Format::RGBA16_FLOAT), pipeline({.compare = RasterCompare::LessEqual})
+      color(800, 600, HardwareImage::Format::RGBA16_FLOAT),
+      depth(800, 600, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage),
+      pipeline({.compare = RasterCompare::LessEqual})
 {
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     {
@@ -94,7 +96,7 @@ void BaselineSlang::run(float seconds)
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
     parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
-    render_executor << pipeline(vertex_buffer, index_buffer, commands, 1, parameter_buffer)
+    render_executor << pipeline(vertex_buffer, index_buffer, commands, 1, parameter_buffer, depth)
                     << display(color);
     render_executor.commit();
 }

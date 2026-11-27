@@ -18,6 +18,11 @@ VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& im
         ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 }
 
+bool coversRenderArea(const ResourceManager::ImageHardwareWrap& image, ktm::uvec2 extent, uint32_t views)
+{
+    return image.imageSize.x >= extent.x && image.imageSize.y >= extent.y && image.arrayLayers >= views;
+}
+
 bool sameAttachment(const HardwareImage& a, const HardwareImage& b)
 {
     const auto* left = ResourceManager::get(a);
@@ -117,8 +122,9 @@ void RasterPipelineVulkan::createRenderPass(GraphicsState& state)
         throw std::invalid_argument("Multiview count exceeds the enabled device capabilities");
 
     // 配置附件描述
+    const bool hasDepth = state.depthFormat != VK_FORMAT_UNDEFINED;
     std::vector<VkAttachmentDescription> attachments;
-    attachments.reserve(state.colorFormats.size() + 1);
+    attachments.reserve(state.colorFormats.size() + hasDepth);
 
     for (size_t i = 0; i < state.colorFormats.size(); ++i)
     {
@@ -135,16 +141,18 @@ void RasterPipelineVulkan::createRenderPass(GraphicsState& state)
     }
 
     // 深度附件
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = state.depthFormat;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = state.pass.loadDepth ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    attachments.push_back(depthAttachment);
+    if (hasDepth) {
+        VkAttachmentDescription depthAttachment{};
+        depthAttachment.format = state.depthFormat;
+        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttachment.loadOp = state.pass.loadDepth ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        attachments.push_back(depthAttachment);
+    }
 
     // 配置颜色附件引用
     std::vector<VkAttachmentReference> colorReferences;
@@ -164,20 +172,19 @@ void RasterPipelineVulkan::createRenderPass(GraphicsState& state)
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = static_cast<uint32_t>(colorReferences.size());
     subpass.pColorAttachments = colorReferences.data();
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    subpass.pDepthStencilAttachment = hasDepth ? &depthAttachmentRef : nullptr;
 
     // 配置子通道依赖
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependency.dependencyFlags = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    if (hasDepth) {
+        dependency.srcStageMask |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    }
+    dependency.dstStageMask = dependency.srcStageMask;
 
     // 配置多视图
     const uint32_t viewMask = UINT32_MAX >> (32 - multiviewCount);
@@ -275,10 +282,9 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     // 配置深度模板
-    // RasterPipeline 默认用于 3D 几何绘制，因此开启深度测试与深度写入。
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = rasterState.depthTest ? VK_TRUE : VK_FALSE;
+    depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = rasterState.depthWrite ? VK_TRUE : VK_FALSE;
     switch (rasterState.compare) {
     case RasterCompare::Less: depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; break;
@@ -371,7 +377,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterInfo;
     pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pDepthStencilState = state.depthFormat != VK_FORMAT_UNDEFINED ? &depthStencil : nullptr;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = pipelineLayout;
@@ -391,35 +397,36 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
-                                  std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
+HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth,
+                                            std::optional<ktm::uvec2> extent, std::optional<RasterPass> requestedPass,
+                                            const std::vector<ResourceUse>& uses)
     : pipeline(std::move(backend)), pass(requestedPass.value_or(RasterPass{})),
-      startsPass(requestedPass.has_value()),
+      startsPass(requestedPass.has_value()), depthImage(depth),
       renderTargets(pipeline->renderTargets), resourceUses(uses)
 {
     if (!extent) {
         const auto color = std::find_if(renderTargets.begin(), renderTargets.end(), [](const HardwareImage& image) { return bool(image); });
-        const HardwareImage& target = color != renderTargets.end() ? *color : pipeline->depthImage;
-        if (!target || (color == renderTargets.end() && !pipeline->explicitDepthImage))
+        const HardwareImage& target = color != renderTargets.end() ? *color : depthImage;
+        if (!target)
             throw std::invalid_argument("An inferred raster extent requires a bound color or depth image");
         extent = ResourceManager::get(target)->imageSize;
     }
     imageSize = *extent;
     if (!imageSize.x || !imageSize.y) throw std::invalid_argument("Raster draw requires a nonzero extent");
-    if (!pipeline->explicitDepthImage) {
-        const auto* depth = ResourceManager::get(pipeline->depthImage);
-        if (!depth || depth->imageSize != imageSize) {
-            HardwareImage::CreateInfo info(imageSize.x, imageSize.y, HardwareImage::Format::D32_FLOAT);
-            info.usage = HardwareImage::Usage::DepthImage;
-            info.arrayLayers = pipeline->multiviewCount;
-            pipeline->depthImage = HardwareImage(info);
-        }
-    }
-    depthImage = pipeline->depthImage;
-    clearValues.reserve(renderTargets.size() + 1);
+    clearValues.reserve(renderTargets.size() + static_cast<bool>(depthImage));
     for (const auto& target : renderTargets)
         clearValues.push_back(target ? ResourceManager::get(target)->clearValue : VkClearValue{});
-    clearValues.push_back(ResourceManager::get(depthImage)->clearValue);
+    if (depthImage) {
+        const auto& image = *ResourceManager::get(depthImage);
+        if (!(image.imageUsage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ||
+            (image.imageFormat != VK_FORMAT_D16_UNORM && image.imageFormat != VK_FORMAT_D32_SFLOAT))
+            throw std::invalid_argument("Raster depth attachment requires a depth image with a depth format");
+        if (!coversRenderArea(image, imageSize, pipeline->multiviewCount))
+            throw std::invalid_argument("Raster depth attachment is smaller than the invocation extent or view count");
+        clearValues.push_back(image.clearValue);
+    } else {
+        pass.loadDepth = false;
+    }
     uniformBytes = copyParameterBytes(pipeline->tempUBO.get(), pipeline->uboSize);
     bindings = pipeline->bindings.snapshot();
 }
@@ -488,11 +495,6 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     std::vector<VkFormat> formats;
     std::vector<VkImageLayout> finalLayouts;
     std::vector<VkImageView> views;
-    const auto checkExtent = [&](const auto* image) {
-        if (image->imageSize.x < imageSize.x || image->imageSize.y < imageSize.y ||
-            image->arrayLayers < static_cast<uint32_t>(pipeline->multiviewCount))
-            throw std::runtime_error("Raster attachment is smaller than the invocation extent or view count");
-    };
     const auto attachmentView = [](auto* image) {
         if (image->mipLevels == 1 && !image->cube) return image->imageView;
         return image->resourceManager->createImageView(*image, UINT32_MAX, 0);
@@ -501,17 +503,18 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
     {
         if (!target) throw std::runtime_error("Raster invocation has an unbound color attachment");
         auto* image = ResourceManager::get(target);
-        checkExtent(image);
+        if (!coversRenderArea(*image, imageSize, pipeline->multiviewCount))
+            throw std::runtime_error("Raster attachment is smaller than the invocation extent or view count");
         formats.push_back(image->imageFormat);
         finalLayouts.push_back(colorAttachmentLayout(*image));
         views.push_back(attachmentView(image));
     }
-    checkExtent(depth);
-    views.push_back(attachmentView(depth));
+    const auto depthFormat = depth ? depth->imageFormat : VK_FORMAT_UNDEFINED;
+    if (depth) views.push_back(attachmentView(depth));
     std::shared_ptr<RasterPipelineVulkan::GraphicsState> graphics;
     for (const auto& cached : pipeline->graphicsStates)
         if (cached->colorFormats == formats && cached->finalLayouts == finalLayouts &&
-            cached->depthFormat == depth->imageFormat && cached->pass == pass)
+            cached->depthFormat == depthFormat && cached->pass == pass)
         { graphics = cached; break; }
     const auto device = getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice();
     if (!graphics)
@@ -520,7 +523,7 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
         graphics->device = device;
         graphics->colorFormats = std::move(formats);
         graphics->finalLayouts = std::move(finalLayouts);
-        graphics->depthFormat = depth->imageFormat;
+        graphics->depthFormat = depthFormat;
         graphics->pass = pass;
         pipeline->createRenderPass(*graphics);
         pipeline->createGraphicsPipeline(*graphics);
@@ -732,8 +735,6 @@ std::shared_ptr<RasterPipelineVulkan> RasterPipelineVulkan::variant(
 {
     auto next = std::make_shared<RasterPipelineVulkan>(shaders, vertexConditions, fragmentConditions, rasterState, multiviewCount);
     if (next->renderTargets.size() == renderTargets.size()) next->renderTargets = renderTargets;
-    next->depthImage = depthImage;
-    next->explicitDepthImage = explicitDepthImage;
     return next;
 }
 
@@ -799,21 +800,9 @@ RasterPipeline<VS, FS>& RasterPipeline<VS, FS>::uses(std::initializer_list<Resou
 }
 
 template<class VS, class FS>
-void RasterPipeline<VS, FS>::setDepthImage(HardwareImage& depthImage)
-{
-    Impl::checked(impl_).backend->setDepthImage(depthImage);
-}
-
-template<class VS, class FS>
-HardwareImage RasterPipeline<VS, FS>::getDepthImage()
-{
-    return Impl::checked(impl_).backend->getDepthImage();
-}
-
-template<class VS, class FS>
 HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
     const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets, uint32_t count,
-    const HardwareBuffer& parameters, std::optional<ScissorRect> scissor,
+    const HardwareBuffer& parameters, const HardwareImage& depth, std::optional<ScissorRect> scissor,
     std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
 {
     if (!count && !pass) return HardwareExecutor::Command(nullptr);
@@ -836,7 +825,7 @@ HardwareExecutor::Command RasterPipeline<VS, FS>::operator()(
                 backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
         }
     }
-    auto draw = std::make_shared<HardwareExecutor::Command::Impl::Draw>(pipeline.backend, extent, pass, pipeline.resourceUses);
+    auto draw = std::make_shared<HardwareExecutor::Command::Impl::Draw>(pipeline.backend, depth, extent, pass, pipeline.resourceUses);
     draw->appendIndirect(vertices, indices, packets, count, parameters, scissor);
     if (!draw->drawCount && !pass) return HardwareExecutor::Command(nullptr);
     return HardwareExecutor::Command(std::move(draw));

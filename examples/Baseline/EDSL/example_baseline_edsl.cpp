@@ -75,6 +75,7 @@ BaselineEdsl::BaselineEdsl(void* native_window)
     using EmbeddedShader::mul;
 
     color_image = HardwareImage(width, height, HardwareImage::Format::RGBA16_FLOAT);
+    depth_image = HardwareImage(width, height, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
 
     auto vertex_shader = [&](EmbeddedShader::Aggregate<VertexInput> vertex) -> Float2 {
         EmbeddedShader::position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
@@ -102,7 +103,7 @@ void BaselineEdsl::run(float seconds)
 {
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
-    render_executor << raster(vertex_buffer, index_buffer, commands, 1)
+    render_executor << raster(vertex_buffer, index_buffer, commands, 1, {}, depth_image)
                     << display(color_image);
     render_executor.commit();
 }

@@ -72,6 +72,7 @@ concept CanCallRaster = requires(RasterPipeline<>& pipeline, const HardwareBuffe
     { pipeline(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<HardwareExecutor::Command>;
 };
 static_assert(CanCallRaster<> && CanCallRaster<const HardwareBuffer&>);
+static_assert(CanCallRaster<const HardwareBuffer&, const HardwareImage&, ScissorRect, RasterPass, ktm::uvec2>);
 static_assert(!CanCallRaster<std::span<const float>>);
 static_assert(!CanCallRaster<std::size_t, void (*)(std::span<std::byte>)>);
 
@@ -191,13 +192,13 @@ static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
 template<class T>
 concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
-static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer) {
+static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer, const HardwareImage& depth) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
     { DisneyRaster({.blend = RasterBlend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
     { RasterPipeline(disney_vert_slang, disney_frag_slang, {.blend = RasterBlend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
     { pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
-    { executor << pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor&>;
+    { executor << pipeline(buffer, buffer, buffer, 1, {}, depth) } -> std::same_as<HardwareExecutor&>;
 });
 static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
 static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);

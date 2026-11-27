@@ -318,9 +318,9 @@ executor.commit();
 
 `createDeviceLocal` 替换当前句柄指向的分配，并在返回前将源数据复制到暂存缓冲。返回的 `HardwareExecutor::Command` 持有暂存缓冲和目标缓冲，调用方用 `executor <<` 将上传排在首次使用之前。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
 
-调用光栅管线时，绘制命令会捕获当前管线、EDSL 变体、绑定和附件。渲染尺寸默认从颜色附件或显式深度附件推导，也可以通过最后一个参数 `extent` 指定。需要共享深度图时使用 `setDepthImage()`。
+调用光栅管线时，绘制命令会捕获当前管线、EDSL 变体、绑定和附件。需要深度测试时，创建 `HardwareImage::Usage::DepthImage` 图像，在 `parameters` 后传入，例如 `pipeline(vertices, indices, commands, count, parameters, depth)`。省略 `depth` 会关闭深度测试和写入。渲染尺寸默认从颜色或深度附件推导，也可以通过最后一个参数 `extent` 指定。
 
-首次绘制默认清除颜色和深度。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 scissor 之后显式传入 `RasterPass{}`。可分别设置 `loadColor` 和 `loadDepth`，例如 `RasterPass{.loadColor = true}` 保留颜色并清除深度。只清屏时写 `executor << pipeline({}, {}, {}, 0, {}, {}, RasterPass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
+首次绘制默认清除已绑定的附件。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 `scissor` 之后显式传入 `RasterPass{}`。两遍绘制可以传入同一张深度图，第二遍用 `RasterPass{.loadColor = true, .loadDepth = true}` 保留上一遍的颜色和深度。只清除颜色时写 `executor << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
 
 执行器可以把管线状态和绑定相同的相邻绘制录入一个物理 pass。对于通过描述符索引采样的纹理，可用 `pipeline.uses({{texture, ResourceAccess::Read}})` 声明实际读取的资源。存在存储写入或无法确认资源访问时，执行器会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。
 

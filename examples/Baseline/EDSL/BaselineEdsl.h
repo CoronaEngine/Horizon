@@ -18,7 +18,7 @@ private:
 
     HardwareDisplayer display;
     HardwareBuffer vertex_buffer, index_buffer, commands;
-    HardwareImage albedo_image, color_image;
+    HardwareImage albedo_image, color_image, depth_image;
     EmbeddedShader::Texture2D<ktm::fvec4> albedo{albedo_image}, color{color_image};
     EmbeddedShader::Float4x4 model, view, proj;
     RasterPipeline<> raster;

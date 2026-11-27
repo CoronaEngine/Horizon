@@ -126,9 +126,6 @@ void test_cpu()
     (void)pendingRaster({}, {}, {}, 0);
     expect(throws<std::logic_error>([&] { (void)pendingRaster({}, {}, {}, 1); }),
            "a raster placeholder rejects a draw before shaders are assigned");
-    expect(throws<std::logic_error>([&] { pendingRaster.setDepthImage(image); }) &&
-           throws<std::logic_error>([&] { (void)pendingRaster.getDepthImage(); }),
-           "a raster placeholder rejects depth access before shaders are assigned");
     expect(throws<std::invalid_argument>([&] { (void)RasterPipeline(vertex, fragment, {}, {}, 0); }),
            "EDSL raster construction rejects zero views");
     expect(throws<std::invalid_argument>([] { (void)RasterPipeline(baseline_vert_slang, baseline_frag_slang, {}, 33); }),
@@ -194,7 +191,7 @@ void test_indirect_draws(bool forceSingleDraw)
             color << value + drawColorOffset;
         };
         RasterPipeline<> pipeline;
-        pipeline = RasterPipeline(std::move(vs), std::move(fs), {.depthTest = false, .depthWrite = false});
+        pipeline = RasterPipeline(std::move(vs), std::move(fs));
         useVertexParameter = vertexFlag.lock();
         useFragmentParameter = fragmentFlag.lock();
         expect(useVertexParameter && useFragmentParameter, "both raster stages retain their condition captures");
@@ -215,19 +212,19 @@ void test_indirect_draws(bool forceSingleDraw)
         HardwareBuffer red(std::array<float,4>{1,0,0,1}, HardwareBuffer::Usage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
                               HardwareBuffer::Usage::StorageBuffer);
-        const auto drawLeft = pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
+        const auto drawLeft = pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{0,0,2,2});
         HardwareBuffer empty;
         executor << drawLeft << empty.copyTo(leftCommands) << drawLeft
                  << pipeline({}, {}, {}, 0)
-                 << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2})
-                 << pipeline(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
+                 << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{-3,0,2,2})
+                 << pipeline(rightVertices, rightIndices, rightCommands, 2, greens, {}, ScissorRect{2,0,2,2});
         replay << drawLeft << target.copyTo(readback);
         *useVertexParameter = false;
         *useFragmentParameter = false;
         // The new shader variant requires a physical split within the same logical pass.
-        const auto drawBlue = pipeline(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1});
+        const auto drawBlue = pipeline(leftVertices, leftIndices, leftCommands, 1, {}, {}, ScissorRect{2,0,1,1});
         executor << drawBlue
-                 << pipeline(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2},
+                 << pipeline(leftVertices, leftIndices, leftCommands, 1, {}, {}, ScissorRect{3,0,1,2},
                              RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
         replay << drawBlue << target.copyTo(splitReadback);
 
@@ -236,9 +233,9 @@ void test_indirect_draws(bool forceSingleDraw)
         color = displayTarget;
         *useVertexParameter = true;
         *useFragmentParameter = true;
-        acrossDisplay << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2})
+        acrossDisplay << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{0,0,2,2})
                       << HardwareDisplayer{}(displayTarget)
-                      << pipeline(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{2,0,2,2})
+                      << pipeline(leftVertices, leftIndices, leftCommands, 1, red, {}, ScissorRect{2,0,2,2})
                       << displayTarget.copyTo(readback);
     }
     executor << target.copyTo(readback);
@@ -292,7 +289,7 @@ void test_raster_sampled_storage_image()
     Texture2D<ktm::fvec4> texture = input, output = target;
     auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
     auto fs = [&] { output << texture.sample(Float2(0.5f)); };
-    RasterPipeline pipeline(vs, fs, {.depthTest = false, .depthWrite = false});
+    RasterPipeline pipeline(vs, fs);
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
     HardwareBuffer vertexBuffer(vertices, HardwareBuffer::Usage::VertexBuffer);
     HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
@@ -313,7 +310,7 @@ void test_raster_sampled_storage_image()
 
     target.setClearColor(0, 1, 0, 1);
     executor << pipeline(vertexBuffer, indexBuffer, commands, 1)
-             << pipeline({}, {}, {}, 0, {}, {}, RasterPass{})
+             << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPass{})
              << target.copyTo(readback);
     executor.commit().wait();
     expect(backend.recordedRasterPassCount == 2 &&
@@ -330,7 +327,7 @@ void test_raster_sampled_storage_image()
             next = values[0] + Float(1.f);
             values[0] = next;
             output << Float4(next, 0, 0, 1);
-        }, {.depthTest = false, .depthWrite = false});
+        });
         for (bool declareAccess : {false, true}) {
             if (declareAccess) increment.uses({{counter, ResourceAccess::ReadWrite}});
             executor << increment(vertexBuffer, indexBuffer, commands, 1)
@@ -347,7 +344,7 @@ void test_raster_sampled_storage_image()
     HardwareImage layers(HardwareImage::CreateInfo{.width = 2, .height = 2, .format = HardwareImage::Format::RGBA32_FLOAT,
         .usage = HardwareImage::Usage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
     std::array attachments{layers[0][1], layers[0][1], layers[1][1]};
-    RasterPipeline additive(vs, fs, {.depthTest = false, .depthWrite = false, .blend = RasterBlend::Additive});
+    RasterPipeline additive(vs, fs, {.blend = RasterBlend::Additive});
     additive.uses({{input, ResourceAccess::Read}});
     for (auto& attachment : attachments) {
         attachment.setClearColor(0, 0, 0, 0);
@@ -385,16 +382,19 @@ void test_shared_vertex_stage()
     std::array<float, 4> pixel{};
     HardwareBuffer readback(sizeof(pixel), HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
-    executor << raster(vertices, indices, packets, 1, parameters) << target.copyTo(readback);
+    HardwareImage depthLayers(1, 1, HardwareImage::Format::D16_UNORM, HardwareImage::Usage::DepthImage, 2);
+    const auto draw = raster(vertices, indices, packets, 1, parameters, depthLayers[1]);
+    depthLayers = {};
+    executor << draw << draw << target.copyTo(readback);
     executor.commit().wait();
     // At the center of the render target, the Disney view vector equals camPos.xyz.
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 2.f},
-           "DrawStress fragment reads the Disney vertex output and adds its alpha to the clear color");
+           "the saved Slang draw retains its depth view and the equal-depth replay adds no second contribution");
     expect(ResourceManager::get(fieldBuffer)->bindlessIndex >= 0, "a named raster field binds its storage buffer");
 }
 
 // Compute supplies the indirect command, color and depth for the second pass.
-void test_generated_packet_and_attachment_load(bool explicitDepth)
+void test_generated_packet_and_attachment_load(bool use16BitIndices)
 {
     using namespace EmbeddedShader;
     HardwareImage::CreateInfo targetInfo(4, 2, HardwareImage::Format::RGBA32_FLOAT);
@@ -409,10 +409,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     auto fs = [&](Float4 instanceColor) { output << rasterDrawParameter<ktm::fvec4>(0) + instanceColor; };
     RasterPipeline opaque(vs, fs, {.blend = RasterBlend::Opaque});
     RasterPipeline additive(vs, fs, {.depthWrite = false, .compare = RasterCompare::Equal, .blend = RasterBlend::Additive});
-    if (explicitDepth) {
-        HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
-        opaque.setDepthImage(depth);
-    }
+    HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
 
     const std::array<float,2> vertices[]{{-1,-1},{3,-1},{-1,3},{0,-1},{1,-1},{1,1},{0,1}};
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
@@ -432,7 +429,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expectInvalidUpload(HardwareBuffer::Usage::VertexBuffer, vertices, 2);
     HardwareBuffer originalVertices(sizeof(vertices), HardwareBuffer::Usage::StorageBuffer);
     executor << indexBuffer.copyTo(originalVertices);
-    if (explicitDepth) {
+    if (use16BitIndices) {
         executor << indexBuffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     } else {
         const std::vector<uint32_t> wideIndices(indices.begin(), indices.end());
@@ -441,7 +438,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expect(vertexBuffer.getElementCount() == std::size(vertices) &&
            vertexBuffer.getElementSize() == sizeof(vertices[0]) &&
            indexBuffer.getElementCount() == indices.size() &&
-           indexBuffer.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
+           indexBuffer.getElementSize() == (use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t)),
            "staged raster buffers preserve element counts, vertex stride and index width");
     HardwareBuffer firstCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
                                  HardwareBuffer::Usage::RasterIndirect);
@@ -453,9 +450,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), HardwareBuffer::Usage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    executor << opaque(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, ScissorRect{0,0,4,1}, {}, ktm::uvec2(4, 2));
-    auto sharedDepth = opaque.getDepthImage();
-    additive.setDepthImage(sharedDepth);
+    executor << opaque(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, depth, ScissorRect{0,0,4,1}, {}, ktm::uvec2(4, 2));
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -472,7 +467,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     }
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
-    executor << additive(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
+    executor << additive(vertexBuffer, indexBuffer, packets, 1, generatedParameters, depth, {},
                          RasterPass{.loadColor = true, .loadDepth = true})
              << target.copyTo(readback);
     executor.commit().wait();
@@ -485,6 +480,20 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     const std::array<float,4> red{1,0,0,1}, blended{1,2,instanceSum,1}, clear{0,0,0,1};
     expect(pixels == std::array{red, red, blended, blended, clear, clear, clear, clear},
            "the additive pipeline loads color and passes Equal only where the opaque pipeline wrote depth");
+
+    HardwareBuffer farBlue(std::array<float,5>{0,0,1,1,0.75f}, HardwareBuffer::Usage::StorageBuffer);
+    executor << opaque(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth)
+             << opaque(vertexBuffer, indexBuffer, firstCommands, 1, farBlue);
+    const auto& draw = std::get<RecordedCommand>(HardwareBackendAccess::state(executor).pending.back());
+    ResourceAccessList accesses;
+    draw.command->resolveResourceUses(draw.resourceUses, accesses);
+    expect(std::ranges::none_of(accesses.uses, [](const auto& use) { return use.range.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT; }),
+           "a draw without depth has no depth attachment access");
+    executor << target.copyTo(readback);
+    executor.commit().wait();
+    const std::array<float,4> blue{0,0,1,1};
+    expect(readback.copyToData(pixels) && std::ranges::all_of(pixels, [&](const auto& pixel) { return pixel == blue; }),
+           "without a depth attachment the later, farther triangle covers the earlier, nearer triangle");
 }
 
 void test_compute_dispatch_snapshots()

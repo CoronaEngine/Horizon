@@ -28,7 +28,7 @@ private:
     std::size_t next_parameter_buffer{};
     ktm::fvec4 axis_projection;
     std::array<ktm::fvec4, dim> translations;
-    HardwareImage final_output_image;
+    HardwareImage final_output_image, depth_image;
     RasterPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> pipeline;
     HardwareExecutor render_executor;
 };

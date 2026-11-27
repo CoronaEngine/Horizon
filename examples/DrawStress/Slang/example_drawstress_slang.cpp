@@ -7,7 +7,8 @@
 // Based on the single-threaded bgfx examples/17-drawstress workload.
 DrawStressSlang::DrawStressSlang(void* native_window)
     : ExampleBase(native_window),
-      display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT)
+      display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT),
+      depth_image(800, 600, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage)
 {
     // The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
     constexpr std::array<uint32_t, 8> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -96,7 +97,7 @@ void DrawStressSlang::run(float seconds)
     }
     parameters.flushMapped();
 
-    render_executor << pipeline(vertex_buffer, index_buffer, commands, draw_count, parameters)
+    render_executor << pipeline(vertex_buffer, index_buffer, commands, draw_count, parameters, depth_image)
                     << display(final_output_image);
     render_executor.commit();
 }
