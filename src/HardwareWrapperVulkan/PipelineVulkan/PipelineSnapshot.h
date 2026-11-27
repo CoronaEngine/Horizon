@@ -104,7 +104,7 @@ template<class PipelineType>
 void BoundField<PipelineType>::writeResource(const ::HardwareImage& image)
 {
     using Bind = ShaderCodeModule::ShaderResources;
-    if constexpr (std::is_same_v<PipelineType, ::RasterPipeline<>>) {
+    if constexpr (std::is_same_v<PipelineType, ::RasterPipeline<>> || std::is_same_v<PipelineType, ::MeshPipeline<>>) {
         if (bindType == Bind::stageOutputs) {
             PipelineType::Impl::checked(pipeline_->impl_).backend->setRenderTarget(location, image);
             return;
@@ -135,6 +135,7 @@ void BoundField<PipelineType>::writeBinding(auto value)
 // Only the pipeline implementation files have the complete Impl needed for these writes.
 extern template struct BoundField<::ComputePipeline<>>;
 extern template struct BoundField<::RasterPipeline<>>;
+extern template struct BoundField<::MeshPipeline<>>;
 } // namespace EmbeddedShader
 
 // Each invocation owns its upload and descriptor set until its submission's

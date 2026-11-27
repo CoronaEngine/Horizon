@@ -31,6 +31,7 @@ public:
         friend struct HardwareDisplayer;
         template<class> friend struct ComputePipeline;
         template<class, class> friend struct RasterPipeline;
+        template<class...> friend struct MeshPipeline;
 
         struct Impl;
         explicit Command(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -334,3 +335,42 @@ public:
 };
 
 extern template struct RasterPipeline<void, void>;
+
+template<class... Stages>
+struct MeshPipeline
+{
+    static_assert(sizeof...(Stages) == 0,
+                  "Register the mesh shader combination and include each generated stage header");
+
+    struct State {
+        bool depthWrite{true};
+        RasterPipeline<>::Compare compare{RasterPipeline<>::Compare::Less};
+        RasterPipeline<>::Blend blend{RasterPipeline<>::Blend::Alpha};
+    };
+
+    // One entry launches task workgroups when a task stage is present, otherwise mesh workgroups.
+    struct IndirectPacket {
+        uint32_t groupCountX{}, groupCountY{}, groupCountZ{};
+    };
+
+    ~MeshPipeline();
+    MeshPipeline(MeshPipeline&&) noexcept;
+    MeshPipeline& operator=(MeshPipeline&&) noexcept;
+
+    [[nodiscard]] HardwareExecutor::Command operator()(
+        const HardwareBuffer& groups, uint32_t drawCount, const HardwareImage& depth = {},
+        std::optional<RasterPipeline<>::ScissorRect> scissor = {}, std::optional<RasterPipeline<>::Pass> pass = {},
+        std::optional<ktm::uvec2> extent = {});
+
+private:
+    template<class...> friend struct MeshPipeline;
+    friend struct EmbeddedShader::BoundField<MeshPipeline>;
+    using Descriptor = HardwareExecutor::Descriptor;
+
+    MeshPipeline(const EmbeddedShader::ShaderCodeModule* task, const EmbeddedShader::ShaderCodeModule& mesh,
+                 const EmbeddedShader::ShaderCodeModule& fragment, State state, uint32_t views);
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+extern template struct MeshPipeline<>;

@@ -261,7 +261,27 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
     createInfo.enabledLayerCount = 0;
     createInfo.ppEnabledLayerNames = nullptr;
     createInfo.pEnabledFeatures = nullptr;
-    createInfo.pNext = deviceFeaturesUtils.featuresChain.getChainHead();
+    void* enabledFeatures = deviceFeaturesUtils.featuresChain.getChainHead();
+
+    auto& mesh = deviceFeaturesUtils.meshShaderFeatures;
+    if (std::ranges::any_of(availableExtensions, [](const auto& extension) {
+            return strcmp(extension.extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0;
+        })) {
+        VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &mesh};
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &query);
+        if (mesh.meshShader) {
+            VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                   &deviceFeaturesUtils.meshShaderProperties};
+            vkGetPhysicalDeviceProperties2(physicalDevice, &properties);
+            mesh.primitiveFragmentShadingRateMeshShader = VK_FALSE;
+            mesh.meshShaderQueries = VK_FALSE;
+            if (!deviceFeaturesUtils.featuresChain.supportsMultiview())
+                mesh.multiviewMeshShader = VK_FALSE;
+            mesh.pNext = enabledFeatures;
+            enabledFeatures = &mesh;
+            requiredExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+        }
+    }
 
     // Implicit-LOD sampling in compute shaders uses quad derivatives. Other
     // shaders and devices can continue using the ordinary device feature set.
@@ -276,12 +296,13 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
             deviceFeaturesUtils.computeDerivativeGroupQuads = true;
             requiredExtensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
             derivatives.computeDerivativeGroupLinear = VK_FALSE;
-            derivatives.pNext = deviceFeaturesUtils.featuresChain.getChainHead();
-            createInfo.pNext = &derivatives;
+            derivatives.pNext = enabledFeatures;
+            enabledFeatures = &derivatives;
         }
     }
     createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
     createInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    createInfo.pNext = enabledFeatures;
 
     coronaHardwareCheck(vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice));
 }

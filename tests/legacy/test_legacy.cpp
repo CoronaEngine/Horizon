@@ -7,6 +7,8 @@
 #include "Compiler/ShaderLanguageConverter.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceAccess.h"
+#include SLANG(mesh_task.slang)
+#include SLANG(examples/Baseline/Mesh/baseline_mesh.slang)
 #include SLANG(examples/Baseline/Slang/baseline_vert.slang)
 #include SLANG(examples/Baseline/Slang/baseline_frag.slang)
 #include SLANG(examples/Disney/Slang/disney_vert.slang)
@@ -220,6 +222,103 @@ bool has_vulkan_14_device()
     }
     vkDestroyInstance(instance, nullptr);
     return supported;
+}
+
+void test_mesh_draws(auto mesh, uint32_t groupCount)
+{
+    using namespace EmbeddedShader;
+    using Pixel = std::array<float, 4>;
+    constexpr Pixel clear{0, 0, 0, 0}, blue{0, 0, 1, 1}, red{1, 0, 0, 1};
+    std::array<Pixel, 8> pixels{};
+    HardwareExecutor executor;
+    HardwareImage color(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+    HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
+    HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
+    color.setClearColor(0, 0, 0, 0);
+    auto readColor = [&] {
+        executor << color.copyTo(readback);
+        executor.commit().wait();
+        expect(readback.copyToData(pixels), "mesh color readback");
+    };
+
+    using Packet = MeshPipeline<>::IndirectPacket;
+    auto& caps = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils();
+    const bool multiDraw = caps.featuresChain.getChainHead()->features.multiDrawIndirect &&
+                           caps.supportedProperties.properties.limits.maxDrawIndirectCount >= 2;
+    const uint32_t drawCount = multiDraw ? 2 : 1;
+    HardwareBuffer groups(std::array<Packet, 2>{}, HardwareBuffer::Usage::RasterIndirect);
+    HardwareBuffer indirectSource(std::array{Packet{multiDraw ? 0u : groupCount, 1, 1}, Packet{groupCount, 1, 1}},
+                                  HardwareBuffer::Usage::StorageBuffer);
+    executor << indirectSource.copyTo(groups);
+    // Only the last indexed triangle covers the screen, in the partially filled second mesh workgroup.
+    using Vertex = std::array<float, 5>;
+    HardwareBuffer meshVertices(std::array{Vertex{-1, -1, 0.6f, 0, 0}, Vertex{3, -1, 0.6f, 0, 0},
+                                          Vertex{-1, 3, 0.6f, 0, 0}}, HardwareBuffer::Usage::StorageBuffer);
+    std::array<uint32_t, 33 * 3> meshIndices{};
+    meshIndices[97] = 1;
+    meshIndices[98] = 2;
+    HardwareBuffer meshIndexBuffer(meshIndices, HardwareBuffer::Usage::StorageBuffer);
+    HardwareImage texture(1, 1, HardwareImage::Format::RGBA32_FLOAT);
+    executor << texture.copyFrom(blue.data());
+    mesh.geometry[0] = meshVertices;
+    mesh.geometry[1] = meshIndexBuffer;
+    mesh.vp.proj = ktm::fmat4x4::from_eye();
+    mesh.vp.view = ktm::fmat4x4::from_eye();
+    mesh.vp.texIndex = texture.storeSampledDescriptor();
+    mesh.outColor = color;
+    expect(throws<std::invalid_argument>([&] { (void)mesh(groups, 3); }), "mesh count cannot exceed packet buffer");
+    expect(throws<std::invalid_argument>([&] { (void)mesh(meshVertices, 1); }), "mesh requires indirect packets");
+
+    if constexpr (requires { mesh.task.groupCount; })
+    {
+        mesh.task.groupCount = 0u;
+        const auto empty = mesh(groups, drawCount, depth);
+        mesh.task.groupCount = 2u;
+        executor << empty;
+        readColor();
+        expect(std::ranges::all_of(pixels, [&](const Pixel& pixel) { return pixel == clear; }),
+               "a saved task command retains its zero mesh group count");
+    }
+    const auto meshDraw = mesh(groups, drawCount, depth);
+    if (multiDraw)
+    {
+        executor << mesh(groups, 1, depth);
+        readColor();
+        expect(std::ranges::all_of(pixels, [&](const Pixel& pixel) { return pixel == clear; }),
+               "the first indirect packet launches zero workgroups");
+    }
+    else
+        expect(throws<std::invalid_argument>([&] { (void)mesh(groups, 2); }), "mesh rejects unsupported multi-draw");
+    executor << meshDraw;
+    readColor();
+    expect(std::ranges::all_of(pixels, [&](const Pixel& pixel) { return pixel == blue; }),
+           "the GPU-written indirect packet reaches the last textured triangle");
+    executor << meshDraw << mesh({}, 0, depth, {}, Raster::Pass{});
+    readColor();
+    expect(std::ranges::all_of(pixels, [&](const Pixel& pixel) { return pixel == clear; }),
+           "an explicit empty mesh pass clears the preceding draw");
+
+    // Draw near red pixels on the left, then the farther blue triangle across the entire image.
+    Texture2D<ktm::fvec4> out = color;
+    auto vs = [] { position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), rasterDrawParameter<float>(0), Float(1)); };
+    auto fs = [&] { out << Float4(1, 0, 0, 1); };
+    RasterPipeline raster(vs, fs, {.blend = Raster::Blend::Opaque});
+    HardwareBuffer vertices(std::array{ktm::fvec2(-1, -1), ktm::fvec2(3, -1), ktm::fvec2(-1, 3)},
+                            HardwareBuffer::Usage::VertexBuffer);
+    HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
+    HardwareBuffer triangle(std::array{Raster::IndirectPacket{.vertexCount = 3, .instanceCount = 1}},
+                            HardwareBuffer::Usage::RasterIndirect);
+    HardwareBuffer nearZ(std::array{0.25f}, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer farZ(std::array{0.8f}, HardwareBuffer::Usage::StorageBuffer);
+    executor << raster(vertices, indices, triangle, 1, nearZ, depth, Raster::ScissorRect{0, 0, 2, 2}) << meshDraw;
+    readColor();
+    for (size_t i = 0; i < pixels.size(); ++i)
+        expect(pixels[i] == (i % 4 < 2 ? red : blue), "mesh loads the depth and color written by a raster draw");
+
+    executor << meshDraw << raster(vertices, indices, triangle, 1, farZ, depth);
+    readColor();
+    expect(std::ranges::all_of(pixels, [&](const Pixel& pixel) { return pixel == blue; }),
+           "raster loads mesh depth and rejects a farther triangle");
 }
 
 // Submit after the pipeline, geometry, draw parameters and output proxies go out of scope.
@@ -1253,12 +1352,28 @@ int main(int argc, char** argv)
 #endif
     try
     {
-        if (argc == 2 && std::string_view(argv[1]) == "--gpu")
+        const std::string_view mode = argc == 2 ? argv[1] : "";
+        if (mode == "--gpu" || mode == "--mesh" || mode == "--task-mesh")
         {
             if (!has_vulkan_14_device())
             {
                 std::cout << "SKIP: no Vulkan 1.4 loader/device\n";
                 return 77;
+            }
+            if (mode != "--gpu")
+            {
+                const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils().meshShaderFeatures;
+                if (!features.meshShader || (mode == "--task-mesh" && !features.taskShader))
+                {
+                    std::cout << "SKIP: selected Vulkan device lacks the requested mesh stages\n";
+                    return 77;
+                }
+                if (mode == "--mesh")
+                    test_mesh_draws(MeshPipeline(baseline_mesh_slang, baseline_frag_slang), 2);
+                else
+                    test_mesh_draws(MeshPipeline(mesh_task_slang, baseline_mesh_slang, baseline_frag_slang), 1);
+                std::cout << "Mesh pipeline GPU checks passed\n";
+                return 0;
             }
             test_gpu();
             test_present_retry();

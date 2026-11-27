@@ -94,6 +94,10 @@ namespace EmbeddedShader
                 return "FragmentShader";
             case ShaderStage::ComputeShader:
                 return "ComputeShader";
+            case ShaderStage::MeshShader:
+                return "MeshShader";
+            case ShaderStage::TaskShader:
+                return "TaskShader";
             default:break;
         }
         return "Unknown";

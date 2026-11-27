@@ -248,3 +248,27 @@ static_assert(!AcceptsRasterPair<disney_vert_slang_t, baseline_frag_slang_t, Ras
 
 struct RasterFragmentAdapter { operator disney_frag_slang_t() const; };
 static_assert(!AcceptsRasterPair<disney_vert_slang_t, RasterFragmentAdapter>);
+
+// Reverse the stage order used by the GPU test. Each specialization appears only
+// once every header in its registered group has been included.
+#include SLANG(examples/Baseline/Mesh/baseline_mesh.slang)
+using TexturedMesh = MeshPipeline<baseline_mesh_slang_t, baseline_frag_slang_t>;
+static_assert(std::same_as<decltype(MeshPipeline(baseline_mesh_slang, baseline_frag_slang)), TexturedMesh>);
+#include SLANG(mesh_task.slang)
+using TexturedTaskMesh = MeshPipeline<mesh_task_slang_t, baseline_mesh_slang_t, baseline_frag_slang_t>;
+static_assert(std::same_as<decltype(MeshPipeline(mesh_task_slang, baseline_mesh_slang, baseline_frag_slang)), TexturedTaskMesh>);
+static_assert(MoveOnlyHandle<TexturedMesh> && MoveOnlyHandle<TexturedTaskMesh>);
+static_assert(std::bit_cast<std::array<uint32_t, 3>>(MeshPipeline<>::IndirectPacket{2, 3, 4}) ==
+              std::array<uint32_t, 3>{2, 3, 4});
+template<class... Stages>
+concept DeducesMeshPipeline = requires(Stages... stages) { MeshPipeline(stages...); };
+static_assert(!DeducesMeshPipeline<baseline_mesh_slang_t, disney_frag_slang_t> &&
+              !DeducesMeshPipeline<baseline_mesh_slang_t, mesh_task_slang_t, baseline_frag_slang_t>);
+static_assert(requires(TexturedTaskMesh& mesh, const HardwareBuffer& groups, const HardwareImage& target) {
+    mesh.outColor = target;
+    mesh.geometry[0] = groups;
+    mesh.task.groupCount = 2u;
+    mesh.vp.view = ktm::fmat4x4::from_eye();
+    { mesh(groups, 1, target, Raster::ScissorRect{}, Raster::Pass{}, ktm::uvec2(4, 2)) }
+        -> std::same_as<HardwareExecutor::Command>;
+});

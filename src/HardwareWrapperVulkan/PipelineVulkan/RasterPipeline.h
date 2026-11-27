@@ -19,6 +19,8 @@ struct RasterPipelineVulkan
     using ConditionInfo = EmbeddedShader::ShaderCodeCompiler::ConditionInfo;
     RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
                          EmbeddedShader::ShaderCodeModule fragmentSpirV, RasterPipeline<>::State state, uint32_t viewCount);
+    RasterPipelineVulkan(const EmbeddedShader::ShaderCodeModule* task, const EmbeddedShader::ShaderCodeModule& mesh,
+                         const EmbeddedShader::ShaderCodeModule& fragment, MeshPipeline<>::State state, uint32_t viewCount);
     RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders, const ConditionInfo& vertexConditions,
                          const ConditionInfo& fragmentConditions, RasterPipeline<>::State state, uint32_t viewCount);
     ~RasterPipelineVulkan();
@@ -80,8 +82,13 @@ struct RasterPipelineVulkan
     const RasterPipeline<>::State rasterState;
     std::vector<HardwareImage> renderTargets;
 
-    EmbeddedShader::ShaderCodeModule vertShaderCode;
+    std::optional<EmbeddedShader::ShaderCodeModule> taskShaderCode;
+    EmbeddedShader::ShaderCodeModule vertexOrMeshCode;
     EmbeddedShader::ShaderCodeModule fragShaderCode;
+    PFN_vkCmdDrawMeshTasksIndirectEXT drawMeshTasksIndirect{};
+    VkPipelineStageFlags2 shaderStages{VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT};
+    VkShaderStageFlags meshPushStages{};
+    std::vector<uint8_t> meshPushConstants;
 
     // Per-pipeline UBO support
     std::unique_ptr<uint8_t[]> tempUBO;
@@ -90,10 +97,6 @@ struct RasterPipelineVulkan
     PipelineBindings bindings;
     UniformSnapshotPool uniformPool;
 
-    std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> vertexStageInputs;
-    std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> vertexStageOutputs;
-    std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> fragmentStageInputs;
-    std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> fragmentStageOutputs;
 };
 } // namespace horizon::detail
 
@@ -123,6 +126,7 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
     std::vector<VkClearValue> clearValues;
     std::vector<IndirectGroup> groups;
     uint32_t drawCount{};
+    std::vector<uint8_t> meshPushConstants;
     std::vector<uint8_t> uniformBytes;
     std::shared_ptr<BindingSnapshot> bindings;
     std::shared_ptr<UniformSnapshot> uniform;
@@ -132,6 +136,9 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
          std::optional<RasterPipeline<>::Pass> pass);
     bool sameAttachments(const Draw& next) const;
     bool canMerge(const Draw& next) const;
+    IndirectGroup* captureGroup(const HardwareBuffer& packets, uint32_t count,
+                                std::optional<RasterPipeline<>::ScissorRect> scissor,
+                                std::span<const EmbeddedShader::AutoBindEntry> entries = {});
     void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                         std::optional<RasterPipeline<>::ScissorRect> scissor,

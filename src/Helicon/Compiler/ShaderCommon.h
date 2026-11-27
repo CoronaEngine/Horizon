@@ -24,11 +24,8 @@ namespace EmbeddedShader
         VertexShader = 0,
         FragmentShader = 1,
         ComputeShader = 2,
-        // RayGenShader = 3,
-        // IntersectShader = 4,
-        // AnyHitShader = 5,
-        // ClosestHitShader = 6,
-        // MissShader = 7,
+        MeshShader,
+        TaskShader,
     };
 
     std::string enumToString(ShaderStage stage);

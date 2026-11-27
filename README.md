@@ -114,18 +114,18 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 #### 第一次阅读渲染示例
 
-运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。打开下表第一行的 Slang 实现，从 `BaselineSlang` 的构造函数往下读，可以依次看到 Viking Room 的模型和纹理加载、相机和渲染目标设置，以及 `run(seconds)` 中单帧的矩阵更新、绘制和呈现。接着并排打开 EDSL 实现，对照同一张纹理在两种 shader 中怎样绑定和采样。三个 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
+运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。从下表第一行的 `BaselineSlang` 构造函数进入 `loadBaselineAssets`，可以看到 Viking Room 的模型和纹理加载。回到构造函数可查看相机和渲染目标设置，`run(seconds)` 中是每帧的矩阵更新、绘制和呈现。各 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
 
-| 场景和阅读重点 | EDSL 实现 | Slang 实现 |
-| --- | --- | --- |
-| Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) |
-| EDSL Feature · G-buffer 与计算着色 | [example_edsl_feature.cpp](examples/Feature/example_edsl_feature.cpp) | — |
-| Disney · 复用球体几何，逐球传入材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
-| DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
+| 场景和阅读重点 | EDSL 实现 | Slang 实现 | Slang Mesh 实现 |
+| --- | --- | --- | --- |
+| Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) | [example_baseline_mesh.cpp](examples/Baseline/Mesh/example_baseline_mesh.cpp) |
+| EDSL Feature · G-buffer 与计算着色 | [example_edsl_feature.cpp](examples/Feature/example_edsl_feature.cpp) | — | — |
+| Disney · 球体阵列与材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) | [example_disney_mesh.cpp](examples/Disney/Mesh/example_disney_mesh.cpp) |
+| DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) | [example_drawstress_mesh.cpp](examples/DrawStress/Mesh/example_drawstress_mesh.cpp) |
 
 运行 `HorizonExamples edsl_feature` 可查看 EDSL 如何调用外部着色器函数。片元入口调用 GLSL 函数计算立方体的表面颜色，将颜色和法线写入 G-buffer。计算入口逐像素读取这两张图像，调用 HLSL 函数计算光照并输出到窗口。[GLSL 辅助函数](examples/Feature/edsl_feature_geometry.glsl) · [HLSL 辅助函数](examples/Feature/edsl_feature_lighting.hlsl)
 
-每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
+每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。Disney 场景使用 [Disney/assets/env](examples/Disney/assets/env) 中的环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
 Disney 光栅示例在初始化时上传球体几何、110 份材质球参数和间接命令，每帧复用这些缓冲。DrawStress 光栅示例每帧将立方体的变换矩阵写入映射的参数缓冲，调用 `flushMapped()` 后将缓冲作为逐 draw 参数传给光栅管线。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
@@ -279,6 +279,10 @@ executor.commit();
 ```
 
 呈现命令保存图像和显示器，重放时读取图像当时的内容。原生窗口由调用方保持有效。窗口最小化时跳过该帧的呈现，前后的 GPU 命令仍按入队顺序执行。
+
+用 `baseline_mesh`、`disney_mesh` 或 `drawstress_mesh` 运行对应场景的手写 Slang mesh 版本。Baseline 分组读取 Viking Room 的索引和顶点。Disney 为 110 个材质球各提交一条间接记录。DrawStress 保留 40³ 个立方体和 64,000 条间接记录，每个工作组生成一个立方体，并通过 `SV_DrawIndex` 读取它的变换矩阵。三个模式都需要 mesh shader，Disney 和 DrawStress 还需要支持对应记录数的多次间接绘制。
+
+用 `MESH_PAIRS` 登记生成头、mesh 和 fragment 文件，在 C++ 中分别引入阶段头并构造 `MeshPipeline mesh(baseline_mesh_slang, baseline_frag_slang)`。调用 `executor << mesh(groups, count, depth)` 时，GPU 从 `Usage::RasterIndirect` 缓冲读取前 `count` 条记录。每条 `MeshPipeline<>::IndirectPacket` 的三个 `uint32_t` 指定第一阶段在 X、Y、Z 上的工作组数。需要 task shader 时，用 `TASK_MESH_PAIRS` 在 mesh 前登记 task 阶段，构造时使用相同顺序。
 
 在目标中登记实际使用的顶点和片元着色器配对，即可通过具名字段绑定资源和输出。每组三个参数依次为生成头、顶点着色器、片元着色器。
 

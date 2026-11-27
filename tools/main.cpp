@@ -8,6 +8,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -98,11 +99,10 @@ static void emitBindingConstructor(std::ostream& out, const std::string& name, s
     out << " {}\n";
 }
 
-static void emitResourceFields(std::ostream& out, const ShaderResources& resources,
-                               std::string_view stateType, const ShaderResources* otherStage = nullptr)
+static void emitResourceFields(std::ostream& out, std::span<const ShaderResources> stages,
+                               std::string_view stateType)
 {
-    auto emitBlock = [&](const std::string& name, ShaderResources::BindType kind) {
-        if (name.empty()) return;
+    auto emitBlock = [&](const ShaderResources& resources, const std::string& name, ShaderResources::BindType kind) {
         out << "    struct " << name << "_t {\n";
         std::vector<std::string> blockInits;
         for (const auto& field : resources.bindInfoPool)
@@ -111,15 +111,16 @@ static void emitResourceFields(std::ostream& out, const ShaderResources& resourc
         emitBindingConstructor(out, name + "_t", stateType, blockInits, "        ");
         out << "    } " << name << "{&pipeline_};\n";
     };
-    emitBlock(resources.pushConstantName, ShaderResources::pushConstantMembers);
-    emitBlock(resources.uniformBufferName, ShaderResources::uniformBufferMembers);
-    // All aliases of a descriptor binding must cover the accesses declared by both stages.
+    const auto push = std::ranges::find_if(stages, [](const auto& r) { return !r.pushConstantName.empty(); });
+    const auto ubo = std::ranges::find_if(stages, [](const auto& r) { return !r.uniformBufferName.empty(); });
+    if (push != stages.end()) emitBlock(*push, push->pushConstantName, ShaderResources::pushConstantMembers);
+    if (ubo != stages.end()) emitBlock(*ubo, ubo->uniformBufferName, ShaderResources::uniformBufferMembers);
+    // Every alias of a descriptor binding covers the accesses declared by all stages.
     std::vector<ShaderResources::ShaderBindInfo> fields;
     std::map<std::pair<uint32_t, uint32_t>, Ast::AccessPermissions> accessByBinding;
-    for (const auto* stage : {&resources, otherStage})
+    for (const auto& stage : stages)
     {
-        if (!stage) continue;
-        for (const auto& field : stage->bindInfoPool)
+        for (const auto& field : stage.bindInfoPool)
         {
             if (!isDirectResourceBindType(field.bindType)) continue;
             auto& access = accessByBinding[{field.set, field.binding}];
@@ -177,7 +178,7 @@ public:
     }
 
 )";
-    emitResourceFields(out, resources, "::ComputePipeline<>");
+    emitResourceFields(out, {&resources, 1}, "::ComputePipeline<>");
     emitOutputFields(out, resources, "::ComputePipeline<>");
     out << "};\n\ntemplate<std::same_as<" << shaderType << "> CS>\n"
         << "ComputePipeline(const CS&) -> ComputePipeline<CS>;\n";
@@ -433,7 +434,8 @@ static Slang::ComPtr<slang::IComponentType> linkStage(const Slang::ComPtr<slang:
     std::array<slang::IComponentType*, 2> components{module.get(), entry.get()};
     auto program = ShaderLanguageConverter::link(session, components);
     auto stage = program->getLayout()->getEntryPointByIndex(0)->getStage();
-    if (stage != SLANG_STAGE_VERTEX && stage != SLANG_STAGE_FRAGMENT && stage != SLANG_STAGE_COMPUTE)
+    if (stage != SLANG_STAGE_VERTEX && stage != SLANG_STAGE_FRAGMENT && stage != SLANG_STAGE_COMPUTE &&
+        stage != SLANG_STAGE_MESH && stage != SLANG_STAGE_AMPLIFICATION)
         throw std::runtime_error("Unsupported shader stage: " + std::string(module->getFilePath()));
     if (expectedStage && slangStageToShaderStage(stage) != *expectedStage)
         throw std::runtime_error("Shader main does not match its registered stage: " + std::string(module->getFilePath()));
@@ -442,9 +444,6 @@ static Slang::ComPtr<slang::IComponentType> linkStage(const Slang::ComPtr<slang:
 
 static void prepareBindingNames(ShaderResources& resources)
 {
-    // The raster recorder owns the push constant root.
-    if (resources.entryPointInfoPool.front().stage != ShaderStage::ComputeShader)
-        resources.pushConstantName.clear();
     for (auto& field : resources.bindInfoPool)
     {
         field.variateName = extractMemberName(field.variateName);
@@ -453,93 +452,165 @@ static void prepareBindingNames(ShaderResources& resources)
     }
 }
 
-static int generateRasterPair(int argc, char** argv)
+// Compare the shader-visible ABI, including members with equal byte sizes but different types.
+static bool sameParameterLayout(slang::TypeLayoutReflection* a, slang::TypeLayoutReflection* b)
 {
-    std::filesystem::path vertex, fragment, vertexIR, fragmentIR, vertexHeader, fragmentHeader, output;
-    for (int i = 2; i < argc; i += 2)
-    {
-        std::string_view flag = argv[i];
-        if (i + 1 == argc)
-            throw std::runtime_error("Missing value for " + std::string(flag));
-        const char* value = argv[i + 1];
-        if (flag == "-vs") vertex = value;
-        else if (flag == "-fs") fragment = value;
-        else if (flag == "-vs-ir") vertexIR = value;
-        else if (flag == "-fs-ir") fragmentIR = value;
-        else if (flag == "-vs-header") vertexHeader = value;
-        else if (flag == "-fs-header") fragmentHeader = value;
-        else if (flag == "-o") output = value;
-        else throw std::runtime_error("Unknown raster pair flag " + std::string(flag));
+    using Kind = slang::TypeReflection::Kind;
+    if (a->getKind() != b->getKind() || a->getSize() != b->getSize()) return false;
+    switch (a->getKind()) {
+    case Kind::Struct:
+        if (a->getFieldCount() != b->getFieldCount()) return false;
+        for (unsigned i = 0; i < a->getFieldCount(); ++i) {
+            auto* left = a->getFieldByIndex(i);
+            auto* right = b->getFieldByIndex(i);
+            if (std::string_view(left->getName()) != right->getName() || left->getOffset() != right->getOffset() ||
+                !sameParameterLayout(left->getTypeLayout(), right->getTypeLayout())) return false;
+        }
+        return true;
+    case Kind::Array:
+        return a->getElementCount() == b->getElementCount() && a->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) ==
+               b->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM) &&
+               sameParameterLayout(a->getElementTypeLayout(), b->getElementTypeLayout());
+    case Kind::Matrix:
+        if (a->getMatrixLayoutMode() != b->getMatrixLayoutMode()) return false;
+        [[fallthrough]];
+    case Kind::Scalar:
+    case Kind::Vector:
+        return a->getScalarType() == b->getScalarType() && a->getRowCount() == b->getRowCount() &&
+               a->getColumnCount() == b->getColumnCount();
+    default:
+        return false;
     }
-    if (vertex.empty() || fragment.empty() || vertexIR.empty() || fragmentIR.empty() ||
-        vertexHeader.empty() || fragmentHeader.empty() || output.empty())
-        throw std::runtime_error("A raster pair requires -vs, -fs, -vs-ir, -fs-ir, -vs-header, -fs-header and -o");
+}
 
-    auto loadBindings = [](const std::filesystem::path& shader, const std::filesystem::path& ir, ShaderStage stage) {
-        std::ifstream input(ir, std::ios::binary);
-        SlangModule module{shader.stem().string(), shader.string(), {}};
-        module.binData.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-        if (module.binData.empty() || input.bad())
-            throw std::runtime_error("Cannot read Slang IR from " + ir.string());
-        auto session = createShaderSession();
-        auto loaded = ShaderLanguageConverter::loadModule(session, module);
-        if (!loaded)
-            throw std::runtime_error("Cannot load Slang IR from " + ir.string());
-        auto program = linkStage(session, loaded, stage);
-        auto resources = ShaderLanguageConverter::slangReflection(program->getLayout());
-        prepareBindingNames(resources);
-        return resources;
+static int generateGraphicsPipeline(int argc, char** argv)
+{
+    struct Stage {
+        std::string_view flag;
+        ShaderStage stage;
+        std::filesystem::path source, ir, header;
     };
-    const auto vs = loadBindings(vertex, vertexIR, ShaderStage::VertexShader);
-    const auto fs = loadBindings(fragment, fragmentIR, ShaderStage::FragmentShader);
-    if (vs.uniformBufferSize && fs.uniformBufferSize && vs.uniformBufferSize != fs.uniformBufferSize)
-        throw std::runtime_error("Uniform buffer block sizes differ in " + vertex.string() + " and " + fragment.string());
+    std::array stages{Stage{"-ts", ShaderStage::TaskShader}, Stage{"-vs", ShaderStage::VertexShader},
+                      Stage{"-ms", ShaderStage::MeshShader}, Stage{"-fs", ShaderStage::FragmentShader}};
+    std::filesystem::path output;
+    for (int i = 2; i < argc; i += 2) {
+        std::string_view flag = argv[i];
+        if (i + 1 == argc) throw std::runtime_error("Missing value for " + std::string(flag));
+        if (flag == "-o") {
+            output = argv[i + 1];
+            continue;
+        }
+        auto stage = std::ranges::find(stages, flag.substr(0, 3), &Stage::flag);
+        if (stage == stages.end()) throw std::runtime_error("Unknown graphics stage " + std::string(flag));
+        const auto option = flag.substr(3);
+        if (option.empty()) stage->source = argv[i + 1];
+        else if (option == "-ir") stage->ir = argv[i + 1];
+        else if (option == "-header") stage->header = argv[i + 1];
+        else throw std::runtime_error("Unknown graphics stage option " + std::string(flag));
+    }
 
-    const auto vertexType = sanitizeFilename(vertex) + "_t";
-    const auto fragmentType = sanitizeFilename(fragment) + "_t";
+    const bool task = !stages[0].source.empty();
+    const bool vertex = !stages[1].source.empty();
+    const bool mesh = !stages[2].source.empty();
+    if (output.empty() || stages[3].source.empty() || vertex == mesh || (task && !mesh))
+        throw std::runtime_error("Expected VS/FS, MS/FS or Task/MS/FS and an output header");
+
+    // foo.vert and foo.frag are distinct modules with the same Slang module name.
+    std::vector<Slang::ComPtr<slang::ISession>> sessions;
+    std::vector<Slang::ComPtr<slang::IComponentType>> programs;
+    std::array<slang::VariableLayoutReflection*, 2> parameterBlocks{};
+    std::vector<ShaderResources> resources;
+    std::vector<std::string> types, names;
     std::ostringstream code;
-    code << "#pragma once\n#include \"Horizon.h\"\n"
-         << "#include \"" << vertexHeader.generic_string() << "\"\n"
-         << "#include \"" << fragmentHeader.generic_string() << "\"\n\n"
-         << "template<> struct RasterPipeline<" << vertexType << ", " << fragmentType << "> {\n"
-         << R"(private:
-    ::RasterPipeline<> pipeline_;
+    code << "#pragma once\n#include \"Horizon.h\"\n";
 
-public:
-)"
-         << "    RasterPipeline(::RasterPipeline<>::State state = {}, uint32_t views = 1) : RasterPipeline({}, {}, state, views) {}\n"
-         << "    RasterPipeline(const " << vertexType << "& vertex, const " << fragmentType
-         << "& fragment, ::RasterPipeline<>::State state = {}, uint32_t views = 1)\n"
-         << R"(        : pipeline_(::EmbeddedShader::VertexEntry{vertex}, ::EmbeddedShader::FragmentEntry{fragment}, state, {}, views) {}
-
-    RasterPipeline(RasterPipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
-
-    RasterPipeline& operator=(RasterPipeline&& other) noexcept
-    {
-        pipeline_ = std::move(other.pipeline_);
-        return *this;
+    for (const auto& stage : stages) {
+        if (stage.source.empty()) continue;
+        std::ifstream input(stage.ir, std::ios::binary);
+        SlangModule module{stage.source.stem().string(), stage.source.string(), {}};
+        module.binData.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+        if (module.binData.empty() || input.bad() || stage.header.empty())
+            throw std::runtime_error("Missing shader IR or header for " + stage.source.string());
+        auto& session = sessions.emplace_back(createShaderSession());
+        auto loaded = ShaderLanguageConverter::loadModule(session, module);
+        if (!loaded) throw std::runtime_error("Cannot load Slang IR from " + stage.ir.string());
+        auto& program = programs.emplace_back(linkStage(session, loaded, stage.stage));
+        auto* layout = program->getLayout();
+        auto& bindings = resources.emplace_back(ShaderLanguageConverter::slangReflection(layout));
+        prepareBindingNames(bindings);
+        if (mesh) {
+            for (unsigned i = 0; i < layout->getParameterCount(); ++i) {
+                auto* var = layout->getParameterByIndex(i);
+                auto* type = var->getTypeLayout();
+                if (type->getKind() != slang::TypeReflection::Kind::ConstantBuffer) continue;
+                const bool push = type->getParameterCategory() == slang::ParameterCategory::PushConstantBuffer;
+                if (!push && (var->getBindingSpace() != 3 || var->getBindingIndex() != 0))
+                    throw std::runtime_error("Mesh uniform buffer must use set 3 binding 0: " + stage.source.string());
+                auto*& previous = parameterBlocks[push ? 1 : 0];
+                if (previous && (std::string_view(previous->getName()) != var->getName() ||
+                    !sameParameterLayout(previous->getTypeLayout()->getElementTypeLayout(), type->getElementTypeLayout())))
+                    throw std::runtime_error("Incompatible mesh parameter block in " + stage.source.string());
+                previous = var;
+            }
+        } else {
+            // The vertex-pulling recorder supplies the raster push constant root itself.
+            bindings.pushConstantName.clear();
+        }
+        types.push_back(sanitizeFilename(stage.source) + "_t");
+        names.emplace_back(stage.flag.substr(1));
+        code << "#include \"" << stage.header.generic_string() << "\"\n";
     }
+    if (!mesh && resources.front().uniformBufferSize && resources.back().uniformBufferSize &&
+        resources.front().uniformBufferSize != resources.back().uniformBufferSize)
+        throw std::runtime_error("Uniform buffer block sizes differ in raster stages");
 
-    [[nodiscard]] HardwareExecutor::Command operator()(
-        const HardwareBuffer& vertices, const HardwareBuffer& indices,
-        const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters = {},
-        const HardwareImage& depth = {}, std::optional<::RasterPipeline<>::ScissorRect> scissor = {},
-        std::optional<::RasterPipeline<>::Pass> pass = {}, std::optional<ktm::uvec2> extent = {})
+    const std::string name = mesh ? "MeshPipeline" : "RasterPipeline";
+    const auto runtime = "::" + name + "<>";
+    auto emitList = [&](auto emit) {
+        for (size_t i = 0; i < types.size(); ++i) {
+            if (i) code << ", ";
+            emit(i);
+        }
+    };
+    code << "\ntemplate<> struct " << name << "<";
+    emitList([&](size_t i) { code << types[i]; });
+    code << "> {\nprivate:\n    " << runtime << " pipeline_;\n\npublic:\n    "
+         << name << "(" << runtime << "::State state = {}, uint32_t views = 1) : " << name << "(";
+    emitList([&](size_t) { code << "{}"; });
+    code << ", state, views) {}\n    " << name << "(";
+    emitList([&](size_t i) { code << "const " << types[i] << "& " << names[i]; });
+    code << ", " << runtime << "::State state = {}, uint32_t views = 1)\n        : pipeline_(";
+    if (mesh)
+        code << (task ? "&ts.shaderModule" : "nullptr") << ", ms.shaderModule, fs.shaderModule, state, views";
+    else
+        code << "::EmbeddedShader::VertexEntry{vs}, ::EmbeddedShader::FragmentEntry{fs}, state, {}, views";
+    code << ") {}\n\n    " << name << "(" << name << "&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}\n"
+         << "    " << name << "& operator=(" << name << "&& other) noexcept {\n"
+         << "        pipeline_ = std::move(other.pipeline_);\n        return *this;\n    }\n\n"
+         << "    [[nodiscard]] HardwareExecutor::Command operator()(\n        ";
+    if (!mesh) code << "const HardwareBuffer& vertices, const HardwareBuffer& indices,\n        ";
+    code << "const HardwareBuffer& packets, uint32_t count, ";
+    if (!mesh) code << "const HardwareBuffer& parameters = {},\n        ";
+    code << R"(const HardwareImage& depth = {},
+        std::optional<::RasterPipeline<>::ScissorRect> scissor = {}, std::optional<::RasterPipeline<>::Pass> pass = {},
+        std::optional<ktm::uvec2> extent = {})
     {
-        return pipeline_(vertices, indices, packets, count, parameters, depth, scissor, pass, extent);
-    }
-
-)";
-    const bool useFragmentBlock = !vs.uniformBufferSize && fs.uniformBufferSize;
-    emitResourceFields(code, useFragmentBlock ? fs : vs, "::RasterPipeline<>", useFragmentBlock ? &vs : &fs);
-    emitOutputFields(code, fs, "::RasterPipeline<>");
-    code << "};\n\ntemplate<std::same_as<" << vertexType << "> VS, std::same_as<" << fragmentType << "> FS>\n"
-         << "RasterPipeline(const VS&, const FS&, ::RasterPipeline<>::State = {}, uint32_t = 1) -> RasterPipeline<VS, FS>;\n";
+)" << "        return pipeline_(" << (mesh ? "packets, count" : "vertices, indices, packets, count, parameters")
+         << ", depth, scissor, pass, extent);\n    }\n\n";
+    emitResourceFields(code, resources, runtime);
+    emitOutputFields(code, resources.back(), runtime);
+    code << "};\n\ntemplate<";
+    emitList([&](size_t i) { code << "std::same_as<" << types[i] << "> " << names[i]; });
+    code << ">\n" << name << "(";
+    emitList([&](size_t i) { code << "const " << names[i] << "&"; });
+    code << ", " << runtime << "::State = {}, uint32_t = 1) -> " << name << "<";
+    emitList([&](size_t i) { code << names[i]; });
+    code << ">;\n";
 
     std::ofstream header(output);
     header << code.str();
     header.close();
-    if (!header) throw std::runtime_error("Cannot write raster pair header " + output.string());
+    if (!header) throw std::runtime_error("Cannot write graphics pipeline header " + output.string());
     return 0;
 }
 
@@ -552,7 +623,7 @@ int main(int argc, char** argv) try
 		return 1;
 	}
     if (std::string_view(argv[1]) == "-raster-pair")
-        return generateRasterPair(argc, argv);
+        return generateGraphicsPipeline(argc, argv);
 	std::filesystem::path path = "";
 	std::filesystem::path outPath = "";
     std::filesystem::path moduleOutput;
@@ -633,6 +704,11 @@ int main(int argc, char** argv) try
 			else if (arg == "frag" || arg == "fragment")
 			{
 				inputStage = ShaderStage::FragmentShader;
+				stageExplicit = true;
+			}
+			else if (arg == "mesh" || arg == "task")
+			{
+				inputStage = arg == "mesh" ? ShaderStage::MeshShader : ShaderStage::TaskShader;
 				stageExplicit = true;
 			}
 			else if (arg == "comp" || arg == "compute")
@@ -773,12 +849,18 @@ int main(int argc, char** argv) try
         emitSpirVLiteral(out, result.binaryTargets.at(ShaderLanguage::SpirV));
         out << "}, " << serializeShaderResources(resources) << "};\n";
         prepareBindingNames(resources);
+        const auto stage = resources.entryPointInfoPool.front().stage;
+        if (stage == ShaderStage::VertexShader || stage == ShaderStage::FragmentShader)
+            resources.pushConstantName.clear();
     }
 
     using Kind = slang::DeclReflection::Kind;
     std::stringstream functions;
+    const bool meshStage = !moduleOnly && (resources.entryPointInfoPool.front().stage == ShaderStage::MeshShader ||
+                                           resources.entryPointInfoPool.front().stage == ShaderStage::TaskShader);
     for (auto child : declarations->getChildren())
     {
+        if (meshStage) break; // Mesh entry points only expose reflected bindings to C++.
         const auto kind = child->getKind();
         if (kind == Kind::Struct || kind == Kind::Variable)
         {
@@ -819,8 +901,17 @@ int main(int argc, char** argv) try
     if (!rasterReady.empty())
     {
         out << "\n#define " << rasterReady << " 1\n";
-        for (const auto& [partner, header] : rasterPartners)
-            out << "#if defined(" << partner << ")\n#include \"" << header << "\"\n#endif\n";
+        for (auto [partners, header] : rasterPartners) {
+            out << "#if ";
+            while (!partners.empty()) {
+                auto comma = partners.find(',');
+                out << "defined(" << partners.substr(0, comma) << ')';
+                if (comma == partners.npos) break;
+                out << " && ";
+                partners.remove_prefix(comma + 1);
+            }
+            out << "\n#include \"" << header << "\"\n#endif\n";
+        }
     }
 
 	//std::cout << out.str();

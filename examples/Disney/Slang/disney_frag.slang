@@ -1,41 +1,6 @@
-// The first two device addresses reserve the draw packet and geometry table slots.
-struct HorizonRasterRoot {
-    uint* packets;
-    uint* geometries;
-    uint* parameters;
-    uint groupBase;
-};
-[[vk::push_constant]] ConstantBuffer<HorizonRasterRoot> drawRoot;
+#include "../disney_scene.slangh"
 
-struct DisneyVaryings {
-    float4 position : SV_Position;
-    [[vk::location(0)]] float3 view : TEXCOORD0;
-    [[vk::location(1)]] float3 normal : TEXCOORD1;
-    [[vk::location(15)]] nointerpolation uint parameterWord : TEXCOORD15;
-};
-
-struct DisneyPbrShared {
-    column_major float4x4 proj_view;
-    float4 camPos;
-    float4 lightDir;
-    uint texCubeIndex;
-    uint texCubeIrrIndex;
-};
-
-struct DisneyDraw {
-    column_major float4x4 model;
-    float4 mat0; // baseColor.rgb, metallic
-    float4 mat1; // roughness, specular, specularTint, subsurface
-    float4 mat2; // anisotropic, sheen, sheenTint, clearcoat
-    float clearcoatGloss;
-};
-
-DisneyDraw* getDisneyDraw(uint parameterWord) {
-    return (DisneyDraw*)(drawRoot.parameters + parameterWord);
-}
-
-// Disney Principled BRDF (wdas/brdf disney.brdf) + IBL from environment maps.
-[[vk::binding(0, 3)]] ConstantBuffer<DisneyPbrShared> fsp;
+[[vk::binding(0, 1)]] StructuredBuffer<DisneyDraw> draws;
 [[vk::binding(0, 0)]] SamplerCube<float4> combinedCubeSamplerHandles[];
 
 static const float PI = 3.14159265358979323846;
@@ -104,17 +69,17 @@ void buildAnisoFrame(float3 N, out float3 X, out float3 Y)
 [shader("fragment")]
 void main(DisneyVaryings input, out float4 outColor : SV_Target0)
 {
-    DisneyDraw* draw = getDisneyDraw(input.parameterWord);
+    DisneyDraw draw = draws[input.materialIndex];
     float3 N = normalize(input.normal);
     float3 V = normalize(input.view);
-    float3 L = normalize(fsp.lightDir.xyz);
+    float3 L = normalize(vsp.lightDir.xyz);
 
-    float metallic = draw->mat0.a;
-    float roughness = clamp(draw->mat1.x, 0.001, 1.0);
-    float specular = draw->mat1.y;
-    float specularTint = draw->mat1.z;
+    float metallic = draw.mat0.a;
+    float roughness = clamp(draw.mat1.x, 0.001, 1.0);
+    float specular = draw.mat1.y;
+    float specularTint = draw.mat1.z;
 
-    float3 Cdlin = toLinear(draw->mat0.rgb);
+    float3 Cdlin = toLinear(draw.mat0.rgb);
     float Cdlum = dot(Cdlin, float3(0.3, 0.6, 0.1));
     float3 Ctint = Cdlum > 0.0 ? Cdlin / Cdlum : float3(1.0);
     float3 Cspec0 = lerp(specular * 0.08 * lerp(float3(1.0), Ctint, specularTint), Cdlin, metallic);
@@ -129,12 +94,12 @@ void main(DisneyVaryings input, out float4 outColor : SV_Target0)
         float NdotH = dot(N, H);
         float LdotH = dot(L, H);
 
-        float subsurface = draw->mat1.w;
-        float anisotropic = draw->mat2.x;
-        float sheen = draw->mat2.y;
-        float sheenTint = draw->mat2.z;
-        float clearcoat = draw->mat2.w;
-        float clearcoatGloss = draw->clearcoatGloss;
+        float subsurface = draw.mat1.w;
+        float anisotropic = draw.mat2.x;
+        float sheen = draw.mat2.y;
+        float sheenTint = draw.mat2.z;
+        float clearcoat = draw.mat2.w;
+        float clearcoatGloss = draw.mat3.x;
 
         float3 Csheen = lerp(float3(1.0), Ctint, sheenTint);
 
@@ -173,8 +138,8 @@ void main(DisneyVaryings input, out float4 outColor : SV_Target0)
     float3 vr = normalize(reflect(-V, N));
     float3 cubeR = fixCubeLookup(normalize(vr), mip, 256.0);
 
-    float3 radiance = toLinear(combinedCubeSamplerHandles[fsp.texCubeIndex].SampleLevel(cubeR, mip).xyz);
-    float3 irradiance = toLinear(combinedCubeSamplerHandles[fsp.texCubeIrrIndex].Sample(normalize(N)).xyz);
+    float3 radiance = toLinear(combinedCubeSamplerHandles[vsp.texCubeIndex].SampleLevel(cubeR, mip).xyz);
+    float3 irradiance = toLinear(combinedCubeSamplerHandles[vsp.texCubeIrrIndex].Sample(normalize(N)).xyz);
 
     float3 diffuseAlbedo = Cdlin * (1.0 - metallic);
     float3 indirect = diffuseAlbedo * irradiance + Cspec0 * radiance * envFresnel;

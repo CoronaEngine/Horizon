@@ -11,6 +11,12 @@
 
 namespace {
 using Raster = RasterPipeline<>;
+using Mesh = MeshPipeline<>;
+using Module = EmbeddedShader::ShaderCodeModule;
+static_assert(sizeof(Mesh::IndirectPacket) == sizeof(VkDrawMeshTasksIndirectCommandEXT));
+static_assert(offsetof(Mesh::IndirectPacket, groupCountX) == offsetof(VkDrawMeshTasksIndirectCommandEXT, groupCountX));
+static_assert(offsetof(Mesh::IndirectPacket, groupCountY) == offsetof(VkDrawMeshTasksIndirectCommandEXT, groupCountY));
+static_assert(offsetof(Mesh::IndirectPacket, groupCountZ) == offsetof(VkDrawMeshTasksIndirectCommandEXT, groupCountZ));
 
 VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& image)
 {
@@ -23,6 +29,13 @@ VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& im
 bool coversRenderArea(const ResourceManager::ImageHardwareWrap& image, ktm::uvec2 extent, uint32_t views)
 {
     return image.imageSize.x >= extent.x && image.imageSize.y >= extent.y && image.arrayLayers >= views;
+}
+
+uint32_t maxDrawIndirectCount()
+{
+    auto& caps = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils();
+    return caps.featuresChain.getChainHead()->features.multiDrawIndirect
+        ? caps.supportedProperties.properties.limits.maxDrawIndirectCount : 1;
 }
 
 bool sameAttachment(const HardwareImage& a, const HardwareImage& b)
@@ -38,55 +51,75 @@ bool sameAttachment(const HardwareImage& a, const HardwareImage& b)
 }
 }
 
-void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResources &resources,
-                          std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> &inputs,
-                          std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> &outputs)
-{
-    using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
-
-    for (const auto &bindInfo : resources.bindInfoPool)
-    {
-        if (bindInfo.bindType == BindType::stageInputs)
-        {
-            inputs.push_back(bindInfo);
-        }
-        else if (bindInfo.bindType == BindType::stageOutputs)
-        {
-            outputs.push_back(bindInfo);
-        }
-    }
-}
-
 RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
                                            EmbeddedShader::ShaderCodeModule fragmentSpirV, Raster::State state, uint32_t viewCount)
-    : rasterState(state), vertShaderCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
+    : rasterState(state), vertexOrMeshCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
 {
     initializeStageBindings(viewCount);
+}
+
+RasterPipelineVulkan::RasterPipelineVulkan(const Module* task, const Module& mesh, const Module& fragment,
+                                           Mesh::State state, uint32_t viewCount)
+    : rasterState{state.depthWrite, state.compare, state.blend}, vertexOrMeshCode(mesh), fragShaderCode(fragment)
+{
+    auto& device = getHardwareContext().getMainDevice()->deviceManager;
+    const auto& caps = device.getFeaturesUtils();
+    if (!caps.meshShaderFeatures.meshShader || (task && !caps.meshShaderFeatures.taskShader))
+        throw std::runtime_error(task ? "Device does not support mesh and task shaders" : "Device does not support mesh shaders");
+    if (viewCount > 1 && (!caps.meshShaderFeatures.multiviewMeshShader ||
+                         viewCount > caps.meshShaderProperties.maxMeshMultiviewViewCount))
+        throw std::invalid_argument("Mesh multiview count exceeds device capabilities");
+    const auto checkWorkgroup = [](const Module& module, const uint32_t (&limits)[3], uint32_t maxInvocations) {
+        const auto& size = module.shaderResources.entryPointInfoPool.at(0).numthreads;
+        if (!size.x || !size.y || !size.z || size.x > limits[0] || size.y > limits[1] || size.z > limits[2] ||
+            uint64_t(size.x) * size.y * size.z > maxInvocations)
+            throw std::invalid_argument("Mesh or task shader local workgroup size exceeds device capabilities");
+    };
+    const auto& properties = caps.meshShaderProperties;
+    checkWorkgroup(mesh, properties.maxMeshWorkGroupSize, properties.maxMeshWorkGroupInvocations);
+    if (task) checkWorkgroup(*task, properties.maxTaskWorkGroupSize, properties.maxTaskWorkGroupInvocations);
+    drawMeshTasksIndirect = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(
+        vkGetDeviceProcAddr(device.getLogicalDevice(), "vkCmdDrawMeshTasksIndirectEXT"));
+    if (!drawMeshTasksIndirect) throw std::runtime_error("Device does not expose indirect mesh draws");
+
+    shaderStages = VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    meshPushStages = VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (task) {
+        taskShaderCode = *task;
+        shaderStages |= VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT;
+        meshPushStages |= VK_SHADER_STAGE_TASK_BIT_EXT;
+    }
+    initializeStageBindings(viewCount);
+    if (meshPushConstants.size() > caps.supportedProperties.properties.limits.maxPushConstantsSize)
+        throw std::invalid_argument("Mesh shader push constants exceed device capabilities");
 }
 
 RasterPipelineVulkan::RasterPipelineVulkan(const EmbeddedShader::RasterPipelineObject& shaders,
                                            const ConditionInfo& vertexConditions, const ConditionInfo& fragmentConditions,
                                            Raster::State state, uint32_t viewCount)
     : rasterState(state),
-      vertShaderCode(shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexConditions)),
+      vertexOrMeshCode(shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexConditions)),
       fragShaderCode(shaders.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragmentConditions))
 {
-    EmbeddedShader::linkRasterDrawParameter(vertShaderCode, fragShaderCode);
+    EmbeddedShader::linkRasterDrawParameter(vertexOrMeshCode, fragShaderCode);
     initializeStageBindings(viewCount);
 }
 
 void RasterPipelineVulkan::initializeStageBindings(uint32_t viewCount)
 {
     if (viewCount == 0 || viewCount > 32) throw std::invalid_argument("Invalid multiview count");
-    const auto& vertex = vertShaderCode.shaderResources;
-    const auto& fragment = fragShaderCode.shaderResources;
-    extractStageBindings(vertex, vertexStageInputs, vertexStageOutputs);
-    extractStageBindings(fragment, fragmentStageInputs, fragmentStageOutputs);
-    renderTargets.resize(fragmentStageOutputs.size());
-    bindings.addLayout(vertex);
-    bindings.addLayout(fragment);
+    renderTargets.resize(std::ranges::count(fragShaderCode.shaderResources.bindInfoPool, Module::ShaderResources::stageOutputs,
+                                            &Module::ShaderResources::ShaderBindInfo::bindType));
     multiviewCount = viewCount;
-    uboSize = std::max(vertex.uniformBufferSize, fragment.uniformBufferSize);
+    uint32_t pushSize = 0;
+    for (const auto* stage : {taskShaderCode ? &*taskShaderCode : nullptr, &vertexOrMeshCode, &fragShaderCode}) {
+        if (!stage) continue;
+        const auto& resources = stage->shaderResources;
+        bindings.addLayout(resources);
+        uboSize = std::max(uboSize, resources.uniformBufferSize);
+        pushSize = std::max(pushSize, resources.pushConstantSize);
+    }
+    if (drawMeshTasksIndirect) meshPushConstants.resize((size_t(pushSize) + 3) & ~size_t(3));
     if (uboSize) tempUBO = std::make_unique<uint8_t[]>(uboSize);
 }
 
@@ -223,33 +256,17 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 
     const VkDevice device = mainDevice->deviceManager.getLogicalDevice();
 
-    if (!mainDevice->deviceManager.getFeaturesUtils().featuresChain.supportsPulledRaster())
-        throw std::runtime_error("Legacy raster requires bufferDeviceAddress and shaderDrawParameters");
-    if (!vertexStageInputs.empty())
-        throw std::invalid_argument("Legacy vertex shaders must use BDA vertex pulling");
-    for (const auto* stage : {&vertShaderCode, &fragShaderCode}) {
-        const auto& reflection = stage->shaderResources;
-        if (reflection.pushConstantSize > sizeof(Root))
-            throw std::invalid_argument("Raster shader push constants exceed the indirect draw root size");
+    if (!drawMeshTasksIndirect) {
+        if (!mainDevice->deviceManager.getFeaturesUtils().featuresChain.supportsPulledRaster())
+            throw std::runtime_error("Legacy raster requires bufferDeviceAddress and shaderDrawParameters");
+        if (std::ranges::find(vertexOrMeshCode.shaderResources.bindInfoPool, Module::ShaderResources::stageInputs,
+                              &Module::ShaderResources::ShaderBindInfo::bindType) != vertexOrMeshCode.shaderResources.bindInfoPool.end())
+            throw std::invalid_argument("Legacy vertex shaders must use BDA vertex pulling");
+        for (const auto* stage : {&vertexOrMeshCode, &fragShaderCode}) {
+            if (stage->shaderResources.pushConstantSize > sizeof(Root))
+                throw std::invalid_argument("Raster shader push constants exceed the indirect draw root size");
+        }
     }
-    // 创建着色器模块
-    VkShaderModule vertShaderModule = mainDevice->resourceManager.createShaderModule(vertShaderCode);
-    VkShaderModule fragShaderModule = mainDevice->resourceManager.createShaderModule(fragShaderCode);
-
-    // 配置着色器阶段
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = vertShaderModule;
-    vertShaderStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = fragShaderModule;
-    fragShaderStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
 
@@ -336,9 +353,9 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 
     // 配置推送常量
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.stageFlags = drawMeshTasksIndirect ? meshPushStages : VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(Root);
+    pushConstantRange.size = drawMeshTasksIndirect ? static_cast<uint32_t>(meshPushConstants.size()) : sizeof(Root);
 
     // 获取描述符集布局
     // 创建 per-pipeline UBO 描述符（如果有 UBO）
@@ -364,7 +381,7 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
     pipelineLayoutInfo.pSetLayouts = setLayouts.data();
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pushConstantRangeCount = pushConstantRange.size ? 1 : 0;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     coronaHardwareCheck(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout));
@@ -372,10 +389,8 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     // 创建图形管线
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pVertexInputState = drawMeshTasksIndirect ? nullptr : &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = drawMeshTasksIndirect ? nullptr : &inputAssembly;
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterInfo;
     pipelineInfo.pMultisampleState = &multisampling;
@@ -387,16 +402,28 @@ void RasterPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
-    coronaHardwareCheck(vkCreateGraphicsPipelines(device,
-                                                  VK_NULL_HANDLE,
-                                                  1,
-                                                  &pipelineInfo,
-                                                  nullptr,
-                                                  &graphicsPipeline));
-
-    // 清理着色器模块
-    vkDestroyShaderModule(device, fragShaderModule, nullptr);
-    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+    struct ShaderStages {
+        VkDevice device;
+        std::array<VkPipelineShaderStageCreateInfo, 3> infos{};
+        uint32_t count{};
+        ~ShaderStages() {
+            for (uint32_t i = 0; i < count; ++i)
+                vkDestroyShaderModule(device, infos[i].module, nullptr);
+        }
+    } stages{device};
+    const auto addStage = [&](const Module& module, VkShaderStageFlagBits stage) {
+        VkPipelineShaderStageCreateInfo info{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+        info.stage = stage;
+        info.pName = "main";
+        info.module = mainDevice->resourceManager.createShaderModule(std::get<std::vector<uint32_t>>(module.shaderCode));
+        stages.infos[stages.count++] = info;
+    };
+    if (taskShaderCode) addStage(*taskShaderCode, VK_SHADER_STAGE_TASK_BIT_EXT);
+    addStage(vertexOrMeshCode, drawMeshTasksIndirect ? VK_SHADER_STAGE_MESH_BIT_EXT : VK_SHADER_STAGE_VERTEX_BIT);
+    addStage(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
+    pipelineInfo.stageCount = stages.count;
+    pipelineInfo.pStages = stages.infos.data();
+    coronaHardwareCheck(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline));
 }
 
 HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan> backend, const HardwareImage& depth,
@@ -432,7 +459,8 @@ HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterPipelineVulkan
 
 bool HardwareExecutor::Command::Impl::Draw::canMerge(const Draw& next) const
 {
-    if (!bindings || !next.bindings || pipeline != next.pipeline || uniformBytes != next.uniformBytes)
+    if (!bindings || !next.bindings || pipeline != next.pipeline ||
+        uniformBytes != next.uniformBytes || meshPushConstants != next.meshPushConstants)
         return false;
     if (bindings != next.bindings && !std::ranges::equal(bindings->values, next.bindings->values,
         [](const PipelineBinding& a, const PipelineBinding& b) {
@@ -522,15 +550,15 @@ void HardwareExecutor::Command::Impl::Draw::prepareFramebuffer()
 
 void RasterPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
-    bindings.writeValue({}, {tempUBO.get(), uboSize},
+    bindings.writeValue(meshPushConstants, {tempUBO.get(), uboSize},
                         bindType, byteOffset, data, size);
 }
 
 void RasterPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, PipelineBinding value,
                                             int32_t bindType, uint32_t slot)
 {
-    bindings.writeResource({}, {tempUBO.get(), uboSize}, bindType, byteOffset, typeSize, std::move(value),
-                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, slot);
+    bindings.writeResource(meshPushConstants, {tempUBO.get(), uboSize}, bindType, byteOffset, typeSize, std::move(value),
+                           shaderStages, slot);
 }
 
 void RasterPipelineVulkan::setRenderTarget(uint32_t location, const HardwareImage& image)
@@ -554,54 +582,73 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 }
 
-void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                                const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                                                std::optional<Raster::ScissorRect> scissor,
-                                                std::span<const EmbeddedShader::AutoBindEntry> entries)
+auto HardwareExecutor::Command::Impl::Draw::captureGroup(const HardwareBuffer& packets, uint32_t count,
+    std::optional<Raster::ScissorRect> scissor, std::span<const EmbeddedShader::AutoBindEntry> entries) -> IndirectGroup*
 {
-    if (!count) return;
-    if (!packets || packets.getElementSize() != sizeof(Raster::IndirectPacket) || count > packets.getElementCount() ||
+    if (!count) return nullptr;
+    const auto stride = pipeline->drawMeshTasksIndirect ? sizeof(Mesh::IndirectPacket) : sizeof(Raster::IndirectPacket);
+    if (!packets || packets.getElementSize() != stride || count > packets.getElementCount() ||
         !(ResourceManager::get(packets)->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
         throw std::invalid_argument("Invalid indirect packet buffer or draw count");
-    if (!vertices || !indices || vertices.getElementSize() % 4 ||
-        (indices.getElementSize() != 2 && indices.getElementSize() != 4))
-        throw std::invalid_argument("Invalid GPU raster geometry");
+    if (pipeline->drawMeshTasksIndirect) {
+        // Splitting a user-authored mesh draw would restart the shader's native DrawIndex.
+        if (count > maxDrawIndirectCount()) throw std::invalid_argument("Mesh indirect draw count exceeds the device limit");
+    }
     VkRect2D clip{{0, 0}, {imageSize.x, imageSize.y}};
     if (scissor) {
         const auto x = std::max(0, scissor->x);
         const auto y = std::max(0, scissor->y);
         const auto right = std::min<int64_t>(imageSize.x, int64_t(scissor->x) + scissor->width);
         const auto bottom = std::min<int64_t>(imageSize.y, int64_t(scissor->y) + scissor->height);
-        if (right <= x || bottom <= y) return;
+        if (right <= x || bottom <= y) return nullptr;
         clip = {{x, y}, {uint32_t(right - x), uint32_t(bottom - y)}};
     }
     for (const auto& entry : entries)
         if (entry.bindType != EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
             pipeline->bindings.bindAuto({}, {pipeline->tempUBO.get(), pipeline->uboSize}, entry);
     uniformBytes = copyParameterBytes(pipeline->tempUBO.get(), pipeline->uboSize);
-    IndirectGroup group{vertices, indices, packets, parameters, {}, clip, count, {}};
+    meshPushConstants = pipeline->meshPushConstants;
+    bindings = pipeline->bindings.snapshot();
+    drawCount = count;
+    auto& group = groups.emplace_back();
+    group.packets = packets;
+    group.scissor = clip;
+    group.count = count;
+    return &group;
+}
+
+void HardwareExecutor::Command::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+    const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
+    std::optional<Raster::ScissorRect> scissor, std::span<const EmbeddedShader::AutoBindEntry> entries)
+{
+    if (!count) return;
+    if (!vertices || !indices || vertices.getElementSize() % 4 ||
+        (indices.getElementSize() != 2 && indices.getElementSize() != 4))
+        throw std::invalid_argument("Invalid GPU raster geometry");
+    auto* group = captureGroup(packets, count, scissor, entries);
+    if (!group) return;
+    group->vertices = vertices;
+    group->indices = indices;
+    group->parameters = parameters;
     auto& pool = pipeline->uploadPool;
     {
         std::lock_guard lock(pipeline->uploadMutex);
         auto free = std::find_if(pool.begin(), pool.end(), [](const auto& buffer) { return buffer.use_count() == 1; });
         if (free == pool.end()) {
-            group.geometryUpload = pool.emplace_back(std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(sizeof(GeometryEntry))));
+            group->geometryUpload = pool.emplace_back(std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(sizeof(GeometryEntry))));
         } else {
-            group.geometryUpload = *free;
+            group->geometryUpload = *free;
         }
     }
 
     const GeometryEntry geometry{addressOf(vertices), addressOf(indices), uint32_t(vertices.getElementSize() / 4),
                                  uint32_t(indices.getElementSize()), uint32_t(vertices.getElementCount())};
-    if (!group.geometryUpload->copyFromData(&geometry, sizeof(geometry)))
+    if (!group->geometryUpload->copyFromData(&geometry, sizeof(geometry)))
         throw std::runtime_error("Raster geometry upload requires host-visible memory");
-    const auto geometryAddress = addressOf(*group.geometryUpload);
+    const auto geometryAddress = addressOf(*group->geometryUpload);
     // Use the reserved zero word as a valid base for shaders with no per-draw parameters.
     const auto parameterAddress = parameters ? addressOf(parameters) : geometryAddress + offsetof(GeometryEntry, reserved);
-    group.root = {addressOf(packets), geometryAddress, parameterAddress, 0, 0};
-    groups.push_back(std::move(group));
-    bindings = pipeline->bindings.snapshot();
-    drawCount = count;
+    group->root = {addressOf(packets), geometryAddress, parameterAddress, 0, 0};
 }
 
 void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(ResourceAccessList& result)
@@ -609,6 +656,11 @@ void HardwareExecutor::Command::Impl::Draw::resolveResourceUses(ResourceAccessLi
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     if (bindings) bindings->resolveResourceUses(result);
     for (const auto& group : groups) {
+        if (pipeline->drawMeshTasksIndirect) {
+            result.buffer(*ResourceManager::get(group.packets), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                          VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+            continue;
+        }
         result.buffer(*ResourceManager::get(group.packets), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
         result.buffer(*ResourceManager::get(*group.geometryUpload), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -648,7 +700,7 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
     const auto commandBuffer = hardwareExecutor.currentRecordQueue->commandBuffer;
     if (bindings) {
         bindings->prepareDescriptors();
-        bindings->writeParameters({}, uniformBytes);
+        bindings->writeParameters(meshPushConstants, uniformBytes);
         if (!uniform) uniform = pipeline->uniformPool.acquire(uniformBytes, pipeline->uboDescriptorSetLayout);
     }
     VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -669,12 +721,17 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
     sets[3] = uniform ? uniform->set : VK_NULL_HANDLE;
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                             0, sets[3] ? 4 : 3, sets.data(), 0, nullptr);
-    auto& caps = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils();
-    const uint32_t limit = caps.featuresChain.getChainHead()->features.multiDrawIndirect
-        ? caps.supportedProperties.properties.limits.maxDrawIndirectCount : 1;
+    const uint32_t limit = maxDrawIndirectCount();
+    if (!meshPushConstants.empty())
+        vkCmdPushConstants(commandBuffer, pipelineLayout, pipeline->meshPushStages, 0,
+                           static_cast<uint32_t>(meshPushConstants.size()), meshPushConstants.data());
     for (const auto& group : groups) {
         vkCmdSetScissor(commandBuffer, 0, 1, &group.scissor);
         const VkBuffer commands = ResourceManager::get(group.packets)->bufferHandle;
+        if (pipeline->drawMeshTasksIndirect) {
+            pipeline->drawMeshTasksIndirect(commandBuffer, commands, 0, group.count, sizeof(Mesh::IndirectPacket));
+            continue;
+        }
         auto root = group.root;
         for (uint32_t first = 0; first < group.count;) {
             const auto count = std::min(group.count - first, limit);
@@ -797,3 +854,47 @@ void RasterPipeline<VS, FS>::Impl::refreshShaderVariant()
 
 template struct RasterPipeline<void, void>;
 template struct EmbeddedShader::BoundField<RasterPipeline<>>;
+
+template<class... Stages>
+struct MeshPipeline<Stages...>::Impl
+{
+    std::shared_ptr<RasterPipelineVulkan> backend;
+
+    static Impl& checked(const std::unique_ptr<Impl>& impl)
+    {
+        if (!impl) throw std::logic_error("Empty mesh pipeline handle");
+        return *impl;
+    }
+};
+
+template<class... Stages>
+MeshPipeline<Stages...>::MeshPipeline(const Module* task, const Module& mesh, const Module& fragment,
+                                      State state, uint32_t views)
+    : impl_(std::make_unique<Impl>())
+{
+    impl_->backend = std::make_shared<RasterPipelineVulkan>(task, mesh, fragment, state, views);
+}
+
+template<class... Stages>
+MeshPipeline<Stages...>::~MeshPipeline() = default;
+
+template<class... Stages>
+MeshPipeline<Stages...>::MeshPipeline(MeshPipeline&&) noexcept = default;
+
+template<class... Stages>
+MeshPipeline<Stages...>& MeshPipeline<Stages...>::operator=(MeshPipeline&&) noexcept = default;
+
+template<class... Stages>
+HardwareExecutor::Command MeshPipeline<Stages...>::operator()(
+    const HardwareBuffer& packets, uint32_t count, const HardwareImage& depth, std::optional<Raster::ScissorRect> scissor,
+    std::optional<Raster::Pass> pass, std::optional<ktm::uvec2> extent)
+{
+    if (!count && !pass) return HardwareExecutor::Command(nullptr);
+    auto draw = std::make_shared<HardwareExecutor::Command::Impl::Draw>(Impl::checked(impl_).backend, depth, extent, pass);
+    draw->captureGroup(packets, count, scissor);
+    if (!draw->drawCount && !pass) return HardwareExecutor::Command(nullptr);
+    return HardwareExecutor::Command(std::move(draw));
+}
+
+template struct MeshPipeline<>;
+template struct EmbeddedShader::BoundField<MeshPipeline<>>;

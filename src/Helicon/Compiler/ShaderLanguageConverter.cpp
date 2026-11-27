@@ -27,8 +27,8 @@ namespace EmbeddedShader
         case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ComputeShader;
         case SLANG_STAGE_MISS:           return ShaderStage::ComputeShader;
         case SLANG_STAGE_CALLABLE:       return ShaderStage::ComputeShader;
-        case SLANG_STAGE_MESH:           return ShaderStage::VertexShader;
-        case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::VertexShader;
+        case SLANG_STAGE_MESH:           return ShaderStage::MeshShader;
+        case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::TaskShader;
         default:                         return ShaderStage::VertexShader;
         }
     }
@@ -965,6 +965,10 @@ namespace EmbeddedShader
 	        return SLANG_STAGE_PIXEL;
 	    case ShaderStage::ComputeShader:
 	        return SLANG_STAGE_COMPUTE;
+	    case ShaderStage::MeshShader:
+	        return SLANG_STAGE_MESH;
+	    case ShaderStage::TaskShader:
+	        return SLANG_STAGE_AMPLIFICATION;
 	    default:
 	        throw std::logic_error("Unsupported shader stage.");
 	    }
@@ -1009,7 +1013,8 @@ namespace EmbeddedShader
                 // 注意：需要确保 ShaderStage 枚举与 slang::Stage 兼容，或自行映射
                 epInfo.stage = slangStageToShaderStage(entryPoint->getStage());
 
-                if (epInfo.stage == ShaderStage::ComputeShader)
+                const bool meshStage = epInfo.stage == ShaderStage::MeshShader || epInfo.stage == ShaderStage::TaskShader;
+                if (epInfo.stage == ShaderStage::ComputeShader || meshStage)
                 {
                     SlangUInt sizes[3] = { 1, 1, 1 };
                     entryPoint->getComputeThreadGroupSize(std::size(sizes), sizes);
@@ -1020,6 +1025,9 @@ namespace EmbeddedShader
                     );
                 }
                 resources.entryPointInfoPool.push_back(epInfo);
+                // Task payloads and mesh primitives are exchanged between shader stages.
+                // Only module-scope resources are host bindings for these stages.
+                if (meshStage) continue;
 
                 // Varying Inputs
                 for (int i = 0; i < entryPoint->getParameterCount(); ++i)
