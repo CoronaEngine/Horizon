@@ -3,7 +3,7 @@
 #include "../../ExampleBase.h"
 #include "Horizon.h"
 #include "Codegen/ControlFlows.h"
-#include SLANG(camera_raygen.slang)
+#include SLANG(Disney/RayTrace/disney_raygen.slang)
 #include SLANG(Disney/RayTrace/disney_miss.slang)
 #include SLANG(Disney/RayTrace/disney_closest_hit.slang)
 
@@ -16,6 +16,6 @@ private:
     static constexpr uint32_t width = 800, height = 600;
     HardwareDisplayer display;
     HardwareImage color{width, height, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage};
-    RayTracePipeline<camera_raygen_slang_t, disney_miss_slang_t, disney_closest_hit_slang_t> pipeline;
+    RayTracePipeline<disney_raygen_slang_t, disney_miss_slang_t, disney_closest_hit_slang_t> pipeline;
     HardwareExecutor executor;
 };

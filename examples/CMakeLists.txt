@@ -51,9 +51,9 @@ helicon_compile_shaders(HorizonExamples
     Disney/Slang/disney.pipeline.hpp Disney/Slang/disney_vert.slang Disney/Slang/disney_frag.slang
     DrawStress/Slang/drawstress.pipeline.hpp DrawStress/Slang/drawstress_vert.slang DrawStress/Slang/drawstress_frag.slang
     RAY_TRACE_PIPELINES
-    Baseline/RayTrace/baseline.pipeline.hpp camera_raygen.slang Baseline/RayTrace/baseline_miss.slang Baseline/RayTrace/baseline_closest_hit.slang
-    Disney/RayTrace/disney.pipeline.hpp camera_raygen.slang Disney/RayTrace/disney_miss.slang Disney/RayTrace/disney_closest_hit.slang
-    DrawStress/RayTrace/drawstress.pipeline.hpp camera_raygen.slang DrawStress/RayTrace/drawstress_miss.slang DrawStress/RayTrace/drawstress_closest_hit.slang
+    Baseline/RayTrace/baseline.pipeline.hpp Baseline/RayTrace/baseline_raygen.slang Baseline/RayTrace/baseline_miss.slang Baseline/RayTrace/baseline_closest_hit.slang
+    Disney/RayTrace/disney.pipeline.hpp Disney/RayTrace/disney_raygen.slang Disney/RayTrace/disney_miss.slang Disney/RayTrace/disney_closest_hit.slang
+    DrawStress/RayTrace/drawstress.pipeline.hpp DrawStress/RayTrace/drawstress_raygen.slang DrawStress/RayTrace/drawstress_miss.slang DrawStress/RayTrace/drawstress_closest_hit.slang
     MESH_PAIRS
     Baseline/Mesh/baseline.pipeline.hpp Baseline/Mesh/baseline_mesh.slang Baseline/Slang/baseline_frag.slang
     Disney/Mesh/disney.pipeline.hpp Disney/Mesh/disney_mesh.slang Disney/Slang/disney_frag.slang
