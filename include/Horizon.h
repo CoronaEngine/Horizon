@@ -75,9 +75,7 @@ public:
 #endif
     };
 
-    HardwareBuffer();
-    HardwareBuffer(const HardwareBuffer& other);
-    HardwareBuffer(HardwareBuffer&& other) noexcept;
+    HardwareBuffer() = default;
     HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, Usage usage, const void* data = nullptr, bool useDedicated = true);
 
     HardwareBuffer(uint32_t size, Usage usage, const void* data = nullptr, bool useDedicated = true)
@@ -99,11 +97,6 @@ public:
                                                               size_t elementCount, size_t elementSize);
 
     HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, Usage usage);
-
-    ~HardwareBuffer();
-
-    HardwareBuffer& operator=(const HardwareBuffer& other);
-    HardwareBuffer& operator=(HardwareBuffer&& other) noexcept;
 
     explicit operator bool() const;
 
@@ -140,7 +133,7 @@ public:
 private:
     static HardwareBuffer rasterUpload(uint32_t bytes);
     struct Impl;
-    Impl* impl_{};
+    std::shared_ptr<Impl> impl_;
     friend struct ResourceManager;
     friend class HardwareExecutor::Command;
 };
@@ -176,16 +169,10 @@ public:
         bool cube{}, linearFiltering{}; // Linear filtering covers min/mag/mip with supported anisotropy.
     };
 
-    HardwareImage();
-    HardwareImage(const HardwareImage& other);
-    HardwareImage(HardwareImage&& other) noexcept;
+    HardwareImage() = default;
     HardwareImage(uint32_t width, uint32_t height, Format format, Usage usage = Usage::SampledImage, int arrayLayers = 1);
     HardwareImage(const CreateInfo& createInfo);
 
-    ~HardwareImage();
-
-    HardwareImage& operator=(const HardwareImage& other);
-    HardwareImage& operator=(HardwareImage&& other) noexcept;
     // image[layer][mip]
     HardwareImage operator[](const uint32_t index);
     explicit operator bool() const;
@@ -208,7 +195,7 @@ public:
 private:
     friend struct ResourceManager;
     struct Impl;
-    Impl* impl_{};
+    std::shared_ptr<Impl> impl_;
 };
 
 struct HardwareDisplayer

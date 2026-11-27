@@ -784,7 +784,14 @@ void test_gpu()
     }
     std::cerr << "GPU: buffer copy/readback\n";
     {
-        const auto copy = HardwareBuffer(input, HardwareBuffer::Usage::StorageBuffer).copyTo(destination);
+        const auto copy = [&] {
+            HardwareBuffer upload(input, HardwareBuffer::Usage::StorageBuffer);
+            HardwareBuffer alias = upload;
+            upload = destination;
+            HardwareBuffer moved = std::move(alias);
+            expect(!alias, "moving a buffer clears the source handle");
+            return moved.copyTo(destination);
+        }();
         executor << copy;
         HardwareExecutor moved(std::move(executor));
         moved.commit();
@@ -885,16 +892,21 @@ void test_gpu()
         HardwareImage imageCopy(imageInfo);
         executor << source.copyTo(image, sizeof(uint32_t), 0, 1);
         executor << image.copyTo(imageCopy, 0, 1, 1, 1);
+        auto mip = imageCopy[1][1];
+        view = mip;
+        mip = imageCopy[0][1];
+        executor << mip.copyFrom(zeros.data());
         executor.commit().wait();
-        view = imageCopy[1][1];
     }
-    expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear image destination");
-    executor << view.copyTo(destination, 0, 0, 2 * sizeof(uint32_t));
-    view = HardwareImage{};
-    executor.commit().wait();
-    expect(destination.copyToData(output.data(), sizeof(output)), "image readback");
-    expect(output == std::array<uint32_t, 8>{0, 0, 20, 30, 40, 50, 0, 0},
-           "a queued copy retains the original layer and mip after its parent and view are released");
+    const auto readView = view.copyTo(destination, 0, 0, 2 * sizeof(uint32_t));
+    view = {};
+    for (int run = 0; run < 2; ++run) {
+        expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear the destination before each view copy");
+        executor << readView;
+        executor.commit().wait();
+        expect(destination.copyToData(output) && output == std::array<uint32_t, 8>{0, 0, 20, 30, 40, 50, 0, 0},
+               "the saved copy retains the original layer and mip after all its image handles are released");
+    }
 
     executor << image.copyFrom(input.data(), 0, 1) << image.copyTo(destination, 0, 1);
     executor.commit().wait();

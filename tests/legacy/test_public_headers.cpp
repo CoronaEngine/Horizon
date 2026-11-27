@@ -20,7 +20,8 @@ concept ExposesResourceID = requires(const T& value) { value.getBufferID(); } ||
                            requires(const T& value) { value.getDisplayerID(); };
 static_assert(!ExposesResourceID<HardwareBuffer> && !ExposesResourceID<HardwareImage> &&
               !ExposesResourceID<HardwareExecutor> && !ExposesResourceID<HardwareDisplayer>);
-static_assert(std::is_copy_constructible_v<HardwareBuffer>);
+static_assert(std::copyable<HardwareBuffer> && std::is_nothrow_move_constructible_v<HardwareBuffer> &&
+              std::is_nothrow_move_assignable_v<HardwareBuffer>);
 static_assert(requires(HardwareBuffer& buffer) {
     { buffer.exportBufferMemory() } -> std::same_as<HardwareBuffer::ExternalHandle>;
     HardwareBuffer(buffer.exportBufferMemory(), 1, 4, 4, HardwareBuffer::Usage::StorageBuffer);
@@ -28,7 +29,8 @@ static_assert(requires(HardwareBuffer& buffer) {
 static_assert(std::is_constructible_v<HardwareBuffer, const uint16_t(&)[3], HardwareBuffer::Usage>);
 static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<bool>, HardwareBuffer::Usage>);
 static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<std::string>, HardwareBuffer::Usage>);
-static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
+static_assert(std::copyable<HardwareImage> && std::is_nothrow_move_constructible_v<HardwareImage> &&
+              std::is_nothrow_move_assignable_v<HardwareImage>);
 static_assert(std::is_aggregate_v<HardwareImage::CreateInfo>);
 constexpr HardwareImage::CreateInfo imageDefaults{};
 static_assert(imageDefaults.width == 0 && imageDefaults.height == 0 &&

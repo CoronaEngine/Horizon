@@ -32,8 +32,8 @@ struct ResourceManager
     using BufferHardwareWrap = HardwareBuffer::Impl;
     using ImageHardwareWrap = HardwareImage::Impl;
 
-    static BufferHardwareWrap* get(const HardwareBuffer& buffer) { return buffer.impl_; }
-    static ImageHardwareWrap* get(const HardwareImage& image) { return image.impl_; }
+    static BufferHardwareWrap* get(const HardwareBuffer& buffer) { return buffer.impl_.get(); }
+    static ImageHardwareWrap* get(const HardwareImage& image) { return image.impl_.get(); }
 
     struct BindlessDescriptorSet
     {
@@ -176,7 +176,6 @@ struct HardwareBuffer::Impl
 {
     uint32_t elementCount{0};
     uint32_t elementSize{0};
-    uint64_t refCount{1};
 
     VkBuffer bufferHandle{VK_NULL_HANDLE};
     VkDeviceAddress deviceAddress{};
@@ -198,7 +197,6 @@ struct HardwareImage::Impl
     VkImageLayout imageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
     float pixelSize{0};
     ktm::uvec2 imageSize{0, 0};
-    uint64_t refCount{1};
 
     VkFormat imageFormat{VK_FORMAT_MAX_ENUM};
     VkImageUsageFlags imageUsage{VK_IMAGE_USAGE_FLAG_BITS_MAX_ENUM};

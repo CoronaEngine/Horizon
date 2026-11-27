@@ -32,7 +32,7 @@ VkBufferUsageFlags convertBufferUsage(HardwareBuffer::Usage const usage)
 }
 
 namespace {
-ResourceManager::BufferHardwareWrap& requireBuffer(ResourceManager::BufferHardwareWrap* buffer)
+ResourceManager::BufferHardwareWrap& requireBuffer(const std::shared_ptr<ResourceManager::BufferHardwareWrap>& buffer)
 {
     if (!buffer) throw std::runtime_error("Empty HardwareBuffer handle");
     return *buffer;
@@ -40,22 +40,17 @@ ResourceManager::BufferHardwareWrap& requireBuffer(ResourceManager::BufferHardwa
 
 void releaseBuffer(ResourceManager::BufferHardwareWrap* buffer)
 {
-    if (buffer && --buffer->refCount == 0)
-    {
-        buffer->resourceManager->destroyBuffer(*buffer);
-        delete buffer;
-    }
+    buffer->resourceManager->destroyBuffer(*buffer);
+    delete buffer;
 }
 }
-
-HardwareBuffer::HardwareBuffer() = default;
 
 HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
 {
     HardwareBuffer buffer;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
     constexpr auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    buffer.impl_ = new Impl(manager.createBuffer(1, bytes, usage, true, true, true));
+    buffer.impl_.reset(new Impl(manager.createBuffer(1, bytes, usage, true, true, true)), releaseBuffer);
     return buffer;
 }
 
@@ -78,7 +73,7 @@ HardwareExecutor::Command HardwareBuffer::createDeviceLocal(Usage usage, const v
     const auto stride = static_cast<uint32_t>(elementSize);
     HardwareBuffer destination;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
-    destination.impl_ = new Impl(manager.createBuffer(count, stride, convertBufferUsage(usage), false, true));
+    destination.impl_.reset(new Impl(manager.createBuffer(count, stride, convertBufferUsage(usage), false, true)), releaseBuffer);
     HardwareExecutor::Command upload(nullptr);
     if (count) {
         HardwareBuffer staging(count, stride, Usage::StorageBuffer, data);
@@ -90,12 +85,11 @@ HardwareExecutor::Command HardwareBuffer::createDeviceLocal(Usage usage, const v
 
 HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, Usage usage, const void* data, bool useDedicated)
 {
-    HardwareBuffer buffer;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
-    buffer.impl_ = new Impl(manager.createBuffer(bufferSize, elementSize, convertBufferUsage(usage), true, useDedicated));
-    if (data && buffer.impl_->bufferAllocInfo.pMappedData)
-        manager.writeMapped(*buffer.impl_, data, static_cast<size_t>(bufferSize) * elementSize);
-    *this = std::move(buffer);
+    impl_.reset(new Impl(manager.createBuffer(bufferSize, elementSize, convertBufferUsage(usage), true, useDedicated)),
+                releaseBuffer);
+    if (data && impl_->bufferAllocInfo.pMappedData)
+        manager.writeMapped(*impl_, data, static_cast<size_t>(bufferSize) * elementSize);
 }
 
 HardwareBuffer::HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, Usage usage)
@@ -107,36 +101,8 @@ HardwareBuffer::HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferS
     memoryHandle.fd = memHandle.fd;
 #endif
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
-    impl_ = new Impl(manager.importBufferMemory(memoryHandle, bufferSize, elementSize, allocSize, convertBufferUsage(usage)));
-}
-
-HardwareBuffer::HardwareBuffer(const HardwareBuffer& other) : impl_(other.impl_)
-{
-    if (impl_) ++impl_->refCount;
-}
-
-HardwareBuffer::HardwareBuffer(HardwareBuffer&& other) noexcept : impl_(std::exchange(other.impl_, nullptr)) {}
-
-HardwareBuffer::~HardwareBuffer()
-{
-    releaseBuffer(impl_);
-}
-
-HardwareBuffer& HardwareBuffer::operator=(const HardwareBuffer& other)
-{
-    if (impl_ == other.impl_) return *this;
-    if (other.impl_) ++other.impl_->refCount;
-    releaseBuffer(impl_);
-    impl_ = other.impl_;
-    return *this;
-}
-
-HardwareBuffer& HardwareBuffer::operator=(HardwareBuffer&& other) noexcept
-{
-    if (this == &other) return *this;
-    releaseBuffer(impl_);
-    impl_ = std::exchange(other.impl_, nullptr);
-    return *this;
+    impl_.reset(new Impl(manager.importBufferMemory(memoryHandle, bufferSize, elementSize, allocSize, convertBufferUsage(usage))),
+                releaseBuffer);
 }
 
 HardwareBuffer::operator bool() const

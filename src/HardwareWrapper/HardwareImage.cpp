@@ -139,15 +139,10 @@ uint32_t uploadByteCount(const ResourceManager::ImageHardwareWrap& image, uint32
 
 void releaseImage(ResourceManager::ImageHardwareWrap* image)
 {
-    if (image && --image->refCount == 0)
-    {
-        image->resourceManager->destroyImage(*image);
-        delete image;
-    }
+    image->resourceManager->destroyImage(*image);
+    delete image;
 }
 }
-
-HardwareImage::HardwareImage() = default;
 
 HardwareImage::HardwareImage(const CreateInfo& createInfo)
 {
@@ -160,52 +155,24 @@ HardwareImage::HardwareImage(const CreateInfo& createInfo)
         throw std::invalid_argument("A cubemap requires six square faces");
     const auto [vkFormat, pixelSize, isCompressed] = convertImageFormat(createInfo.format);
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
-    impl_ = new Impl(manager.createImage(
+    impl_.reset(new Impl(manager.createImage(
         ktm::uvec2(createInfo.width, createInfo.height), vkFormat, pixelSize,
-        convertImageUsage(createInfo.usage, isCompressed), createInfo.arrayLayers, createInfo.mipLevels, VK_IMAGE_TILING_OPTIMAL, createInfo.cube));
+        convertImageUsage(createInfo.usage, isCompressed), createInfo.arrayLayers, createInfo.mipLevels,
+        VK_IMAGE_TILING_OPTIMAL, createInfo.cube)), releaseImage);
     impl_->linearFiltering = createInfo.linearFiltering;
 }
 
 HardwareImage::HardwareImage(uint32_t width, uint32_t height, Format format, Usage usage, int arrayLayers)
     : HardwareImage(CreateInfo{width, height, format, usage, arrayLayers}) {}
 
-HardwareImage::HardwareImage(const HardwareImage& other) : impl_(other.impl_)
-{
-    if (impl_) ++impl_->refCount;
-}
-
-HardwareImage::HardwareImage(HardwareImage&& other) noexcept : impl_(std::exchange(other.impl_, nullptr)) {}
-
-HardwareImage::~HardwareImage()
-{
-    releaseImage(impl_);
-}
-
-HardwareImage& HardwareImage::operator=(const HardwareImage& other)
-{
-    if (impl_ == other.impl_) return *this;
-    if (other.impl_) ++other.impl_->refCount;
-    releaseImage(impl_);
-    impl_ = other.impl_;
-    return *this;
-}
-
-HardwareImage& HardwareImage::operator=(HardwareImage&& other) noexcept
-{
-    if (this == &other) return *this;
-    releaseImage(impl_);
-    impl_ = std::exchange(other.impl_, nullptr);
-    return *this;
-}
-
 HardwareImage HardwareImage::operator[](uint32_t index)
 {
     HardwareImage result;
     if (!impl_) return result;
-    auto* parent = impl_;
-    auto view = std::make_unique<Impl>();
+    auto* parent = impl_.get();
+    result.impl_.reset(new Impl{.resourceManager = parent->resourceManager}, releaseImage);
+    auto* view = result.impl_.get();
     view->device = parent->device;
-    view->resourceManager = parent->resourceManager;
     view->imageFormat = parent->imageFormat;
     view->linearFiltering = parent->linearFiltering;
     view->pixelSize = parent->pixelSize;
@@ -237,7 +204,6 @@ HardwareImage HardwareImage::operator[](uint32_t index)
         view->arrayLayers = 1;
         view->mipLevels = parent->mipLevels;
     }
-    result.impl_ = view.release();
     return result;
 }
 
