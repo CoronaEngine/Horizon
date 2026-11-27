@@ -1,14 +1,17 @@
 #include "ExampleBase.h"
 #include "Baseline/EDSL/BaselineEdsl.h"
 #include "Baseline/Mesh/BaselineMesh.h"
+#include "Baseline/RayTrace/BaselineRayTrace.h"
 #include "Baseline/Ocarina/BaselineOcarina.h"
 #include "Baseline/Slang/BaselineSlang.h"
 #include "Disney/EDSL/DisneyEdsl.h"
 #include "Disney/Mesh/DisneyMesh.h"
+#include "Disney/RayTrace/DisneyRayTrace.h"
 #include "Disney/Ocarina/DisneyOcarina.h"
 #include "Disney/Slang/DisneySlang.h"
 #include "DrawStress/EDSL/DrawStressEdsl.h"
 #include "DrawStress/Mesh/DrawStressMesh.h"
+#include "DrawStress/RayTrace/DrawStressRayTrace.h"
 #include "DrawStress/Ocarina/DrawStressOcarina.h"
 #include "DrawStress/Slang/DrawStressSlang.h"
 #include "Feature/EdslFeature.h"
@@ -55,12 +58,15 @@ int main(int argc, char** argv)
             if (mode == "baseline_edsl") example = std::make_unique<BaselineEdsl>(native_window);
             else if (mode == "baseline_slang") example = std::make_unique<BaselineSlang>(native_window);
             else if (mode == "baseline_mesh") example = std::make_unique<BaselineMesh>(native_window);
+            else if (mode == "baseline_raytrace") example = std::make_unique<BaselineRayTrace>(native_window);
             else if (mode == "disney_edsl") example = std::make_unique<DisneyEdsl>(native_window);
             else if (mode == "disney_slang") example = std::make_unique<DisneySlang>(native_window);
             else if (mode == "disney_mesh") example = std::make_unique<DisneyMesh>(native_window);
+            else if (mode == "disney_raytrace") example = std::make_unique<DisneyRayTrace>(native_window);
             else if (mode == "drawstress_edsl") example = std::make_unique<DrawStressEdsl>(native_window);
             else if (mode == "drawstress_slang") example = std::make_unique<DrawStressSlang>(native_window);
             else if (mode == "drawstress_mesh") example = std::make_unique<DrawStressMesh>(native_window);
+            else if (mode == "drawstress_raytrace") example = std::make_unique<DrawStressRayTrace>(native_window);
             else if (mode == "edsl_feature") example = std::make_unique<EdslFeature>(native_window);
             else if (mode == "baseline_ocarina") example = std::make_unique<BaselineOcarina>(native_window);
             else if (mode == "disney_ocarina") example = std::make_unique<DisneyOcarina>(native_window);

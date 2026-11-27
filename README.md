@@ -116,12 +116,12 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。在下表第一行的 `BaselineSlang` 构造函数中可以看到 Viking Room 的模型、纹理、相机和渲染目标的初始化，`run(seconds)` 中是每帧的矩阵更新、绘制和呈现。各 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
 
-| 场景和阅读重点 | EDSL 实现 | Slang 实现 | Slang Mesh 实现 |
-| --- | --- | --- | --- |
-| Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) | [example_baseline_mesh.cpp](examples/Baseline/Mesh/example_baseline_mesh.cpp) |
-| EDSL Feature · G-buffer 与计算着色 | [example_edsl_feature.cpp](examples/Feature/example_edsl_feature.cpp) | — | — |
-| Disney · 球体阵列与材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) | [example_disney_mesh.cpp](examples/Disney/Mesh/example_disney_mesh.cpp) |
-| DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) | [example_drawstress_mesh.cpp](examples/DrawStress/Mesh/example_drawstress_mesh.cpp) |
+| 场景和阅读重点 | EDSL 实现 | Slang 实现 | Slang Mesh 实现 | Slang RayTrace 实现 |
+| --- | --- | --- | --- | --- |
+| Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) | [example_baseline_mesh.cpp](examples/Baseline/Mesh/example_baseline_mesh.cpp) | [example_baseline_raytrace.cpp](examples/Baseline/RayTrace/example_baseline_raytrace.cpp) |
+| EDSL Feature · G-buffer 与计算着色 | [example_edsl_feature.cpp](examples/Feature/example_edsl_feature.cpp) | — | — | — |
+| Disney · 球体阵列与材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) | [example_disney_mesh.cpp](examples/Disney/Mesh/example_disney_mesh.cpp) | [example_disney_raytrace.cpp](examples/Disney/RayTrace/example_disney_raytrace.cpp) |
+| DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) | [example_drawstress_mesh.cpp](examples/DrawStress/Mesh/example_drawstress_mesh.cpp) | [example_drawstress_raytrace.cpp](examples/DrawStress/RayTrace/example_drawstress_raytrace.cpp) |
 
 运行 `HorizonExamples edsl_feature` 可查看 EDSL 如何调用外部着色器函数。片元入口调用 GLSL 函数计算立方体的表面颜色，将颜色和法线写入 G-buffer。计算入口逐像素读取这两张图像，调用 HLSL 函数计算光照并输出到窗口。[GLSL 辅助函数](examples/Feature/edsl_feature_geometry.glsl) · [HLSL 辅助函数](examples/Feature/edsl_feature_lighting.hlsl)
 
@@ -283,6 +283,22 @@ executor.commit();
 用 `baseline_mesh`、`disney_mesh` 或 `drawstress_mesh` 运行对应场景的手写 Slang mesh 版本。Baseline 分组读取 Viking Room 的索引和顶点。Disney 为 110 个材质球各提交一条间接记录。DrawStress 保留 40³ 个立方体和 64,000 条间接记录，每个工作组生成一个立方体，并通过 `SV_DrawIndex` 读取它的变换矩阵。三个模式都需要 mesh shader，Disney 和 DrawStress 还需要支持对应记录数的多次间接绘制。
 
 用 `MESH_PAIRS` 登记生成头、mesh 和 fragment 文件，在 C++ 中分别引入阶段头并构造 `MeshPipeline mesh(baseline_mesh_slang, baseline_frag_slang)`。调用 `executor << mesh(groups, count, depth)` 时，GPU 从 `Usage::RasterIndirect` 缓冲读取前 `count` 条记录。每条 `MeshPipeline<>::IndirectPacket` 的三个 `uint32_t` 指定第一阶段在 X、Y、Z 上的工作组数。需要 task shader 时，用 `TASK_MESH_PAIRS` 在 mesh 前登记 task 阶段，构造时使用相同顺序。
+
+用 `baseline_raytrace`、`disney_raytrace` 或 `drawstress_raytrace` 运行对应的光追场景。Baseline 在命中三角形时插值 UV 采样 Viking Room 纹理。Disney 的 110 个实例共享球体 BLAS，通过实例 ID 读取各自的材质。DrawStress 的 64,000 个立方体共享一个 BLAS，每帧更新实例变换并重建 TLAS。用 `RAY_TRACE_PIPELINES` 按生成头、raygen、miss、closest-hit 的顺序登记，在 C++ 中分别引入三个阶段头。首版支持索引三角形、一个三角形命中组和一级光线递归。
+
+`RayTracePipeline<>::AccelerationStructure` 的两个 `build` 重载分别接收顶点和索引 buffer，或接收 `RayTracePipeline<>::Instance` 数组。顶点坐标为 `float3`，可传入顶点内的字节偏移。实例保存 BLAS、仿射变换、24 位 ID 和 8 位掩码。构建命令保留其输入，重新构建会替换目标句柄。已绑定或已捕获的场景继续引用原来的结构。
+
+```cpp
+executor << geometry.build(vertices, indices);
+const std::array instances{RayTracePipeline<>::Instance{.geometry = geometry}};
+executor << scene.build(instances);
+pipeline.scene = scene;
+pipeline.output = color;
+executor << pipeline(width, height) << display(color);
+executor.commit();
+```
+
+Slang 的场景声明使用 `[[vk::binding(1, 3)]] RaytracingAccelerationStructure scene`，set 3 的 binding 0 仍可用于相机 UBO。发射尺寸、绑定资源和 shader 参数在调用 `pipeline(...)` 时捕获。跨 executor 使用新构建的场景时，先提交构建，再用消费方的 `wait(&producer)` 登记依赖。
 
 在目标中登记实际使用的顶点和片元着色器配对，即可通过具名字段绑定资源和输出。每组三个参数依次为生成头、顶点着色器、片元着色器。
 
