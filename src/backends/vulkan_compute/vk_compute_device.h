@@ -224,6 +224,7 @@ public:
     [[nodiscard]] VkImageAllocation &get_vk_image(handle_ty handle) noexcept;
 
     // ── Device::Impl interface ───────────────────────────────────────────────
+    [[nodiscard]] bool supports_ray_queries() const noexcept override { return has_ray_query(); }
     [[nodiscard]] bool supports_buffer_export() const noexcept override { return has_external_memory_; }
     [[nodiscard]] bool supports_bc7_textures() const noexcept override { return has_bc7_; }
     [[nodiscard]] bool supports_raytracing() const noexcept override { return has_ray_query() || has_ray_tracing_pipeline(); }

@@ -279,78 +279,22 @@ class WorkflowTests(unittest.TestCase):
     def test_image_and_hash_dependencies_follow_active_consumers(self) -> None:
         recipe = ast.parse((REPO_ROOT / "build_tools/conanfile.py").read_text(encoding="utf-8"))
         recipe_class = next(node for node in recipe.body if isinstance(node, ast.ClassDef))
-        requirements = next(node for node in recipe_class.body
-                            if isinstance(node, ast.FunctionDef) and node.name == "requirements")
-        namespace = {}
-        exec(compile(ast.Module(body=[requirements], type_ignores=[]), "requirements", "exec"), namespace)
+        namespace = {"ConanFile": object}
+        exec(compile(ast.Module(body=[recipe_class], type_ignores=[]), "recipe", "exec"), namespace)
 
-        for ocarina, examples, baseline in itertools.product((False, True), repeat=3):
-            with self.subTest(ocarina=ocarina, examples=examples, baseline=baseline):
+        for ocarina, examples in itertools.product((False, True), repeat=2):
+            with self.subTest(ocarina=ocarina, examples=examples):
                 packages = set()
-                consumer = SimpleNamespace(
-                    settings=SimpleNamespace(os="Linux"),
-                    options=SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
-                                            with_examples=examples, with_baseline_window_test=baseline,
-                                            with_tracy=False),
-                    requires=lambda reference, **kwargs: packages.add(reference.split("/", 1)[0]))
-                namespace["requirements"](consumer)
-                self.assertEqual("xxhash" in packages, ocarina)
-                self.assertEqual("tinyexr" in packages, ocarina)
-                self.assertEqual("stb" in packages, ocarina or examples or baseline)
+                consumer = namespace["HorizonConan"]()
+                consumer.options = SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
+                                                   with_examples=examples, with_tracy=False)
+                consumer.requires = lambda reference, **kwargs: packages.add(reference.split("/", 1)[0])
+                consumer.requirements()
+                for package in ("xxhash", "tinyexr", "stb"):
+                    self.assertEqual(package in packages, ocarina or examples)
                 self.assertTrue({"fmt", "quill"} <= packages)
                 if not ocarina and not examples:
-                    self.assertEqual(packages, {"fmt", "quill", "stb"} if baseline else {"fmt", "quill"})
-
-    def test_windows_baseline_installs_window_dependencies_without_duplicate_requirements(self) -> None:
-        recipe = ast.parse((REPO_ROOT / "build_tools/conanfile.py").read_text(encoding="utf-8"))
-        recipe_class = next(node for node in recipe.body if isinstance(node, ast.ClassDef))
-        requirements = next(node for node in recipe_class.body
-                            if isinstance(node, ast.FunctionDef) and node.name == "requirements")
-        namespace = {}
-        exec(compile(ast.Module(body=[requirements], type_ignores=[]), "requirements", "exec"), namespace)
-
-        window = {"glfw/3.4", "glm/1.0.1"}
-        vulkan = {"volk/1.4.350.0", "vulkan-headers/1.4.350.0", "vulkan-loader/1.4.350.0"}
-        for system, engine, examples, baseline in itertools.product(
-                ("Windows", "Linux", "Macos"), (False, True), (False, True), (False, True)):
-            if examples and not engine:
-                continue
-            with self.subTest(system=system, engine=engine, examples=examples, baseline=baseline):
-                packages = []
-                consumer = SimpleNamespace(
-                    settings=SimpleNamespace(os=system),
-                    options=SimpleNamespace(with_engine=engine, with_ocarina=False, with_examples=examples,
-                                            with_baseline_window_test=baseline, with_tracy=False),
-                    requires=lambda reference, **kwargs: packages.append(reference))
-                namespace["requirements"](consumer)
-                actual = set(packages)
-                windows_baseline = system == "Windows" and baseline
-                self.assertEqual(actual & window, window if examples or windows_baseline else set())
-                self.assertEqual(actual & vulkan, vulkan if engine or windows_baseline else set())
-                self.assertEqual(len(packages), len(actual), "Each dependency must be required only once")
-                if not engine:
-                    expected = {"fmt/12.1.0", "quill/11.0.2"}
-                    if baseline:
-                        expected.add("stb/cci.20240531")
-                    if windows_baseline:
-                        expected |= window | vulkan
-                    self.assertEqual(actual, expected, "Standalone window tests must not pull engine packages")
-
-    def test_baseline_window_commands_install_stb_without_the_engine(self) -> None:
-        for platform in ("linux", "darwin"):
-            for command in ("install", "_bootstrap", "configure", "build", "rebuild", "update"):
-                with self.subTest(platform=platform, command=command), \
-                        patch.object(dev.sys, "platform", platform), \
-                        patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
-                        patch.object(dev, "cached_ninja", return_value=None), \
-                        patch.object(dev, "safe_remove"), patch.object(dev, "cmake_configure"), \
-                        patch.object(dev, "cmake_build"), patch.object(dev, "conan_install") as install:
-                    args = dev.create_parser().parse_args(
-                        [command, "horizon-test-baseline-window", "--configuration", "Release"])
-                    dev.execute(args)
-                    self.assertEqual(install.call_args.kwargs["target_family"], "core")
-                    self.assertEqual(install.call_args.kwargs["options"], [
-                        "&:with_engine=False", "&:with_tests=True", "&:with_baseline_window_test=True"])
+                    self.assertEqual(packages, {"fmt", "quill"})
 
     def test_examples_commands_preserve_enabled_ocarina_and_test_features(self) -> None:
         for command in ("install", "_bootstrap", "configure", "build", "rebuild", "update"):
@@ -364,8 +308,8 @@ class WorkflowTests(unittest.TestCase):
                 dev.execute(args)
                 self.assertEqual(install.call_args.kwargs["target_family"], "examples")
                 self.assertEqual(install.call_args.kwargs["options"], [
-                    "&:with_examples=True", "&:with_ocarina=True",
-                    "&:with_ocarina_tests=True", "&:with_tests=True"])
+                    "&:with_examples=True", "&:with_tests=True",
+                    "&:with_ocarina=True", "&:with_ocarina_tests=True"])
 
     def test_enabled_features_do_not_duplicate_target_family_options(self) -> None:
         with patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
@@ -400,15 +344,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("Helicon"), "engine")
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
-        self.assertEqual(target_family_for_targets(["HorizonExamples", "horizon-baseline-hotfix-patch"]),
-                         "examples")
+        self.assertEqual(target_family_for_target("horizon-test-legacy"), "engine")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "horizon-tests"]), "examples")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "ShaderCompileScripts"]), "examples")
+        self.assertEqual(target_family_for_targets(["horizon-tests", "horizon-test-legacy"]), "engine")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
         self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
         self.assertEqual(target_family_for_target("horizon-hotfix-build-cmake"), "core")
         self.assertEqual(target_family_for_targets(["test-core-parsetype"]), "ocarina-tests")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "ocarina-native"]), "examples")
         with self.assertRaises(ValueError):
-            target_family_for_targets(["HorizonExamples", "ocarina-native"])
+            target_family_for_targets(["HorizonExamples", "test-core-parsetype"])
 
     def test_hotfix_targets_infer_the_core_build_on_every_platform(self) -> None:
         targets = ["horizon-hotfix", "horizon-hotfix-build-cmake", "horizon-hotfix-process-posix",
@@ -440,9 +387,9 @@ class WorkflowTests(unittest.TestCase):
             conan_options("core"),
             ["&:with_engine=False", "&:with_tests=True"],
         )
-        self.assertEqual(conan_options("engine"), ["&:with_engine=True"])
+        self.assertEqual(conan_options("engine"), ["&:with_engine=True", "&:with_tests=True"])
         self.assertEqual(target_family_slug("engine"), "engine")
-        self.assertEqual(conan_options("examples"), ["&:with_examples=True"])
+        self.assertEqual(conan_options("examples"), ["&:with_examples=True", "&:with_tests=True"])
         self.assertEqual(conan_options("ocarina"), ["&:with_ocarina=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),

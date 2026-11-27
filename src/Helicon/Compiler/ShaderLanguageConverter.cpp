@@ -21,14 +21,14 @@ namespace EmbeddedShader
         case SLANG_STAGE_HULL:       return ShaderStage::VertexShader;
         case SLANG_STAGE_DOMAIN:     return ShaderStage::VertexShader;
         case SLANG_STAGE_GEOMETRY:   return ShaderStage::VertexShader;
-        case SLANG_STAGE_RAY_GENERATION: return ShaderStage::ComputeShader;
+        case SLANG_STAGE_RAY_GENERATION: return ShaderStage::RayGeneration;
         case SLANG_STAGE_INTERSECTION:   return ShaderStage::ComputeShader;
         case SLANG_STAGE_ANY_HIT:        return ShaderStage::ComputeShader;
-        case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ComputeShader;
-        case SLANG_STAGE_MISS:           return ShaderStage::ComputeShader;
+        case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ClosestHit;
+        case SLANG_STAGE_MISS:           return ShaderStage::Miss;
         case SLANG_STAGE_CALLABLE:       return ShaderStage::ComputeShader;
-        case SLANG_STAGE_MESH:           return ShaderStage::VertexShader;
-        case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::VertexShader;
+        case SLANG_STAGE_MESH:           return ShaderStage::MeshShader;
+        case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::TaskShader;
         default:                         return ShaderStage::VertexShader;
         }
     }
@@ -66,6 +66,26 @@ namespace EmbeddedShader
 
     namespace
     {
+        Ast::AccessPermissions descriptorAccess(slang::TypeLayoutReflection* layout, ShaderCodeModule::ShaderResources::BindType type)
+        {
+            using Resources = ShaderCodeModule::ShaderResources;
+            using Access = Ast::AccessPermissions;
+            switch (type)
+            {
+                case Resources::sampledImages:
+                case Resources::sampler:
+                case Resources::texture:
+                case Resources::accelerationStructure:
+                case Resources::rawBuffer: return Access::ReadOnly;
+                case Resources::storageTexture:
+                case Resources::storageBuffer:
+                    if (layout->getResourceAccess() == SLANG_RESOURCE_ACCESS_WRITE) return Access::WriteOnly;
+                    if (layout->getResourceAccess() == SLANG_RESOURCE_ACCESS_READ) return Access::ReadOnly;
+                    return Access::ReadAndWrite;
+                default: return Access::None;
+            }
+        }
+
         uint32_t scalarSizeInBytes(slang::TypeReflection::ScalarType st)
         {
             switch (st)
@@ -293,6 +313,7 @@ namespace EmbeddedShader
                                         ? 0
                                         : elemCount;
                 info.bindType = elemBindType;
+                info.access = descriptorAccess(elemTypeLayout, elemBindType);
                 fillSemanticAndLocation(info);
                 resources.bindInfoPool.push_back(info);
                 return;
@@ -320,6 +341,7 @@ namespace EmbeddedShader
             info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
             info.elementCount = 1;
             info.bindType = bindType;
+            info.access = descriptorAccess(m_typeLayout, bindType);
 
             // varying(顶点输入/输出)不占 uniform 存储, getSize()=0 且分量数需从向量宽度推导。
             // 下游 vertex_attribute_format 依赖 elementCount(分量数)+typeName 决定 VkFormat,
@@ -396,6 +418,8 @@ namespace EmbeddedShader
 
     EmbeddedShader::ShaderCodeModule::ShaderResources::BindType ShaderCursor::deduceLeafBindType(slang::TypeLayoutReflection* typeLayout)
     {
+        if (typeLayout->getResourceShape() == SLANG_ACCELERATION_STRUCTURE)
+            return ShaderCodeModule::ShaderResources::accelerationStructure;
         int rangeCount = typeLayout->getBindingRangeCount();
         if (rangeCount > 0)
         {
@@ -579,7 +603,8 @@ namespace EmbeddedShader
 
         slang::SessionDesc sessionDesc{};
 	    slang::TargetDesc targetDesc{};
-	    targetDesc.format = SLANG_CPP_SOURCE;
+	    targetDesc.format = SLANG_SPIRV;
+	    targetDesc.profile = slangGlobalSession->findProfile("spirv_1_6");
 	    sessionDesc.targets = &targetDesc;
 	    sessionDesc.targetCount = 1;
 
@@ -664,109 +689,6 @@ namespace EmbeddedShader
 	    module.binData = std::vector(static_cast<uint8_t const*>(moduleBlob->getBufferPointer()),static_cast<uint8_t const*>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
 	    return module;
     }
-
-    void ShaderLanguageConverter::slangModuleReflection(SlangModuleReflectionArgs arg)
-    {
-	    initSlangGlobalSession();
-
-        slang::SessionDesc sessionDesc{};
-	    slang::TargetDesc targetDesc{};
-	    targetDesc.format = SLANG_SPIRV;
-	    sessionDesc.targets = &targetDesc;
-	    sessionDesc.targetCount = 1;
-
-	    std::array options =
-        {
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::NoMangle,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::IncompleteLibrary,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
-        };
-
-	    sessionDesc.compilerOptionEntries = options.data();
-	    sessionDesc.compilerOptionEntryCount = options.size();
-	    Slang::ComPtr<slang::ISession> session;
-        slangGlobalSession->createSession(sessionDesc, session.writeRef());
-	    Slang::ComPtr<slang::IModule> srcModule;
-	    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	    auto dataBlob = slang_createBlob(arg.module->binData.data(), arg.module->binData.size());
-	    srcModule = session->loadModuleFromIRBlob(arg.module->name.c_str(),arg.module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
-	    diagnoseIfNeeded(diagnosticsBlob);
-	    if (!srcModule)
-	    {
-	        std::cout << "Load Module From IR Blob failed: " << arg.module->name << std::endl;
-	    }
-        diagnoseIfNeeded(diagnosticsBlob);
-	    arg.reflectionCallback(srcModule->getModuleReflection());
-
-	    Slang::ComPtr<slang::IComponentType> slangTarget;
-	    Slang::ComPtr<slang::IEntryPoint> entryPoint;
-	    bool isLibrary = false;
-	    {
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        srcModule->findEntryPointByName(arg.entrypointName.c_str(), entryPoint.writeRef());
-	        if (!entryPoint)
-	        {
-	            //针对非shader attr标注的入口点查找
-                srcModule->findAndCheckEntryPoint(arg.entrypointName.c_str(),
-                                                  toSlangStage(arg.stage),
-                                                  entryPoint.writeRef(),
-                                                  diagnosticsBlob.writeRef());
-	            if (!entryPoint)
-	            {
-	                //切换到库模式
-	                isLibrary = true;
-	            }
-            }
-	    }
-	    if (!isLibrary)
-	    {
-	        // 5. Compose Modules + Entry Points
-	        std::array<slang::IComponentType *, 2> componentTypes =
-            {
-	            srcModule,
-                entryPoint
-            };
-
-	        Slang::ComPtr<slang::IComponentType> composedProgram;
-	        {
-	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	            SlangResult result = session->createCompositeComponentType(
-                    componentTypes.data(),
-                    componentTypes.size(),
-                    composedProgram.writeRef(),
-                    diagnosticsBlob.writeRef());
-	            diagnoseIfNeeded(diagnosticsBlob);
-	            if (SLANG_FAILED(result))
-	                throw std::runtime_error("Failed to create composite component type in Slang.");
-	        }
-
-	        {
-	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	            SlangResult result = composedProgram->link(
-                    slangTarget.writeRef(),
-                    diagnosticsBlob.writeRef());
-	            diagnoseIfNeeded(diagnosticsBlob);
-	            if (SLANG_FAILED(result))
-	                throw std::runtime_error("Failed to link Slang program.");
-	        }
-	    }
-        else
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            auto result = srcModule->link(slangTarget.writeRef(), diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (SLANG_FAILED(result))
-                throw std::runtime_error("Failed to link Slang program.");
-        }
-
-	    arg.layoutCallback(slangTarget->getLayout(0));
-    }
-
 
     Slang::ComPtr<slang::IGlobalSession> ShaderLanguageConverter::getGlobalSession()
     {
@@ -1046,6 +968,13 @@ namespace EmbeddedShader
 	        return SLANG_STAGE_PIXEL;
 	    case ShaderStage::ComputeShader:
 	        return SLANG_STAGE_COMPUTE;
+	    case ShaderStage::RayGeneration: return SLANG_STAGE_RAY_GENERATION;
+	    case ShaderStage::Miss: return SLANG_STAGE_MISS;
+	    case ShaderStage::ClosestHit: return SLANG_STAGE_CLOSEST_HIT;
+	    case ShaderStage::MeshShader:
+	        return SLANG_STAGE_MESH;
+	    case ShaderStage::TaskShader:
+	        return SLANG_STAGE_AMPLIFICATION;
 	    default:
 	        throw std::logic_error("Unsupported shader stage.");
 	    }
@@ -1064,19 +993,8 @@ namespace EmbeddedShader
             cursor.m_varLayout = param;
             cursor.m_typeLayout = param->getTypeLayout();
 
-            // 顶层参数的 descriptor set 取法(已实测 SpirV target 逐 compile/逐字段确认):
-            //   - ParameterBlock(kind=11): 其内容独占一个寄存器空间, set 来自
-            //     getOffset(SubElementRegisterSpace)。non-bindless 的 global_parameter_block 由此得 set=1。
-            //   - 其余全部(ConstantBuffer UBO + 普通纹理/采样器/buffer + bindless 句柄数组 __DynamicResource[]):
-            //     set 来自 getBindingSpace(DescriptorTableSlot)。
-            //       · bindless global_ubo([[vk::binding(0,3)]] ConstantBuffer) → 3
-            //       · textureHandles([vk::binding(0,2)]) → 2, bufferHandles → 1, combinedTextureSamplerHandles → 0
-            //       · non-bindless global_ubo(无显式 binding) → 0
-            //       · 真 push_constant(getParameterCategory==PushConstantBuffer)DTS=0, 但 set 对 push constant 无意义
-            //         (collectBindings 走 PushConstantBuffer 分支, 进 VkPushConstantRange 而非 descriptor set)。
-            // 旧代码对非 ParameterBlock 统一用 getOffset(RegisterSpace) 恒返回 0 → set 2/3 资源全被误报到 set 0。
-            // 注意: ConstantBuffer 不能并入 ParameterBlock 用 SubElementRegisterSpace —— 那对 global_ubo 返回 0,
-            // 会让 bindless UBO 落到 set 0(bindless 保留集)从而崩溃(rasterizer add_descriptor_binding 抛异常)。
+            // Slang assigns a separate register space to a ParameterBlock in handwritten shaders.
+            // Other globals, including descriptor tables and the set-3 UBO, use their binding space.
             if (param->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ParameterBlock)
             {
                 cursor.m_offset.set = param->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
@@ -1101,7 +1019,8 @@ namespace EmbeddedShader
                 // 注意：需要确保 ShaderStage 枚举与 slang::Stage 兼容，或自行映射
                 epInfo.stage = slangStageToShaderStage(entryPoint->getStage());
 
-                if (epInfo.stage == ShaderStage::ComputeShader)
+                const bool meshStage = epInfo.stage == ShaderStage::MeshShader || epInfo.stage == ShaderStage::TaskShader;
+                if (epInfo.stage == ShaderStage::ComputeShader || meshStage)
                 {
                     SlangUInt sizes[3] = { 1, 1, 1 };
                     entryPoint->getComputeThreadGroupSize(std::size(sizes), sizes);
@@ -1112,6 +1031,10 @@ namespace EmbeddedShader
                     );
                 }
                 resources.entryPointInfoPool.push_back(epInfo);
+                // Task payloads and mesh primitives are exchanged between shader stages.
+                // Only module-scope resources are host bindings for these stages.
+                if (meshStage || epInfo.stage == ShaderStage::RayGeneration || epInfo.stage == ShaderStage::Miss ||
+                    epInfo.stage == ShaderStage::ClosestHit) continue;
 
                 // Varying Inputs
                 for (int i = 0; i < entryPoint->getParameterCount(); ++i)
@@ -1137,16 +1060,4 @@ namespace EmbeddedShader
 	    return resources;
     }
 
-    ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg)
-    {
-	    SlangModuleReflectionArgs reflectArgs;
-	    static_cast<SlangModuleReflectionArgs0&>(reflectArgs) = std::move(arg);
-	    ShaderCodeModule::ShaderResources resources;
-	    reflectArgs.layoutCallback = [&](slang::ProgramLayout* programLayout)
-        {
-            resources = slangReflection(programLayout);
-        };
-	    slangModuleReflection(reflectArgs);
-	    return resources;
-    }
 } // namespace EmbeddedShader

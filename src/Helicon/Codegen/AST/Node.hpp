@@ -60,7 +60,7 @@ namespace EmbeddedShader::Ast
 	    virtual AccessPermissions getAccessPermissions() const { return AccessPermissions::None; }
 	};
 
-	struct Variate : Value
+	struct Variate : Value, std::enable_shared_from_this<Variate>
 	{
 		std::string name;
 		std::string parse() override;
@@ -114,6 +114,7 @@ namespace EmbeddedShader::Ast
 		std::shared_ptr<Value> value1;
 		std::shared_ptr<Value> value2;
 		std::string operatorType;
+        void access(AccessPermissions permissions) override;
 		std::string parse() override;
 	};
 
@@ -282,6 +283,7 @@ namespace EmbeddedShader::Ast
         // Back-pointer to the C++ proxy's boundResource_ (void*).
         // Used by auto-bind to read the current resource at dispatch time.
         void** boundResourceRef = nullptr;
+        bool indexed = false;
 
         size_t dirtyVersion = 1;
 

@@ -36,7 +36,7 @@ _deps/
 # 编译输出
 *.o
 *.obj
-!examples/assets/models/*.obj
+!examples/Baseline/assets/models/*.obj
 *.exe
 *.dll
 *.so
@@ -97,6 +97,3 @@ bench_*.txt
 compare_dump.ps1
 dumps/
 imgui.ini
-
-# Ocarina DSL example output
-/ocarina_dsl_example_output/

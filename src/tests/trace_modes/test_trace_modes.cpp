@@ -296,7 +296,7 @@ int reject(Device &device, std::string_view reason) {
 int main(int argc, char **argv) {
     require(argc >= 2, "expected a trace-mode case");
     const auto which = std::string_view(argv[1]);
-    if (argc > 2) RHIContext::instance().init(argv[0], argv[2]);
+    if (argc > 2) test::RHIContextTestAccess::set_cache_directory(argv[2]);
     auto device = create_test_device();
     const auto caps = device.trace_capabilities();
     std::cout << "trace capabilities ray_query=" << caps.ray_query << " ray_tracing_pipeline="

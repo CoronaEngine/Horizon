@@ -1,5 +1,3 @@
-import os
-
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMakeDeps, CMakeToolchain, cmake_layout
@@ -28,11 +26,9 @@ class HorizonConan(ConanFile):
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
-        "with_baseline_window_test": [True, False],
         "with_ocarina_tests": [True, False],
         "with_hardcode_shaders": [True, False],
         "with_tracy": [True, False],
-        "enable_imgui_render": [True, False],
     }
 
     default_options = {
@@ -42,11 +38,9 @@ class HorizonConan(ConanFile):
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
-        "with_baseline_window_test": False,
         "with_ocarina_tests": False,
         "with_hardcode_shaders": False,
         "with_tracy": True,
-        "enable_imgui_render": True,
         "spirv-tools/*:shared": False,
         "spirv-tools/*:build_executables": False,
         "glfw/*:shared": False,
@@ -63,16 +57,16 @@ class HorizonConan(ConanFile):
             )
         cmake_layout(self, build_folder=f"build/conan/{target_family}/{configuration}")
 
+    @property
+    def _build_ocarina(self):
+        return bool(self.options.with_examples) or bool(self.options.with_ocarina)
+
     def requirements(self):
-        windows_baseline = (bool(self.options.with_baseline_window_test)
-                            and self.settings.os == "Windows")
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
         self.requires("fmt/12.1.0")
-        if bool(self.options.with_ocarina):
+        if self._build_ocarina:
             self.requires("xxhash/0.8.3")
             self.requires("tinyexr/1.0.7")
-        if (bool(self.options.with_ocarina) or bool(self.options.with_examples)
-                or bool(self.options.with_baseline_window_test)):
             self.requires("stb/cci.20240531")
 
         if bool(self.options.with_engine):
@@ -83,19 +77,14 @@ class HorizonConan(ConanFile):
             self.requires("slang/2026.11", transitive_headers=True, transitive_libs=True)
             if bool(self.options.with_tracy):
                 self.requires("tracy/0.13.1", options={"on_demand": True})
-
-        if bool(self.options.with_engine) or windows_baseline:
             self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
             self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
             self.requires("vulkan-loader/1.4.350.0", transitive_headers=True)
 
-        if bool(self.options.with_examples) or windows_baseline:
+        if bool(self.options.with_examples):
             self.requires("glfw/3.4")
             self.requires("glm/1.0.1")
-
-        if bool(self.options.with_examples):
             self.requires("tinyobjloader/1.0.7")
-            self.requires("imgui/1.92.8")
 
     def validate(self):
         runtime = self.settings.get_safe("compiler.runtime")
@@ -120,8 +109,8 @@ class HorizonConan(ConanFile):
             raise ConanInvalidConfiguration(
                 "with_engine=False is incompatible with: " + ", ".join(enabled_engine_features)
             )
-        if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
-            raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True")
+        if bool(self.options.with_ocarina_tests) and not self._build_ocarina:
+            raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True or with_examples=True")
 
     def generate(self):
         CMakeDeps(self).generate()
@@ -130,19 +119,11 @@ class HorizonConan(ConanFile):
         variables = toolchain.variables
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
         variables["HORIZON_BUILD_ENGINE"] = bool(self.options.with_engine)
-        variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina)
+        variables["HORIZON_BUILD_OCARINA"] = self._build_ocarina
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
         variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
-        variables["HORIZON_BUILD_BASELINE_WINDOW_TEST"] = bool(self.options.with_baseline_window_test)
         variables["HORIZON_BUILD_OCARINA_TESTS"] = bool(self.options.with_ocarina_tests)
         variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
         variables["HORIZON_ENABLE_TRACY"] = bool(self.options.with_tracy)
-        variables["HORIZON_ENABLE_IMGUI_RENDER"] = bool(self.options.enable_imgui_render)
-        if bool(self.options.with_examples):
-            variables["HORIZON_IMGUI_BINDINGS_DIR"] = os.path.join(
-                self.dependencies["imgui"].package_folder,
-                "res",
-                "bindings",
-            ).replace("\\", "/")
         toolchain.generate()

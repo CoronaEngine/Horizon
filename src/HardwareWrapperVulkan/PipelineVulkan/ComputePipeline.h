@@ -1,63 +1,62 @@
-﻿#pragma once
+#pragma once
 
+#include <memory>
 #include <ktm/ktm.h>
 
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
+#include "PipelineSnapshot.h"
 
-struct ComputePipelineVulkan : public CommandRecordVulkan
+namespace horizon::detail {
+struct ComputePipelineVulkan
 {
-  public:
-    ComputePipelineVulkan();
-    ~ComputePipelineVulkan() override;
+    ~ComputePipelineVulkan();
 
-    ComputePipelineVulkan(std::string shaderCode, EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
-
-    // 新构造函数：接受已编译的 ShaderCodeCompiler，避免重复编译
-    ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler &compiler, const std::source_location &sourceLocation = std::source_location::current());
-
-    // 从 SPIR-V + Slang 反射构造
-    ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &sourceLocation = std::source_location::current());
-
-    // std::variant<HardwarePushConstant> operator[](const std::string& resourceName);
+    explicit ComputePipelineVulkan(const EmbeddedShader::ComputePipelineObject& shader);
+    explicit ComputePipelineVulkan(EmbeddedShader::ShaderCodeModule module);
 
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType);
+    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, PipelineBinding value,
+                           int32_t bindType, uint32_t slot);
+    void bindAuto(const EmbeddedShader::AutoBindEntry& entry);
 
-    ComputePipelineVulkan *operator()(uint16_t x, uint16_t y, uint16_t z);
-
-    ExecutorType getExecutorType() override
-    {
-        return CommandRecordVulkan::ExecutorType::Compute;
-    }
-
-    void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    RequiredBarriers getRequiredBarriers(HardwareExecutorVulkan &hardwareExecutor) override;
-
-  private:
+private:
+    friend class ::HardwareExecutor::Command;
     void createComputePipeline();
 
     VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
     VkPipeline pipeline{VK_NULL_HANDLE};
 
-    HardwarePushConstant pushConstant;
+    std::unique_ptr<uint8_t[]> pushConstant;
     EmbeddedShader::ShaderCodeModule shaderCode;
 
     // Per-pipeline UBO support
-    HardwarePushConstant tempUBO;
-    HardwareBuffer uboBuffer;
+    std::unique_ptr<uint8_t[]> tempUBO;
     uint32_t uboSize{0};
-    VkDescriptorPool uboDescriptorPool{VK_NULL_HANDLE};
     VkDescriptorSetLayout uboDescriptorSetLayout{VK_NULL_HANDLE};
-    VkDescriptorSet uboDescriptorSet{VK_NULL_HANDLE};
-    bool uboDescriptorDirty{true};
-    void createPerPipelineUBODescriptor();
-    void updateUBODescriptor();
+    PipelineBindings bindings;
+    UniformSnapshotPool uniformPool;
+};
+} // namespace horizon::detail
 
-    ktm::uvec3 groupCount = {0, 0, 0};
+using horizon::detail::ComputePipelineVulkan;
+
+struct HardwareExecutor::Command::Impl::Dispatch final : HardwareExecutor::Command::Impl, CommandRecordVulkan
+{
+    Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups);
+    Entry queueEntry(std::shared_ptr<Impl> owner) override { return RecordedCommand(*this, std::move(owner)); }
+    ExecutorType getExecutorType() override { return ExecutorType::Compute; }
+    void resolveResourceUses(ResourceAccessList& result) override;
+    void commitCommand(HardwareExecutorVulkan& executor) override;
+
+    std::shared_ptr<ComputePipelineVulkan> backend;
+    ktm::uvec3 groupCount;
+    std::vector<uint8_t> pushConstant;
+    std::vector<uint8_t> uniformBytes;
+    std::shared_ptr<BindingSnapshot> bindings;
+    std::shared_ptr<UniformSnapshot> uniform;
 };

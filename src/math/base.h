@@ -8,10 +8,12 @@
 #include "scalar_func.h"
 #include "dsl/api/operators.h"
 #include "dsl/core/type_trait.h"
+#include <utility>
 
 #define MAKE_VECTOR_OP(op)                                                           \
     template<typename T>                                                             \
-    requires ocarina::concepts::iterable<T>                                          \
+    requires ocarina::concepts::iterable<T> &&                                       \
+             requires(T &v) { v.push_back(std::move(v[0])); }                        \
     [[nodiscard]] T operator op(const T &lhs, const T &rhs) noexcept {               \
         OC_ASSERT((lhs.size() == rhs.size()) || lhs.size() == 1 || rhs.size() == 1); \
         T ret;                                                                       \

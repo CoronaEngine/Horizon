@@ -39,11 +39,6 @@ function(horizon_dev_bootstrap)
         "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/conan_toolchain.cmake")
     set(_horizon_build_environment
         "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
-    # Keep the optional window test's Conan dependencies during IDE reconfigure.
-    set(_horizon_bootstrap_targets)
-    if(HORIZON_BUILD_BASELINE_WINDOW_TEST)
-        list(APPEND _horizon_bootstrap_targets horizon-test-baseline-window)
-    endif()
     # An IDE preset can enable additional features without changing its family
     # or build directory. Preserve their Conan dependencies on every reload.
     set(_horizon_bootstrap_options)
@@ -71,7 +66,7 @@ function(horizon_dev_bootstrap)
         execute_process(
             COMMAND "${CMAKE_COMMAND}" -E env
                     --modify "PATH=path_list_prepend:${_horizon_python_dir}"
-                    "${_horizon_python}" "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap ${_horizon_bootstrap_targets}
+                    "${_horizon_python}" "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
                     ${_horizon_bootstrap_options}
@@ -154,7 +149,7 @@ function(horizon_dev_bootstrap)
         message(STATUS "Running Horizon dependency bootstrap...")
         execute_process(
             COMMAND "${_horizon_conda}" run --name "${HORIZON_CONDA_ENV}" --no-capture-output
-                    python "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap ${_horizon_bootstrap_targets}
+                    python "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
                     ${_horizon_bootstrap_options}

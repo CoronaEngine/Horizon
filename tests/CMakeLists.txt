@@ -38,7 +38,7 @@ list(APPEND _horizon_test_build_tool_path
 set_tests_properties(horizon.python.build_tools PROPERTIES
     ENVIRONMENT_MODIFICATION "${_horizon_test_build_tool_path}")
 
-if(HORIZON_BUILD_ENGINE AND HORIZON_USE_LEGACY_BACKEND)
+if(HORIZON_BUILD_ENGINE)
     add_subdirectory(legacy)
 endif()
 
@@ -56,7 +56,6 @@ add_test(
             -DHORIZON_BUILD_ENGINE=OFF
             -DHORIZON_BUILD_TESTS=OFF
             -DHORIZON_BUILD_EXAMPLES=OFF
-            -DHORIZON_BUILD_BASELINE_WINDOW_TEST=OFF
             -DHORIZON_BUILD_TOOLS=OFF
             -DHORIZON_BUILD_OCARINA=OFF
             -DHORIZON_BUILD_OCARINA_TESTS=OFF

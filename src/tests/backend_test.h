@@ -5,6 +5,16 @@
 #include "rhi/device.h"
 #include <iostream>
 
+namespace ocarina::test {
+struct RHIContextTestAccess {
+    static fs::path set_cache_directory(const fs::path &directory) {
+        auto &context = RHIContext::instance();
+        context.set_cache_directory(directory);
+        return context.cache_directory();
+    }
+};
+}// namespace ocarina::test
+
 inline const char *test_backend_name() noexcept {
     return "vulkan-compute";
 }

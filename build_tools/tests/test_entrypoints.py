@@ -16,6 +16,42 @@ from build_tools.paths import REPO_ROOT, conanfile_path
 
 
 class EntryPointTests(unittest.TestCase):
+    def test_raster_pairs_share_stage_outputs_and_track_only_their_inputs(self):
+        cmake, ninja = shutil.which("cmake"), shutil.which("ninja")
+        if not cmake or not ninja:
+            self.skipTest("CMake and Ninja required")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("shared.vert", "first.frag", "second.hlsl", "compute.slang"):
+                (root / name).touch()
+            (root / "consumer.h").write_text('#include SLANG(shared.vert)\n#include SLANG(compute.slang)\n')
+            module = (REPO_ROOT / "build_tools/cmake/HeliconShaderCompile.cmake").as_posix()
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 4.0)\nproject(PairedShaders NONE)\n'
+                'set(HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE "${CMAKE_COMMAND}")\n'
+                f'include("{module}")\n'
+                'add_library(consumer OBJECT consumer.h)\nset_target_properties(consumer PROPERTIES LINKER_LANGUAGE C)\n'
+                'helicon_compile_shaders(consumer OUTPUT_DIR generated RASTER_PAIRS\n'
+                '    first.hpp shared.vert first.frag\n    second.hpp shared.vert second.hlsl)\n')
+            build = root / "build"
+            subprocess.run([cmake, "-S", str(root), "-B", str(build), "-G", "Ninja",
+                            f"-DCMAKE_MAKE_PROGRAM={ninja}"], check=True, capture_output=True, timeout=30)
+
+            for target, expected_stages, expected_pairs, expected_standalone in (
+                    ("consumer_shaders", 3, 2, 1), ("generated/first.hpp", 2, 1, 0),
+                    ("generated/second.hpp", 2, 1, 0)):
+                with self.subTest(target=target):
+                    result = subprocess.run([ninja, "-C", str(build), "-t", "commands", target],
+                                            check=True, capture_output=True, text=True, timeout=30)
+                    commands = result.stdout.splitlines()
+                    self.assertEqual(sum(" -module-output " in line for line in commands), expected_stages)
+                    self.assertEqual(sum(" -raster-pair " in line for line in commands), expected_pairs)
+                    self.assertEqual(sum(" -l slang " in line and " -module-output " not in line
+                                         for line in commands), expected_standalone)
+                    self.assertTrue(any(" -l slang " in line and " -t vert " in line for line in commands))
+                    self.assertEqual(any(" -l glsl " in line for line in commands), target != "generated/second.hpp")
+                    self.assertEqual(any(" -l hlsl " in line for line in commands), target != "generated/first.hpp")
+
     def test_scripts_work_outside_the_repository(self):
         with tempfile.TemporaryDirectory() as temporary:
             for script in ("dev.py", "conan_cache.py"):
@@ -76,7 +112,6 @@ class EntryPointTests(unittest.TestCase):
                         f'set(CMAKE_MODULE_PATH "{root.as_posix()}")\n'
                         'set(HORIZON_DEV_CONFIGURATION Release CACHE STRING "")\n'
                         'set(HORIZON_DEV_TARGET_FAMILY examples CACHE STRING "")\n'
-                        'set(HORIZON_BUILD_BASELINE_WINDOW_TEST ON)\n'
                         + ''.join(f'set(HORIZON_BUILD_{feature.upper()} {"ON" if feature in features else "OFF"})\n'
                                   for feature in ("ocarina", "ocarina_tests", "tests"))
                         + f'set(_horizon_conda "{(root / "conda").as_posix()}")\n'
@@ -102,7 +137,6 @@ class EntryPointTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     command = (root / "command.txt").read_text(encoding="utf-8").split(";")
                     self.assertEqual(command[command.index("--target-family") + 1], "examples")
-                    self.assertIn("horizon-test-baseline-window", command)
                     self.assertEqual("--modify" in command, provider == "venv", command)
                     for feature, flag in (("ocarina", "--with-ocarina"),
                                           ("ocarina_tests", "--with-ocarina-tests"),

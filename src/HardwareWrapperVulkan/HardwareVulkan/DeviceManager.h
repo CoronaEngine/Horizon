@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <array>
+#include <atomic>
 #include <mutex>
 #include <set>
 #include <unordered_map>
@@ -28,6 +30,7 @@ class DeviceManager
         uint32_t queueFamilyIndex = -1;
         VkQueue vkQueue{VK_NULL_HANDLE};
         VkCommandPool commandPool{VK_NULL_HANDLE};
+        std::array<VkCommandBuffer, 3> commandBuffers{};
         VkCommandBuffer commandBuffer{VK_NULL_HANDLE};
         DeviceManager *deviceManager{nullptr};
     };
@@ -39,6 +42,19 @@ class DeviceManager
         VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties{};
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties{};
         VkPhysicalDeviceProperties2 supportedProperties{};
+        VkPhysicalDeviceMultiviewProperties multiviewProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES};
+        VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+        VkPhysicalDeviceMeshShaderPropertiesEXT meshShaderProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
+        bool computeDerivativeGroupQuads{};
+        bool rayTrace{};
+        PFN_vkCreateAccelerationStructureKHR createAS{};
+        PFN_vkDestroyAccelerationStructureKHR destroyAS{};
+        PFN_vkGetAccelerationStructureBuildSizesKHR buildSizes{};
+        PFN_vkGetAccelerationStructureDeviceAddressKHR addressAS{};
+        PFN_vkCmdBuildAccelerationStructuresKHR buildAS{};
+        PFN_vkCreateRayTracingPipelinesKHR createRayPipelines{};
+        PFN_vkGetRayTracingShaderGroupHandlesKHR rayGroupHandles{};
+        PFN_vkCmdTraceRaysKHR traceRays{};
         DeviceFeaturesChain featuresChain;
     };
 
@@ -63,7 +79,7 @@ class DeviceManager
     /// 同设备直接返回原 semaphore；跨设备从预导入缓存查表（初始化阶段已填充）。
     VkSemaphore getOrImportTimelineSemaphore(const QueueUtils &foreignQueue) const;
 
-    std::vector<QueueUtils> pickAvailableQueues(std::function<bool(const QueueUtils &)> predicate) const;
+    const QueueUtils* findPresentQueue(VkSurfaceKHR surface, uint32_t& graphicsFamily) const;
 
     VkPhysicalDevice getPhysicalDevice() const
     {
@@ -106,7 +122,6 @@ class DeviceManager
     VkDevice logicalDevice{VK_NULL_HANDLE};
     FeaturesUtils deviceFeaturesUtils;
 
-    std::atomic_uint16_t currentGraphicsQueueIndex{0};
     std::atomic_uint16_t currentComputeQueueIndex{0};
     std::atomic_uint16_t currentTransferQueueIndex{0};
 

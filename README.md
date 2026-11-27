@@ -111,17 +111,46 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 把 `examples` 换成 `core`、`engine`、`tools`、`ocarina` 或 `ocarina-tests`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
 
 热更新统一使用跨平台 CMake 后端，`horizon-hotfix` 及其基础测试属于 `core`，不依赖 Ocarina。
-普通 baseline 示例可在配置好的 `examples` 构建树中开启热更新：
+
+#### 第一次阅读渲染示例
+
+运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。在下表第一行的 `BaselineSlang` 构造函数中可以看到 Viking Room 的模型、纹理、相机和渲染目标的初始化，`run(seconds)` 中是每帧的矩阵更新、绘制和呈现。各 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
+
+| 场景和阅读重点 | EDSL 实现 | Slang 实现 | Slang Mesh 实现 | Slang RayTrace 实现 |
+| --- | --- | --- | --- | --- |
+| Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) | [example_baseline_mesh.cpp](examples/Baseline/Mesh/example_baseline_mesh.cpp) | [example_baseline_raytrace.cpp](examples/Baseline/RayTrace/example_baseline_raytrace.cpp) |
+| EDSL Feature · G-buffer 与计算着色 | [example_edsl_feature.cpp](examples/Feature/example_edsl_feature.cpp) | — | — | — |
+| Disney · 球体阵列与材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) | [example_disney_mesh.cpp](examples/Disney/Mesh/example_disney_mesh.cpp) | [example_disney_raytrace.cpp](examples/Disney/RayTrace/example_disney_raytrace.cpp) |
+| DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) | [example_drawstress_mesh.cpp](examples/DrawStress/Mesh/example_drawstress_mesh.cpp) | [example_drawstress_raytrace.cpp](examples/DrawStress/RayTrace/example_drawstress_raytrace.cpp) |
+
+运行 `HorizonExamples edsl_feature` 可查看 EDSL 如何调用外部着色器函数。片元入口调用 GLSL 函数计算立方体的表面颜色，将颜色和法线写入 G-buffer。计算入口逐像素读取这两张图像，调用 HLSL 函数计算光照并输出到窗口。[GLSL 辅助函数](examples/Feature/edsl_feature_geometry.glsl) · [HLSL 辅助函数](examples/Feature/edsl_feature_lighting.hlsl)
+
+每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。Disney 场景使用 [Disney/assets/env](examples/Disney/assets/env) 中的环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
+
+Disney 光栅示例在初始化时上传球体几何、110 份材质球参数和间接命令，每帧复用这些缓冲。DrawStress 光栅示例每帧将立方体的变换矩阵写入映射的参数缓冲，调用 `flushMapped()` 后将缓冲作为逐 draw 参数传给光栅管线。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+
+最后可以阅读 Tutorial 的原生 Vulkan 实现，对照 Vulkan 初始化、Viking Room 绘制和资源释放的顺序。Tutorial 的源码作为独立参考保留。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
+
+#### 用 Ocarina 追踪同一组场景
+
+构建 `HorizonExamples` 时会自动编译三个 Ocarina 示例及其 Vulkan Compute 后端。先从仓库根目录编译，再选择一个模式。运行光追需要支持 Vulkan 加速结构和 ray query 的 GPU。
 
 ```powershell
-cmake --preset examples-debug -DHORIZON_ENABLE_EXAMPLE_HOTFIX=ON
-python build_tools/dev.py build-fast HorizonExamples horizon-baseline-hotfix-patch --configuration Debug --target-family examples
+cmake --preset examples-release
+cmake --build --preset examples-release --target HorizonExamples
+$examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExamples.exe
+& $examples baseline_ocarina
 ```
 
-首次使用先运行 `python build_tools/dev.py configure --configuration Debug --target-family examples`。
-baseline 示例使用 H 触发重编译，F9 回退版本；模块路径由 CMake 清单提供。
-热更新运行时支持 Windows、Linux 和 macOS；完整 `examples` 目标仍受引擎依赖的平台支持范围限制，
-Linux 的窗口热更新由独立的 baseline-window 用例验证。
+| 模式 | 从入口阅读的内容 |
+| --- | --- |
+| `baseline_ocarina` | 载入 Viking Room，建立三角形加速结构，为每个像素发出相机射线。命中后插值 UV、采样模型纹理，与 Tutorial 显示相同的无光照材质。[源码](examples/Baseline/Ocarina/example_baseline_ocarina.cpp) |
+| `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。三个 Disney 模式都使用同一束方向光，并从两张 DDS 环境贴图采样漫反射和镜面光照。相机固定在材质球阵列前。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
+| `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。三个 DrawStress 示例各自的类头文件中都有 `dim` 常量，可将网格边长设为 2 到 40。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
+
+各模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
+
+窗口标题每帧显示模式、实时帧率和本帧实际耗时，例如 `baseline_slang | 125.0 FPS | 8.00 ms`。Baseline 和 DrawStress 的动画从首帧零秒开始。将主循环中的 `fixed_dt` 设为正数可指定动画每帧推进的秒数，帧率和耗时仍按实际时间计算。[主循环](examples/main.cpp)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
@@ -156,23 +185,6 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 ```
 
 重新配置 `ocarina-tests-debug` 后，`test-core-my-check` 会出现在 target 列表中；不需要修改 Conan。
-
-### Ocarina DSL 示例
-
-`examples/example_ocarina_dsl` 是一个完整的 `C++ EDSL -> Slang -> Vulkan Compute -> PNG`
-示例：它构建一个光线步进 kernel，保存后端生成的 Slang 源码，并把它调度到
-Vulkan 写入 storage texture，最后回读为 PNG。示例并入现有的 `HorizonExamples`
-模式体系，构建时同时启用 examples 和 Ocarina 即可：
-
-```powershell
-python build_tools/dev.py build HorizonExamples --configuration RelWithDebInfo --with-ocarina
-.\build\conan\examples\relwithdebinfo\bin\RelWithDebInfo\HorizonExamples.exe ocarina_dsl
-```
-
-详细说明见
-[`examples/example_ocarina_dsl/README.md`](examples/example_ocarina_dsl/README.md)，
-AST 构建到 Slang 生成的内部流程见
-[`docs/ocarina-dsl-example-flow.md`](docs/ocarina-dsl-example-flow.md)。
 
 ### Ocarina 运行时光追模式
 
@@ -229,8 +241,6 @@ python src/tests/run_ci_suite.py --build-dir build/conan/ocarina-tests/relwithde
 
 复现 macOS CI 时，给第二条命令加上 `--without-int64-atomics`。
 
-窗口热更新测试需要可用的 Vulkan 驱动和图形会话。Linux 和 macOS 还需要系统提供 GLFW、GLM、volk 和 Vulkan 开发包，可参考仓库的 `hotfix-examples.yml` 安装依赖。给该 CMake 配置加上 `-DHORIZON_BUILD_BASELINE_WINDOW_TEST=ON` 并重新构建后，`horizon.hotfix.baseline_window` 也会出现在 **All CTest**。旧版 HardwareWrapper 的测试在下文所示的 Legacy 构建配置中运行。
-
 ### 常见问题
 
 - **VS Code 中找不到标准头文件**：确认 `cmake.useVsDeveloperEnvironment` 已手动设置为 `always`，然后重新打开 VS Code 并重新 Configure。
@@ -239,28 +249,117 @@ python src/tests/run_ci_suite.py --build-dir build/conan/ocarina-tests/relwithde
 
 ---
 
-## 旧版 HardwareWrapper 的构建与验证
+## Horizon 渲染接口的构建与验证
 
-旧版接口位于 `include/Horizon_old.h`、`include/HardwareCommands_old.h`，实现位于
-`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。默认仍构建新版；使用独立构建目录启用旧版：
+消费端在 CMake 中链接 `Horizon`，在 C++ 中包含 `Horizon.h` 即可使用渲染接口和拷贝命令。引擎与示例均使用
+`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。
 
 ```powershell
-cmake --preset engine-debug -B build/legacy-debug -DHORIZON_USE_LEGACY_BACKEND=ON -DHORIZON_BUILD_TESTS=ON
-cmake --build build/legacy-debug --config Debug --target horizon-test-legacy
-ctest --test-dir build/legacy-debug -C Debug -L legacy --output-on-failure
+cmake --preset examples-relwithdebinfo
+cmake --build --preset examples-relwithdebinfo --target horizon-tests
+ctest --preset examples-relwithdebinfo
 ```
 
-消费端链接 `Horizon` 并包含 `Horizon_old.h`；目标会传递 `HORIZON_LEGACY_API=1`。
-不要手工定义该宏后链接新版库，也不要在同一个程序中混用两套头文件。
-当前 examples、Ocarina 和 hotfix 使用新版 API，不能与旧版开关同时启用。
-源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
+`engine` 和 `examples` 预设均启用 Horizon 测试。`examples` 的 `horizon-tests` 目标也构建
+`HorizonExamples`。用 `HorizonExamples <mode>` 选择示例，省略参数时运行 `baseline_slang`。关闭窗口即可退出。
+
+```powershell
+cmake --build --preset examples-relwithdebinfo --target HorizonExamples
+& ./build/conan/examples/relwithdebinfo/bin/RelWithDebInfo/HorizonExamples.exe drawstress_slang
+```
+
+手写着色器通过 `#include SLANG(...)`、`HLSL(...)` 或 `GLSL(...)` 引入。构建时生成的阶段对象自带 SPIR-V 和反射。计算管线写作 `ComputePipeline pipeline(compute_write_slang)`，光栅管线传入顶点和片元两个阶段对象。EDSL 在相同的构造位置传入 lambda。
+
+拷贝、绘制、计算和呈现都返回 `HardwareExecutor::Command`，可以直接用 `executor <<` 入队，也可以先保存，再按需要的顺序入队。同一条命令可以多次入队。调用计算管线时，命令会保存本次 dispatch 的工作组数量、着色器变体、参数，以及该变体使用的资源和图像视图。之后给管线重新赋值，可以为下一条命令选择其他资源。
+
+```cpp
+const auto dispatch = compute(groupsX, groupsY, groupsZ);
+executor << raster(vertexBuffer, indexBuffer, commands, count) << dispatch << display(image);
+executor.commit();
+```
+
+呈现命令保存图像和显示器，重放时读取图像当时的内容。原生窗口由调用方保持有效。窗口最小化时跳过该帧的呈现，前后的 GPU 命令仍按入队顺序执行。
+
+用 `baseline_mesh`、`disney_mesh` 或 `drawstress_mesh` 运行对应场景的手写 Slang mesh 版本。Baseline 分组读取 Viking Room 的索引和顶点。Disney 为 110 个材质球各提交一条间接记录。DrawStress 保留 40³ 个立方体和 64,000 条间接记录，每个工作组生成一个立方体，并通过 `SV_DrawIndex` 读取它的变换矩阵。三个模式都需要 mesh shader，Disney 和 DrawStress 还需要支持对应记录数的多次间接绘制。
+
+用 `MESH_PAIRS` 登记生成头、mesh 和 fragment 文件，在 C++ 中分别引入阶段头并构造 `MeshPipeline mesh(baseline_mesh_slang, baseline_frag_slang)`。调用 `executor << mesh(groups, count, depth)` 时，GPU 从 `Usage::RasterIndirect` 缓冲读取前 `count` 条记录。每条 `MeshPipeline<>::IndirectPacket` 的三个 `uint32_t` 指定第一阶段在 X、Y、Z 上的工作组数。需要 task shader 时，用 `TASK_MESH_PAIRS` 在 mesh 前登记 task 阶段，构造时使用相同顺序。
+
+用 `baseline_raytrace`、`disney_raytrace` 或 `drawstress_raytrace` 运行对应的光追场景。Baseline 在命中三角形时插值 UV 采样 Viking Room 纹理。Disney 的 110 个实例共享球体 BLAS，通过实例 ID 读取各自的材质。DrawStress 的 64,000 个立方体共享一个 BLAS，每帧更新实例变换并重建 TLAS。用 `RAY_TRACE_PIPELINES` 按生成头、raygen、miss、closest-hit 的顺序登记，在 C++ 中分别引入三个阶段头。首版支持索引三角形、一个三角形命中组和一级光线递归。
+
+`RayTracePipeline<>::AccelerationStructure` 的两个 `build` 重载分别接收顶点和索引 buffer，或接收 `RayTracePipeline<>::Instance` 数组。顶点坐标为 `float3`，可传入顶点内的字节偏移。实例保存 BLAS、仿射变换、24 位 ID 和 8 位掩码。构建命令保留其输入，重新构建会替换目标句柄。已绑定或已捕获的场景继续引用原来的结构。
+
+```cpp
+executor << geometry.build(vertices, indices);
+const std::array instances{RayTracePipeline<>::Instance{.geometry = geometry}};
+executor << scene.build(instances);
+pipeline.scene = scene;
+pipeline.output = color;
+executor << pipeline(width, height) << display(color);
+executor.commit();
+```
+
+Slang 的场景声明使用 `[[vk::binding(1, 3)]] RaytracingAccelerationStructure scene`，set 3 的 binding 0 仍可用于相机 UBO。发射尺寸、绑定资源和 shader 参数在调用 `pipeline(...)` 时捕获。跨 executor 使用新构建的场景时，先提交构建，再用消费方的 `wait(&producer)` 登记依赖。
+
+在目标中登记实际使用的顶点和片元着色器配对，即可通过具名字段绑定资源和输出。每组三个参数依次为生成头、顶点着色器、片元着色器。
+
+```cmake
+helicon_compile_shaders(HorizonExamples RASTER_PAIRS
+    Baseline/Slang/baseline.pipeline.hpp
+    Baseline/Slang/baseline_vert.slang
+    Baseline/Slang/baseline_frag.slang)
+```
+
+在使用处分别引入两个阶段，顺序可以互换。
+
+```cpp
+#include "Horizon.h"
+#include "Codegen/ControlFlows.h"
+#include SLANG(Baseline/Slang/baseline_vert.slang)
+#include SLANG(Baseline/Slang/baseline_frag.slang)
+```
+
+两个阶段都可见时，即可用 `RasterPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterPipeline<VS, FS>&`，由函数模板推导阶段类型。
+
+EDSL 和 Slang 共用 `RasterPipeline<>` 中的光栅类型。构造管线时可以在 VS、FS 后传入 `RasterPipeline<>::State`，其中的 `compare`、`blend` 和 `topology` 分别使用 `RasterPipeline<>::Compare`、`RasterPipeline<>::Blend` 和 `RasterPipeline<>::Topology`。每次绘制可单独指定 `RasterPipeline<>::ScissorRect`。
+
+`executor << pipeline(vertexBuffer, indexBuffer, commands, count)` 将命令缓冲中的前 `count` 条绘制记录入队。每次调用独立选择几何缓冲、参数和裁剪矩形。执行器按入队顺序绘制，将兼容的相邻绘制合并到同一 render pass。CPU 预先生成的间接命令可以与顶点和索引一起上传，并在后续帧中复用。
+
+```cpp
+HardwareExecutor executor;
+HardwareBuffer vertexBuffer, indexBuffer, commands;
+executor << vertexBuffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer,
+                                           vertices.data(), vertices.size(), sizeof(vertices[0]));
+executor << indexBuffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
+                                          indices.data(), indices.size(), sizeof(indices[0]));
+const RasterPipeline<>::IndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &packet, 1, sizeof(packet));
+
+executor << pipeline(vertexBuffer, indexBuffer, commands, 1);
+executor.commit();
+```
+
+`createDeviceLocal` 替换当前句柄指向的分配，并在返回前将源数据复制到暂存缓冲。返回的 `HardwareExecutor::Command` 持有暂存缓冲和目标缓冲，调用方用 `executor <<` 将上传排在首次使用之前。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
+
+调用光栅管线时，绘制命令会捕获当前管线、EDSL 变体、绑定和附件。需要深度测试时，创建 `HardwareImage::Usage::DepthImage` 图像，在 `parameters` 后传入，例如 `pipeline(vertices, indices, commands, count, parameters, depth)`。省略 `depth` 会关闭深度测试和写入。渲染尺寸默认从颜色或深度附件推导，也可以通过最后一个参数 `extent` 指定。
+
+首次绘制默认清除已绑定的附件。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 `scissor` 之后显式传入 `RasterPipeline<>::Pass{}`。两遍绘制可以传入同一张深度图，第二遍用 `RasterPipeline<>::Pass{.loadColor = true, .loadDepth = true}` 保留上一遍的颜色和深度。只清除颜色时写 `executor << pipeline({}, {}, {}, 0, {}, {}, {}, RasterPipeline<>::Pass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
+
+手写 Slang 通过参数索引描述符表时，给字段赋一个 `HardwareExecutor::Descriptor`。例如 Baseline 使用 `pipeline.vp.texIndex = texture_image.storeSampledDescriptor()`。公开枚举 `HardwareExecutor::Descriptor::Use` 包含 `Read`、`Write`、`ReadWrite` 和 `Sampled`。缓冲和存储图像分别用 `storeReadDescriptor()`、`storeWriteDescriptor()` 或 `storeReadWriteDescriptor()` 表达本次访问。图像的过滤采样用 `storeSampledDescriptor()`，按坐标读取存储图像用 `storeReadDescriptor()`。这些值可以保存和复制，持有对应的资源或图像视图。Slang 反射出的直接资源字段和固定槽位仍可写成 `pipeline.outputs[3] = buffer`，读写范围由 shader 声明决定。EDSL 从代理的赋值、读取和采样处记录用途。
+
+命令创建时保存绑定及其访问方式。EDSL 会按当前主机条件选择变体，GPU 条件会合并各条可能执行的路径。希望某个采样或导入函数的资源只在特定变体中登记时，把调用也写在对应的 `$IF` 分支里。同一张图在一条管线里同时用于采样和存储时，给两个 EDSL 代理绑定同一张图，分别用于 `sample()` 和下标访问。
+
+普通整数赋值会清除该字段先前的描述符绑定。手写 shader 通过整数选择槽位时，应先绑定所有可能访问的资源，并覆盖实际的读写权限，包括间接查表和导入函数中的访问。原子读改写使用 `storeReadWriteDescriptor()`。同步跟踪整个 buffer 或图像视图覆盖的 mip 和图层。光栅间接绘制的顶点、索引、命令、参数和附件由绘制命令捕获。
+
+执行器根据命令捕获的访问安排屏障。管线状态和绑定相同、只有着色器读取的相邻绘制仍可合并到同一物理 pass。涉及 shader 存储写入时会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。跨执行器的提交依赖仍由调用方显式登记。
+
+将旧写法 `a << b << cmd` 改为 `b << cmd` 即可保留原有的入队行为。如果 `b` 的工作依赖 `a` 的提交，先调用 `a.commit()`，再用 `b.wait(&a)` 让 `b` 的下一次提交等待 `a` 最近一次成功提交。调用 `b.wait()`、`b.wait(nullptr)` 或 `b.wait(&b)` 会阻塞 CPU，直到 `b` 已提交的工作完成。排队中的命令留到下一次 `commit()` 提交。
 
 旧代码原先未被 CMake 收集，两份公共头文件也被整体注释，因此默认构建成功并不能证明旧版可编译。
 恢复构建后，主要迁移点如下：
 
 | 层次 | 发现的问题 | 修复方式 |
 | --- | --- | --- |
-| 公共接口 | 旧文件名、缺少有效头文件保护和标准头文件 | 恢复 `_old.h` 声明，所有旧实现显式包含它们 |
+| 公共接口 | 旧文件名、缺少有效头文件保护和标准头文件 | 将渲染接口和拷贝命令合并到 `Horizon.h`，由实现显式包含 |
 | 资源池与日志 | 引用已移除的 Corona Kernel 路径 | 使用已有 `horizon::core::Storage` 和 Core/Quill 日志 |
 | 宿主内存 | 引用旧的对齐分配器 | 使用 C++ 对齐 `operator new/delete`，保存分配对齐值，先销毁导入缓冲区再释放内存 |
 | 着色器 | `getShaderCode` 已改为可变操作，SPIRV-Cross 反射已移除 | 适配当前 Helicon API，使用 Slang 产生的二进制和反射 |
@@ -271,21 +370,16 @@ ctest --test-dir build/legacy-debug -C Debug -L legacy --output-on-failure
 
 旧版仍采用“原子 ID → Storage 槽位 → Vulkan 资源”的引用计数模型。
 拷贝命令持有资源包装对象，executor 通过 timeline semaphore 保留资源到 GPU 完成。
-测试覆盖头文件独立包含、push constant 的复制/移动/槽位复用、无窗口 displayer、
+测试覆盖头文件独立包含、无窗口 displayer 的移动语义、
 临时缓冲区保活、整块/局部/同缓冲区拷贝、越界拒绝、图像 mip/数组层/偏移往返和子视图保活，
-以及当前 Slang、EDSL 和预编译 Slang 模块的计算管线入口。
+以及使用生成的 Slang 阶段和 EDSL 创建计算管线后的 GPU 写入与读回。
+光栅测试通过像素回读验证 GPU 生成的间接绘制命令和多 pass 的颜色、深度附件加载。
 CPU 测试不初始化 Vulkan；GPU 测试要求 Vulkan 1.4，无相应 loader/device 时明确返回 CTest 的 skip 状态。
 设备存在但初始化、编译或执行失败会报错，不会被当成跳过。
 
-**预编译着色器迁移：** 不再接受单独的 `std::vector<uint32_t>` 来隐式反射 SPIR-V。
-请传入当前编译器返回的 `EmbeddedShader::ShaderCodeModule`（含 SPIR-V 和反射）；
-`ComputePipeline<CS>` / `RasterizerPipeline<VS, FS>` 使用当前生成器的 `slangModule`。
-旧的仅包含 `spirv` 的生成头需要用当前 ShaderCompileScripts 重新生成。
-整个迁移不添加第三方库，也不恢复 SPIRV-Cross 或 Corona Kernel。
+**迁移手写着色器**　原先传入源码字符串或 `ShaderCodeModule` 的调用应改为引入着色器文件并传入阶段对象。已有工程需要用当前版本的 ShaderCompileScripts 重新生成着色器头。
 
-此开关用于维护旧 API，并不把新版功能全部移植回来。Linux 窗口 surface 创建仍是旧实现中的未完成分支；
-GPU 测试不覆盖窗口呈现、跨 GPU 外部内存、所有压缩格式或完整光栅化渲染。
-新版公共头和新版后端没有改动；共享 Helicon 仅增加按宏选择资源前置声明的兼容分支。
+Linux 窗口 surface 创建尚未实现。
 
 ## tracy用法
 
@@ -295,7 +389,7 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
 ->
 option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
-2、编译启动 example
+2、为需要分析的目标链接 `Tracy::TracyClient`，定义 `HORIZON_TRACY_ENABLED=1`，添加埋点后编译并启动该目标。
 
 3、打开tracy-profiler.exe 点Connect
 
@@ -304,36 +398,37 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
 ## Shader 资源使用与设计
 
-> 注：这是当前最终的设计方案，仍在持续调整中。
+### Vulkan 间接绘制的 shader 约定
 
-Horizon 的着色器资源绑定遵循一套统一约定，核心原则是**全面走 bindless，不再保留非 bindless 路径**。所有资源按数据的生命周期与共享粒度划分到不同的下发通道。
+Horizon 通过 `vkCmdDrawIndirect` 提交批次，顶点输入状态为空。手写 shader 自行声明所用字段、读取顶点，并决定各阶段之间传递什么。入口为 `main`。下面的字段名仅供对照，二进制接口由字节偏移、宽度和数组步长决定。
 
-### 数据下发通道
+Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，直接调用 `RasterPipelineObject::compile()` 也采用同一布局。顶点 lambda 可以写成 `[](Float3 position, Float2 uv)`，Helicon 按形参顺序从顶点记录读取属性。手写 shader 可参考 [手写 Slang 顶点着色器](examples/Baseline/Slang/baseline_vert.slang) 与[片元着色器](examples/Baseline/Slang/baseline_frag.slang)。
 
-- **Per-object 数据走 Push Constant。**
-  每个物体独有、且随 draw 变化的数据（如 model 矩阵、bindless 纹理索引等）直接放进 Push Constant，随 draw call 下发，避免频繁的 descriptor 更新。
+| 数据 | 字节偏移与字段 | 大小 |
+| --- | --- | --- |
+| 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 表内起点 `groupBase`、28 逻辑 pass 内起点 `drawBase`（均为 `uint32`） | 32 字节 |
+| 命令表元素（`RasterPipeline<>::IndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
+| 几何表元素 | 0 顶点地址、8 索引地址（均为 64 位设备地址），16 `strideWords`、20 `indexBytes`、24 `vertexCount`、28 保留（均为 `uint32`） | 32 字节 |
 
-- **Push Constant 塞不下时开 SSBO。**
-  当 per-object 数据超出 Push Constant 的大小限制时，将数据整体放入一个 SSBO，Push Constant 里只保留一个 **id / 索引**，shader 通过该 id 到 SSBO 中取出对应物体的数据。
-
-- **Per-pass 共享数据走 UBO + Push Descriptor。**
-  每个 pass 内部共享、不随单个物体变化的数据（如 view / projection 矩阵、光照参数等）放在 UBO 中，通过 **Push Descriptor** 下发，减少常规 descriptor set 的分配与绑定开销。
-
-- **纹理 / buffer / image 全部 bindless。**
-  所有纹理、storage buffer、storage image 均通过 bindless 表访问，shader 侧仅持有索引。已彻底移除非 bindless 的绑定路径。
+- **定位 draw**。每次调用光栅管线都从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一逻辑 pass 内跨调用连续编号。即使后端为同步资源而拆分 render pass，后续绘制也会加载已有附件并接着编号。零条命令和完全落在目标外的裁剪区域不占编号。
+- **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
+- **读取 draw 参数**。有逐 draw 参数时，使用 `executor << pipeline(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `HardwareBuffer::Usage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。绘制命令持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
+- **首实例**。每个 packet 的 `firstInstance` 指定起始实例编号。设备未启用 `drawIndirectFirstInstance` 时，生成 packet 的 CPU 或 GPU 代码必须将该字段设为零。
+- **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`disney_slang` 和 EDSL 的自动取数使用 15。`baseline_slang` 只在顶点阶段读取逐 draw 参数，片元阶段直接从共享 UBO 取得纹理索引。
+- **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
 
 ### Descriptor Set 约定
 
-Set 0–2 为 Horizon 保留的 bindless 集，普通 UBO 一律放在 set 3：
+Helicon 的光栅和计算 EDSL 都通过 bindless 描述符表访问纹理和 `Array<T>` 资源。每个阶段只生成一份绑定布局，使用 `getShaderCode(language)` 取得编译结果。计算 shader 的资源句柄写入 push constant，光栅 shader 的共享资源句柄写入 set 3 的 UBO。间接绘制的顶点、索引和逐 draw 参数通过上节的设备地址读取。
+
+需要生成离线 shader 缓存时，启用 `HORIZON_ENABLE_HARDCODE_SHADERS` 并运行带 `CABBAGE_ENGINE_DEBUG` 的构建。请重新生成已有的 EDSL 光栅 shader 缓存，以包含 `instanceIndex()` 的首实例偏移修正。
 
 | Set | 用途 |
 | --- | --- |
 | set 0 | bindless 纹理表（combined image sampler） |
 | set 1 | bindless storage buffer |
 | set 2 | bindless storage image |
-| set 3 | per-pass 共享 UBO（经 Push Descriptor 下发） |
-
-同一个 Push Constant 块在 vertex / fragment 等各阶段之间共享，布局必须严格一致。
+| set 3 | per-pass 共享 UBO |
 
 ### REBLUR GPU 时间戳诊断
 

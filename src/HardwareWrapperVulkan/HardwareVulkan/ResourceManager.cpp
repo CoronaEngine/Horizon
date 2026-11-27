@@ -1,7 +1,11 @@
-﻿#include "ResourceManager.h"
+#include "ResourceAccess.h"
+#include "ResourceManager.h"
 
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+
+#include <algorithm>
+#include <numeric>
+#include <utility>
 
 #define VK_NO_PROTOTYPES
 #define VMA_IMPLEMENTATION
@@ -68,7 +72,14 @@ void ResourceManager::cleanUpResourceManager()
             vkDestroyDescriptorSetLayout(logicalDevice, bindlessDesc.descriptorSetLayout, nullptr);
             bindlessDesc.descriptorSetLayout = VK_NULL_HANDLE;
         }
+        bindlessDesc.descriptorSet = VK_NULL_HANDLE;
+        bindlessDesc.capacity = bindlessDesc.nextIndex = 0;
+        bindlessDesc.slots.clear();
+        bindlessDesc.freeIndices.clear();
+        bindlessDesc.retiredIndices.clear();
     }
+
+    descriptorWaits.clear();
 
     // 清理纹理采样器
     if (textureSampler != VK_NULL_HANDLE)
@@ -76,6 +87,8 @@ void ResourceManager::cleanUpResourceManager()
         vkDestroySampler(logicalDevice, textureSampler, nullptr);
         textureSampler = VK_NULL_HANDLE;
     }
+
+    if (linearSampler) vkDestroySampler(logicalDevice, std::exchange(linearSampler, VK_NULL_HANDLE), nullptr);
 
     // 清理外部内存池（必须在 VMA allocator 之前销毁）
     if (exportBufferPool != VK_NULL_HANDLE)
@@ -188,6 +201,11 @@ void ResourceManager::createTextureSampler()
     samplerInfo.maxLod = static_cast<float>(5.0);
 
     coronaHardwareCheck(vkCreateSampler(device->getLogicalDevice(), &samplerInfo, nullptr, &textureSampler));
+    samplerInfo.magFilter = samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+    samplerInfo.anisotropyEnable = device->getFeaturesUtils().featuresChain.getChainHead()->features.samplerAnisotropy;
+    coronaHardwareCheck(vkCreateSampler(device->getLogicalDevice(), &samplerInfo, nullptr, &linearSampler));
 }
 
 void ResourceManager::createBindlessDescriptorSet()
@@ -277,6 +295,11 @@ void ResourceManager::createBindlessDescriptorSet()
     {
         const uint32_t maxCount = maxResourceCounts[i];
         const VkDescriptorType descriptorType = configs[i].type;
+        auto &table = bindlessDescriptors[i];
+        table.capacity = table.nextIndex = maxCount;
+        table.slots.assign(maxCount, BindlessDescriptorSet::Slot::Free);
+        table.freeIndices.reserve(maxCount);
+        table.retiredIndices.reserve(maxCount);
 
         // 创建描述符集布局
         VkDescriptorSetLayoutBinding binding{};
@@ -328,6 +351,14 @@ void ResourceManager::createBindlessDescriptorSet()
 
         coronaHardwareCheck(vkAllocateDescriptorSets(logicalDevice, &allocInfo, &bindlessDescriptors[i].descriptorSet));
     }
+    auto addQueues = [this](const auto &queues) {
+        for (const auto &queue : queues)
+            if (queue.timelineSemaphore != VK_NULL_HANDLE)
+                descriptorWaits.push_back({queue.timelineSemaphore, 0});
+    };
+    addQueues(device->graphicsQueues);
+    addQueues(device->computeQueues);
+    addQueues(device->transferQueues);
 }
 
 void ResourceManager::createExternalBufferMemoryPool()
@@ -430,7 +461,7 @@ ResourceManager::ImageHardwareWrap ResourceManager::createImage(ktm::uvec2 image
                                                                 VkImageUsageFlags imageUsage,
                                                                 uint32_t arrayLayers,
                                                                 uint32_t mipLevels,
-                                                                VkImageTiling tiling)
+                                                                VkImageTiling tiling, bool cube)
 {
     ImageHardwareWrap resultImage{};
     resultImage.device = device;
@@ -469,6 +500,8 @@ ResourceManager::ImageHardwareWrap ResourceManager::createImage(ktm::uvec2 image
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+    resultImage.cube = cube;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.extent = {imageSize.x, imageSize.y, 1};
     imageInfo.mipLevels = mipLevels;
@@ -508,6 +541,8 @@ ResourceManager::ImageHardwareWrap ResourceManager::createImage(ktm::uvec2 image
     resultImage.allocationOwner->allocator = vmaAllocator;
     resultImage.allocationOwner->image = resultImage.imageHandle;
     resultImage.allocationOwner->allocation = resultImage.imageAlloc;
+    resultImage.allocationOwner->mipLevels = mipLevels;
+    resultImage.allocationOwner->layouts.assign(size_t(mipLevels) * arrayLayers, VK_IMAGE_LAYOUT_UNDEFINED);
 
     // 创建图像视图
     resultImage.imageView = createImageView(resultImage);
@@ -609,37 +644,40 @@ VkImageView ResourceManager::createImageView(ImageHardwareWrap &image, uint32_t 
 
     if (is_full_view)
     {
-        viewInfo.subresourceRange.baseMipLevel = 0;
+        if (image.cube) viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        viewInfo.subresourceRange.baseMipLevel = image.baseMipLevel;
         viewInfo.subresourceRange.levelCount = image.mipLevels;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.baseArrayLayer = image.baseArrayLayer;
         viewInfo.subresourceRange.layerCount = image.arrayLayers;
     }
     else if (is_layer_view)
     {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.baseMipLevel = image.baseMipLevel;
         viewInfo.subresourceRange.levelCount = image.mipLevels;
-        viewInfo.subresourceRange.baseArrayLayer = layer;
+        viewInfo.subresourceRange.baseArrayLayer = image.baseArrayLayer + layer;
         viewInfo.subresourceRange.layerCount = 1;
     }
     else if (is_layer_mip_view)
     {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.subresourceRange.baseMipLevel = mipLevel;
+        viewInfo.subresourceRange.baseMipLevel = image.baseMipLevel + mipLevel;
         viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = layer;
+        viewInfo.subresourceRange.baseArrayLayer = image.baseArrayLayer + layer;
         viewInfo.subresourceRange.layerCount = 1;
     }
     else
     {
-        // 无效组合
-        return VK_NULL_HANDLE;
+        // One framebuffer mip across the layers of this wrapper.
+        viewInfo.subresourceRange.baseMipLevel = image.baseMipLevel + mipLevel;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = image.baseArrayLayer;
+        viewInfo.subresourceRange.layerCount = image.arrayLayers;
     }
 
     coronaHardwareCheck(vkCreateImageView(device->getLogicalDevice(), &viewInfo, nullptr, &imageView));
     if (image.allocationOwner)
     {
-        std::lock_guard lock(image.allocationOwner->viewsMutex);
         image.allocationOwner->views.push_back(imageView);
     }
     image.allSubViews[cacheKey] = imageView;
@@ -648,6 +686,9 @@ VkImageView ResourceManager::createImageView(ImageHardwareWrap &image, uint32_t 
 
 void ResourceManager::destroyImage(ImageHardwareWrap &image)
 {
+    const uint32_t binding = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? storageImageBinding : textureBinding;
+    retireDescriptorIndex(binding, image.bindlessIndex);
+    retireDescriptorIndex(textureBinding, image.sampledIndex);
     image.allSubViews.clear();
     image.imageView = VK_NULL_HANDLE;
     image.imageHandle = VK_NULL_HANDLE;
@@ -660,7 +701,8 @@ ResourceManager::BufferHardwareWrap ResourceManager::createBuffer(uint32_t eleme
                                                                   uint32_t elementSize,
                                                                   VkBufferUsageFlags usage,
                                                                   bool hostVisibleMapped,
-                                                                  bool useDedicated)
+                                                                  bool useDedicated,
+                                                                  bool privateUpload)
 {
     BufferHardwareWrap resultBuffer{};
     resultBuffer.device = device;
@@ -685,7 +727,8 @@ ResourceManager::BufferHardwareWrap ResourceManager::createBuffer(uint32_t eleme
 
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = totalSize;
+    // A packed uint16 index stream may end halfway through a shader word.
+    bufferInfo.size = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? (totalSize + 3) & ~uint64_t(3) : totalSize;
     bufferInfo.usage = usage;
 
     // 配置队列族共享模式
@@ -713,11 +756,24 @@ ResourceManager::BufferHardwareWrap ResourceManager::createBuffer(uint32_t eleme
     bufferInfo.pNext = &externalMemoryInfo;
 
     VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.usage = hostVisibleMapped ? VMA_MEMORY_USAGE_AUTO : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
     if (hostVisibleMapped)
     {
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    }
+
+    if (privateUpload)
+    {
+        // Exportable Win32 buffers can exclude the CPU-visible VRAM heap.
+        // Let VMA suballocate the private upload within budget, including on UMA.
+        auto privateInfo = bufferInfo;
+        privateInfo.pNext = nullptr;
+        auto mapped = allocInfo;
+        mapped.flags |= VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+        if (vmaCreateBuffer(vmaAllocator, &privateInfo, &mapped, &resultBuffer.bufferHandle,
+                            &resultBuffer.bufferAlloc, &resultBuffer.bufferAllocInfo) == VK_SUCCESS)
+            return resultBuffer;
     }
 
     if (useDedicated)
@@ -895,6 +951,7 @@ void ResourceManager::destroyBuffer(BufferHardwareWrap &buffer)
         buffer.bufferAlloc = VK_NULL_HANDLE;
         buffer.elementCount = 0;
     }
+    retireDescriptorIndex(storageBufferBinding, buffer.bindlessIndex);
 }
 
 ResourceManager::ExternalMemoryHandle ResourceManager::exportBufferMemory(BufferHardwareWrap &sourceBuffer)
@@ -1155,43 +1212,149 @@ ResourceManager::BufferHardwareWrap ResourceManager::importHostBuffer(void *host
     return bufferWrap;
 }
 
-int32_t ResourceManager::storeDescriptor(horizon::core::Storage<ResourceManager::ImageHardwareWrap>::WriteHandle &image)
+uint32_t ResourceManager::allocateDescriptorIndex(uint32_t binding)
 {
-    if (image->bindlessIndex < 0)
+    reclaimDescriptorIndices();
+    auto &table = bindlessDescriptors[binding];
+    using Slot = BindlessDescriptorSet::Slot;
+    while (!table.freeIndices.empty())
     {
-        image->bindlessIndex = globalImageStorages.seq_id(image);
+        const uint32_t index = table.freeIndices.back();
+        table.freeIndices.pop_back();
+        if (table.slots[index] == Slot::Free)
+        {
+            table.slots[index] = Slot::Automatic;
+            return index;
+        }
     }
-    storeDescriptorAt(image, static_cast<uint32_t>(image->bindlessIndex));
-
-    return image->bindlessIndex;
+    // Allocate from the high end; legacy explicit bindings normally use low slots.
+    // The state check also handles fixed bindings reserved before reaching a slot.
+    while (table.nextIndex > 0)
+    {
+        const uint32_t index = --table.nextIndex;
+        if (table.slots[index] == Slot::Free)
+        {
+            table.slots[index] = Slot::Automatic;
+            return index;
+        }
+    }
+    throw std::runtime_error("Legacy bindless descriptor table exhausted (binding " + std::to_string(binding) + ")");
 }
 
-int32_t ResourceManager::storeDescriptor(horizon::core::Storage<ResourceManager::BufferHardwareWrap>::WriteHandle &buffer)
+void ResourceManager::reserveDescriptorIndex(uint32_t binding, uint32_t index, int32_t automaticIndex)
 {
-    if (buffer->bindlessIndex < 0)
-    {
-        buffer->bindlessIndex = globalBufferStorages.seq_id(buffer);
-    }
-    storeDescriptorAt(buffer, static_cast<uint32_t>(buffer->bindlessIndex));
-
-    return buffer->bindlessIndex;
+    auto &table = bindlessDescriptors[binding];
+    if (index >= table.capacity)
+        throw std::out_of_range("Legacy descriptor index exceeds table capacity");
+    using Slot = BindlessDescriptorSet::Slot;
+    auto &slot = table.slots[index];
+    if (automaticIndex >= 0 && index == static_cast<uint32_t>(automaticIndex) && slot == Slot::Automatic)
+        return;
+    if (slot == Slot::Automatic || slot == Slot::Retired)
+        throw std::runtime_error("Legacy fixed descriptor binding conflicts with an automatic descriptor");
+    slot = Slot::Fixed;
 }
 
-bool ResourceManager::storeDescriptorAt(horizon::core::Storage<ResourceManager::ImageHardwareWrap>::WriteHandle &image, uint32_t descriptorIndex)
+void ResourceManager::retireDescriptorIndex(uint32_t binding, int32_t &index)
+{
+    if (index < 0) return;
+    auto &table = bindlessDescriptors[binding];
+    const uint32_t retired = static_cast<uint32_t>(std::exchange(index, -1));
+    table.slots[retired] = BindlessDescriptorSet::Slot::Retired;
+    table.retiredIndices.push_back(retired);
+    // Shared image allocations can outlive a subview. Its descriptor must not be
+    // overwritten while a submitted shader can still address it.
+    auto capture = [this](const auto &queues) {
+        for (const auto &queue : queues)
+        {
+            if (!queue.timelineValue) continue;
+            for (auto &wait : descriptorWaits)
+                if (wait.semaphore == queue.timelineSemaphore)
+                    wait.value = std::max(wait.value, queue.timelineValue->load(std::memory_order_acquire));
+        }
+    };
+    capture(device->graphicsQueues);
+    capture(device->computeQueues);
+    capture(device->transferQueues);
+}
+
+void ResourceManager::reclaimDescriptorIndices()
+{
+    bool pending = false;
+    for (const auto &table : bindlessDescriptors)
+        pending |= !table.retiredIndices.empty();
+    if (!pending) return;
+    for (const auto &wait : descriptorWaits)
+    {
+        if (!wait.value) continue;
+        uint64_t completed = 0;
+        coronaHardwareCheck(vkGetSemaphoreCounterValue(device->getLogicalDevice(), wait.semaphore, &completed));
+        if (completed < wait.value) return;
+    }
+    for (auto &table : bindlessDescriptors)
+    {
+        for (uint32_t index : table.retiredIndices)
+        {
+            table.slots[index] = BindlessDescriptorSet::Slot::Free;
+            table.freeIndices.push_back(index);
+        }
+        table.retiredIndices.clear();
+    }
+    for (auto &wait : descriptorWaits) wait.value = 0;
+}
+
+int32_t ResourceManager::storeDescriptor(ImageHardwareWrap &image)
+{
+    if (image.bindlessIndex >= 0) return image.bindlessIndex;
+    const uint32_t binding = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? storageImageBinding : textureBinding;
+    image.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(binding));
+    if (!storeDescriptorAt(image, static_cast<uint32_t>(image.bindlessIndex)))
+        throw std::runtime_error("Cannot store image descriptor without an initialized device");
+
+    return image.bindlessIndex;
+}
+
+int32_t ResourceManager::storeDescriptor(BufferHardwareWrap &buffer)
+{
+    if (buffer.bindlessIndex >= 0) return buffer.bindlessIndex;
+    if (!(buffer.bufferUsage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
+        throw std::invalid_argument("A storage buffer descriptor requires storage buffer usage");
+    buffer.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(storageBufferBinding));
+    if (!storeDescriptorAt(buffer, static_cast<uint32_t>(buffer.bindlessIndex)))
+        throw std::runtime_error("Cannot store buffer descriptor without an initialized device");
+
+    return buffer.bindlessIndex;
+}
+
+int32_t ResourceManager::storeSampledDescriptor(ImageHardwareWrap& image)
+{
+    if (!(image.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT)) throw std::invalid_argument("Image is not sampleable");
+    if (!(image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) return storeDescriptor(image);
+    if (image.sampledIndex >= 0) return image.sampledIndex;
+    image.sampledIndex = static_cast<int32_t>(allocateDescriptorIndex(textureBinding));
+    if (!storeDescriptorAt(image, static_cast<uint32_t>(image.sampledIndex), true))
+        throw std::runtime_error("Could not store sampled image descriptor");
+    return image.sampledIndex;
+}
+
+bool ResourceManager::storeDescriptorAt(ImageHardwareWrap &image, uint32_t descriptorIndex, bool sampled)
 {
     if (!device || device->getLogicalDevice() == VK_NULL_HANDLE)
     {
         return false;
     }
 
-    VkDescriptorType descriptorType = (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
+    VkDescriptorType descriptorType = !sampled && (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
                                           ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                           : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
+    const uint32_t binding = descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ? storageImageBinding : textureBinding;
+    reserveDescriptorIndex(binding, descriptorIndex, sampled ? image.sampledIndex : image.bindlessIndex);
+
     VkDescriptorImageInfo imageInfo{};
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageInfo.imageView = image->imageView;
-    imageInfo.sampler = textureSampler;
+    imageInfo.imageView = image.imageView;
+    imageInfo.sampler = image.linearFiltering ? linearSampler : textureSampler;
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1215,15 +1378,17 @@ bool ResourceManager::storeDescriptorAt(horizon::core::Storage<ResourceManager::
     return true;
 }
 
-bool ResourceManager::storeDescriptorAt(horizon::core::Storage<ResourceManager::BufferHardwareWrap>::WriteHandle &buffer, uint32_t descriptorIndex)
+bool ResourceManager::storeDescriptorAt(BufferHardwareWrap &buffer, uint32_t descriptorIndex)
 {
     if (!device || device->getLogicalDevice() == VK_NULL_HANDLE)
     {
         return false;
     }
 
+    reserveDescriptorIndex(storageBufferBinding, descriptorIndex, buffer.bindlessIndex);
+
     VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = buffer->bufferHandle;
+    bufferInfo.buffer = buffer.bufferHandle;
     bufferInfo.offset = 0;
     bufferInfo.range = VK_WHOLE_SIZE;
 
@@ -1251,53 +1416,6 @@ ResourceManager &ResourceManager::copyBuffer(VkCommandBuffer &commandBuffer,
         vkCmdCopyBuffer(commandBuffer, srcBuffer.bufferHandle, dstBuffer.bufferHandle, 1, &copyRegion);
     }
 
-    return *this;
-}
-
-ResourceManager &ResourceManager::copyImage(VkCommandBuffer &commandBuffer,
-                                            ImageHardwareWrap &source,
-                                            ImageHardwareWrap &destination,
-                                            uint32_t srcLayer,
-                                            uint32_t dstLayer,
-                                            uint32_t srcMip,
-                                            uint32_t dstMip)
-{
-    if (source.imageFormat == destination.imageFormat &&
-        srcLayer < source.arrayLayers &&
-        dstLayer < destination.arrayLayers &&
-        srcMip < source.mipLevels &&
-        dstMip < destination.mipLevels)
-    {
-        const uint32_t srcWidth = std::max(1u, source.imageSize.x >> srcMip);
-        const uint32_t srcHeight = std::max(1u, source.imageSize.y >> srcMip);
-        const uint32_t dstWidth = std::max(1u, destination.imageSize.x >> dstMip);
-        const uint32_t dstHeight = std::max(1u, destination.imageSize.y >> dstMip);
-    
-        VkImageCopy copyRegion{};
-        copyRegion.srcSubresource.aspectMask = source.aspectMask;
-        //copyRegion.srcSubresource.layerCount = source.arrayLayers;
-        copyRegion.srcSubresource.mipLevel = srcMip;
-        copyRegion.srcSubresource.baseArrayLayer = srcLayer;
-        copyRegion.srcSubresource.layerCount = 1;
-        copyRegion.dstSubresource.aspectMask = destination.aspectMask;
-        //copyRegion.dstSubresource.layerCount = destination.arrayLayers;
-        //copyRegion.extent.width = std::min(source.imageSize.x, destination.imageSize.x);
-        //copyRegion.extent.height = std::min(source.imageSize.y, destination.imageSize.y);
-        copyRegion.dstSubresource.mipLevel = dstMip;
-        copyRegion.dstSubresource.baseArrayLayer = dstLayer;
-        copyRegion.dstSubresource.layerCount = 1;
-        copyRegion.extent.width = std::min(srcWidth, dstWidth);
-        copyRegion.extent.height = std::min(srcHeight, dstHeight);
-        copyRegion.extent.depth = 1;
-
-        vkCmdCopyImage(commandBuffer,
-                       source.imageHandle,
-                       source.imageLayout,
-                       destination.imageHandle,
-                       destination.imageLayout,
-                       1,
-                       &copyRegion);
-    }
     return *this;
 }
 
@@ -1354,8 +1472,8 @@ ResourceManager &ResourceManager::copyBufferToImage(VkCommandBuffer &commandBuff
     region.bufferRowLength = 0;
     region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = image.aspectMask;
-    region.imageSubresource.mipLevel = mipLevel; // 指定 mip level
-    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.mipLevel = image.baseMipLevel + mipLevel;
+    region.imageSubresource.baseArrayLayer = image.baseArrayLayer;
     region.imageSubresource.layerCount = layerCount;
     region.imageOffset = {0, 0, 0};
     region.imageExtent = {mipWidth, mipHeight, 1};
@@ -1395,86 +1513,44 @@ ResourceManager &ResourceManager::copyImageToBuffer(VkCommandBuffer &commandBuff
     return *this;
 }
 
-ResourceManager &ResourceManager::blitImage(VkCommandBuffer &commandBuffer,
-                                            ImageHardwareWrap &srcImage,
-                                            ImageHardwareWrap &dstImage)
-{
-    VkImageBlit blitRegion{};
-    blitRegion.srcSubresource.aspectMask = srcImage.aspectMask;
-    blitRegion.srcSubresource.layerCount = 1;
-    blitRegion.srcOffsets[1] = {static_cast<int32_t>(srcImage.imageSize.x),
-                                static_cast<int32_t>(srcImage.imageSize.y), 1};
-    blitRegion.dstSubresource.aspectMask = dstImage.aspectMask;
-    blitRegion.dstSubresource.layerCount = 1;
-    blitRegion.dstOffsets[1] = {static_cast<int32_t>(dstImage.imageSize.x),
-                                static_cast<int32_t>(dstImage.imageSize.y), 1};
-
-    vkCmdBlitImage(commandBuffer,
-                   srcImage.imageHandle,
-                   srcImage.imageLayout,
-                   dstImage.imageHandle,
-                   dstImage.imageLayout,
-                   1,
-                   &blitRegion,
-                   VK_FILTER_LINEAR);
-
-    return *this;
-}
-
 void ResourceManager::copyBufferToHost(BufferHardwareWrap &buffer, void *cpuData, uint64_t size)
 {
     if (buffer.bufferAllocInfo.pMappedData != nullptr)
     {
+        coronaHardwareCheck(vmaInvalidateAllocation(vmaAllocator, buffer.bufferAlloc, 0, size));
         std::memcpy(cpuData, buffer.bufferAllocInfo.pMappedData, size);
     }
 }
 
 // Todo: 有待优化
-void ResourceManager::transitionImageLayout(VkCommandBuffer &commandBuffer,
-                                            ImageHardwareWrap &image,
-                                            VkImageLayout newLayout,
-                                            VkPipelineStageFlags2 dstStageMask,
-                                            VkAccessFlags2 dstAccessMask)
+void ResourceManager::transitionImageLayout(VkCommandBuffer& commandBuffer,
+    ImageHardwareWrap& image, VkImageLayout newLayout,
+    VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask)
 {
-    std::vector<VkMemoryBarrier2> memoryBarriers;
-    std::vector<VkBufferMemoryBarrier2> bufferBarriers;
-    std::vector<VkImageMemoryBarrier2> imageBarriers;
-
-    VkImageMemoryBarrier2 imageBarrier;
-    imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    imageBarrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-    imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.image = image.imageHandle;
-    imageBarrier.dstStageMask = dstStageMask;
-    imageBarrier.dstAccessMask = dstAccessMask;
-    imageBarrier.oldLayout = image.imageLayout;
-    imageBarrier.newLayout = newLayout;
-    imageBarrier.subresourceRange.aspectMask = image.aspectMask;
-    imageBarrier.subresourceRange.baseMipLevel = 0;
-    //imageBarrier.subresourceRange.levelCount = 1;
-    imageBarrier.subresourceRange.levelCount = std::max(1u, image.mipLevels);
-    imageBarrier.subresourceRange.baseArrayLayer = 0;
-    //imageBarrier.subresourceRange.layerCount = 1;
-    imageBarrier.subresourceRange.layerCount = std::max(1u, image.arrayLayers);
-    imageBarrier.pNext = nullptr;
-
-    image.imageLayout = imageBarrier.newLayout;
-
-    imageBarriers.push_back(imageBarrier);
-
-    VkDependencyInfo dependencyInfo{};
-    dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependencyInfo.memoryBarrierCount = static_cast<uint32_t>(memoryBarriers.size());
-    dependencyInfo.pMemoryBarriers = memoryBarriers.data();
-    dependencyInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
-    dependencyInfo.pBufferMemoryBarriers = bufferBarriers.data();
-    dependencyInfo.imageMemoryBarrierCount = static_cast<uint32_t>(imageBarriers.size());
-    dependencyInfo.pImageMemoryBarriers = imageBarriers.data();
-    dependencyInfo.pNext = nullptr;
-
-    vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
+    std::vector<VkImageMemoryBarrier2> barriers;
+    const auto range = imageViewRange(image);
+    for (uint32_t layer = range.baseArrayLayer; layer < range.baseArrayLayer + range.layerCount; ++layer)
+        for (uint32_t mip = range.baseMipLevel; mip < range.baseMipLevel + range.levelCount; ++mip)
+        {
+            VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            barrier.dstStageMask = dstStageMask;
+            barrier.dstAccessMask = dstAccessMask;
+            barrier.oldLayout = imageSubresourceLayout(image, mip, layer);
+            if (barrier.oldLayout == newLayout) continue;
+            barrier.newLayout = newLayout;
+            barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = image.imageHandle;
+            barrier.subresourceRange = {range.aspectMask, mip, 1, layer, 1};
+            barriers.push_back(barrier);
+        }
+    setImageSubresourceLayout(image, range, newLayout);
+    if (barriers.empty()) return;
+    VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dependency.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+    dependency.pImageMemoryBarriers = barriers.data();
+    vkCmdPipelineBarrier2(commandBuffer, &dependency);
 }
 
 VkShaderModule ResourceManager::createShaderModule(const std::vector<uint32_t> &code)
@@ -1488,4 +1564,15 @@ VkShaderModule ResourceManager::createShaderModule(const std::vector<uint32_t> &
     coronaHardwareCheck(vkCreateShaderModule(device->getLogicalDevice(), &createInfo, nullptr, &shaderModule));
 
     return shaderModule;
+}
+
+void ResourceManager::writeMapped(BufferHardwareWrap& buffer, const void* data, size_t bytes)
+{
+    std::memcpy(buffer.bufferAllocInfo.pMappedData, data, bytes);
+    flushMapped(buffer, bytes);
+}
+
+void ResourceManager::flushMapped(BufferHardwareWrap& buffer, size_t bytes)
+{
+    if (buffer.bufferAlloc) coronaHardwareCheck(vmaFlushAllocation(vmaAllocator, buffer.bufferAlloc, 0, bytes));
 }

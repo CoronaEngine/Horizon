@@ -1,222 +1,95 @@
-#include "example_baseline/example_baseline.h"
-#include "example_edsl/example_edsl.h"
-#include "example_glsl/example_glsl.h"
-#include "example_ibl/example_ibl.h"
-#include "example_drawstress/example_drawstress.h"
-#include "example_edsl_ibl/example_edsl_ibl.h"
-#include "example_raymarch/example_raymarch.h"
-#include "example_bump/example_bump.h"
-#include "example_deferred/example_deferred.h"
-#include "example_sponza/example_sponza.h"
-#include "example_shadowmaps/example_shadowmaps.h"
-#include "example_edsl_shadowmaps/example_edsl_shadowmaps.h"
-#include "example_shadowvolumes/example_shadowvolumes.h"
-#include "example_assao/example_assao.h"
-#include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
-#include "example_sky/example_sky.h"
-#include "example_ssr/example_ssr.h"
-#include "example_edsl_ssr/example_edsl_ssr.h"
-#include "example_edsl_sky/example_edsl_sky.h"
-#include "example_gpudrivenrendering/example_gpudrivenrendering.h"
-#include "example_disney_pbr/example_disney_pbr.h"
-#include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
-#include "example_rsm/example_rsm.h"
-#include "example_edsl_rsm/example_edsl_rsm.h"
-#include "example_edsl_sponza/example_edsl_sponza.h"
+#include "ExampleBase.h"
+#include "Baseline/EDSL/BaselineEdsl.h"
+#include "Baseline/Mesh/BaselineMesh.h"
+#include "Baseline/RayTrace/BaselineRayTrace.h"
+#include "Baseline/Ocarina/BaselineOcarina.h"
+#include "Baseline/Slang/BaselineSlang.h"
+#include "Disney/EDSL/DisneyEdsl.h"
+#include "Disney/Mesh/DisneyMesh.h"
+#include "Disney/RayTrace/DisneyRayTrace.h"
+#include "Disney/Ocarina/DisneyOcarina.h"
+#include "Disney/Slang/DisneySlang.h"
+#include "DrawStress/EDSL/DrawStressEdsl.h"
+#include "DrawStress/Mesh/DrawStressMesh.h"
+#include "DrawStress/RayTrace/DrawStressRayTrace.h"
+#include "DrawStress/Ocarina/DrawStressOcarina.h"
+#include "DrawStress/Slang/DrawStressSlang.h"
+#include "Feature/EdslFeature.h"
 
-#ifdef HORIZON_OCARINA_EXAMPLE_ENABLED
-#include "example_ocarina_dsl/example_ocarina_dsl.h"
-#endif
-
-#include "horizon/core/logging.h"
-
-#include <ctime>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
+#include <format>
+#include <memory>
 #include <string_view>
-#include <example_edsl_compile/example_edsl_compile.h>
-#include <example_edsl_compile_comparison/example_edsl_compile_comparison.h>
 
-int main(int argc, char **argv)
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#endif
+#include <GLFW/glfw3native.h>
+
+int main(int argc, char** argv)
 {
-    // Application policy: keep the timestamped file and crash flushing enabled.
-    const auto now = std::time(nullptr);
-    std::tm local_time {};
-#ifdef _WIN32
-    localtime_s(&local_time, &now);
-#else
-    localtime_r(&now, &local_time);
+    const std::string_view mode = argc > 1 ? argv[1] : "baseline_slang";
+
+    if (glfwInit()) {
+#if defined(__linux__)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 #endif
-    std::ostringstream log_filename;
-    log_filename << std::put_time(&local_time, "%Y-%m-%d_%H-%M-%S") << "_corona.log";
-    horizon::core::LoggingOptions logging;
-    logging.file_path = std::filesystem::path { "logs" } / log_filename.str();
-    logging.install_signal_handlers = true;
-    logging.configure_utf8_console = true;
-#ifdef CORONA_LOG_LEVEL
-    logging.level = static_cast<horizon::core::LogLevel>(CORONA_LOG_LEVEL);
-#endif
-    horizon::core::initialize_logging(logging);
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("sponza");
+        GLFWwindow* window = glfwCreateWindow(800, 600, mode.data(), nullptr, nullptr);
 
-    if (mode == "baseline")
-    {
-        run_example_baseline();
-        return 0;
-    }
-
-#ifdef HORIZON_OCARINA_EXAMPLE_ENABLED
-    if (mode == "ocarina_dsl")
-    {
-        return run_example_ocarina_dsl(argc, argv);
-    }
-#else
-    if (mode == "ocarina_dsl")
-    {
-        std::cerr << "ocarina_dsl example requires HORIZON_BUILD_OCARINA=ON; rebuild "
-                     "HorizonExamples with --with-ocarina.\n";
-        return 1;
-    }
+#if defined(_WIN32)
+        void* native_window = glfwGetWin32Window(window);
+#elif defined(__linux__)
+        void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
+#elif defined(__APPLE__)
+        void* native_window = glfwGetCocoaView(window);
 #endif
 
-    if (mode == "edsl")
-    {
-        run_example_edsl();
-        return 0;
-    }
-    if (mode == "glsl")
-    {
-        run_example_glsl();
-        return 0;
-    }
+        {
+            std::unique_ptr<ExampleBase> example;
+            if (mode == "baseline_edsl") example = std::make_unique<BaselineEdsl>(native_window);
+            else if (mode == "baseline_slang") example = std::make_unique<BaselineSlang>(native_window);
+            else if (mode == "baseline_mesh") example = std::make_unique<BaselineMesh>(native_window);
+            else if (mode == "baseline_raytrace") example = std::make_unique<BaselineRayTrace>(native_window);
+            else if (mode == "disney_edsl") example = std::make_unique<DisneyEdsl>(native_window);
+            else if (mode == "disney_slang") example = std::make_unique<DisneySlang>(native_window);
+            else if (mode == "disney_mesh") example = std::make_unique<DisneyMesh>(native_window);
+            else if (mode == "disney_raytrace") example = std::make_unique<DisneyRayTrace>(native_window);
+            else if (mode == "drawstress_edsl") example = std::make_unique<DrawStressEdsl>(native_window);
+            else if (mode == "drawstress_slang") example = std::make_unique<DrawStressSlang>(native_window);
+            else if (mode == "drawstress_mesh") example = std::make_unique<DrawStressMesh>(native_window);
+            else if (mode == "drawstress_raytrace") example = std::make_unique<DrawStressRayTrace>(native_window);
+            else if (mode == "edsl_feature") example = std::make_unique<EdslFeature>(native_window);
+            else if (mode == "baseline_ocarina") example = std::make_unique<BaselineOcarina>(native_window);
+            else if (mode == "disney_ocarina") example = std::make_unique<DisneyOcarina>(native_window);
+            else if (mode == "drawstress_ocarina") example = std::make_unique<DrawStressOcarina>(native_window);
+            else example = std::make_unique<BaselineEdsl>(native_window);
 
-    if (mode == "ibl")
-    {
-        run_example_ibl();
-        return 0;
-    }
+            constexpr double fixed_dt = 0.0;
+            double seconds = 0.0;
+            double frame_start = glfwGetTime();
+            while (!glfwWindowShouldClose(window)) {
+                example->run(static_cast<float>(seconds));
+                glfwPollEvents();
+                const double now = glfwGetTime();
+                const double dt = now - frame_start;
+                frame_start = now;
+                seconds += fixed_dt > 0.0 ? fixed_dt : dt;
+                const double fps = dt > 0.0 ? 1.0 / dt : 0.0;
+                const auto title = std::format("{} | {:.1f} FPS | {:.2f} ms", mode, fps, dt * 1000.0);
+                glfwSetWindowTitle(window, title.c_str());
+            }
+        }
 
-    if (mode == "edsl_ibl")
-    {
-        run_example_edsl_ibl();
-        return 0;
-    }
-
-    if (mode == "drawstress")
-    {
-        run_example_drawstress();
-        return 0;
-    }
-    if (mode == "raymarch")
-    {
-        run_example_raymarch();
-        return 0;
-    }
-    if (mode == "bump")
-    {
-        run_example_bump();
-        return 0;
-    }
-    if (mode == "deferred")
-    {
-        run_example_deferred();
-        return 0;
-    }
-    if (mode == "sponza")
-    {
-        run_example_sponza();
-        return 0;
-    }
-    if (mode == "shadowmaps")
-    {
-        run_example_shadowmaps();
-        return 0;
-    }
-    if (mode == "edsl_shadowmaps")
-    {
-        run_example_edsl_shadowmaps();
-        return 0;
-    }
-    if (mode == "shadowvolumes")
-    {
-        run_example_shadowvolumes();
-        return 0;
-    }
-    if (mode == "edsl_shadowvolumes")
-    {
-        run_example_edsl_shadowvolumes();
-        return 0;
-    }
-    if (mode == "assao")
-    {
-        run_example_assao();
-        return 0;
-    }
-
-    if (mode == "sky")
-    {
-        run_example_sky();
-        return 0;
-    }
-
-    if (mode == "ssr")
-    {
-        run_example_ssr();
-        return 0;
-    }
-    if (mode == "edsl_ssr")
-    {
-        run_example_edsl_ssr();
-        return 0;
-    }
-    if (mode == "edsl_sky")
-    {
-        run_example_edsl_sky();
-        return 0;
-    }
-    if (mode == "gpudrivenrendering")
-    {
-        run_example_gpudrivenrendering();
-        return 0;
-    }
-    if (mode == "disney_pbr")
-    {
-        run_example_disney_pbr();
-        return 0;
-    }
-    if (mode == "edsl_disney_pbr")
-    {
-        run_example_edsl_disney_pbr();
-        return 0;
-    }
-    if (mode == "rsm")
-    {
-        run_example_rsm();
-        return 0;
-    }
-    if (mode == "edsl_rsm")
-    {
-        run_example_edsl_rsm();
-        return 0;
-    }
-    if (mode == "edsl_sponza")
-    {
-        run_example_edsl_sponza();
-        return 0;
-    }
-
-    if (mode == "edsl_compile")
-    {
-        run_example_edsl_compile();
-        return 0;
-    }
-
-    if (mode == "edsl_compile_comparison")
-    {
-        run_example_edsl_compile_comparison();
-        return 0;
+        glfwTerminate();
     }
 
     return 0;

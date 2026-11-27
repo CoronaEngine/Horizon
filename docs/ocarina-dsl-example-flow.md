@@ -1,11 +1,11 @@
 # Ocarina DSL 示例运行流程：从 AST 构建到 Slang 生成
 
-本文以 [`examples/example_ocarina_dsl`](../examples/example_ocarina_dsl) 为例，梳理
+本文以 [`examples/example_ocarina_dsl`](https://github.com/CoronaEngine/Horizon/tree/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl) 为例，梳理
 Ocarina DSL 从 C++ lambda 到 Slang 源码、再到 Vulkan Compute 的完整内部链路。
 重点在 **AST 构建**和 **Slang 源码生成**；Vulkan 调度、渲染代码和 shader 效果只做
 简略说明。
 
-> 本文行号基于当前源码。若后续重构移动了代码，请同步更新对应链接和行号。
+> 本文记录了上游提交 `4177351f` 的示例和运行结果，示例链接指向该版本。当前分支的渲染示例入口见 [examples/main.cpp](../examples/main.cpp)。
 
 ## 0. 总览
 
@@ -37,10 +37,10 @@ HorizonExamples ocarina_dsl
 
 | 阶段 | 入口 | 位置 |
 | --- | --- | --- |
-| 示例分发 | `mode == "ocarina_dsl"` | [`examples/main.cpp:71`](../examples/main.cpp#L71) |
-| 示例函数 | `run_example_ocarina_dsl()` | [`example_ocarina_dsl.cpp:340`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L340) |
-| 渲染主流程 | `render_example()` | [`example_ocarina_dsl.cpp:267`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L267) |
-| DSL kernel | `make_raymarch_kernel()` | [`example_ocarina_dsl.cpp:134`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L134) |
+| 示例分发 | `mode == "ocarina_dsl"` | [`examples/main.cpp:71`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/main.cpp#L71) |
+| 示例函数 | `run_example_ocarina_dsl()` | [`example_ocarina_dsl.cpp:340`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L340) |
+| 渲染主流程 | `render_example()` | [`example_ocarina_dsl.cpp:267`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L267) |
+| DSL kernel | `make_raymarch_kernel()` | [`example_ocarina_dsl.cpp:134`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L134) |
 | Slang 生成 | `AstToSlangSource::generate()` | [`ast_to_slang_source.cpp:221`](../src/backends/vulkan_compute/ast_to_slang_source.cpp#L221) |
 | Slang 编译 | `SlangShaderCompiler::compile_program()` | [`slang_compiler.cpp:434`](../src/backends/vulkan_compute/slang_compiler.cpp#L434) |
 | Vulkan 调度 | `VulkanComputeDevice::create_shader()` | [`vk_compute_device.cpp:921`](../src/backends/vulkan_compute/vk_compute_device.cpp#L921) |
@@ -441,7 +441,7 @@ apply(kernel)
 1. **显式生成**：示例调用
    [`AstToSlangSource::generate()`](../src/backends/vulkan_compute/ast_to_slang_source.cpp#L221)
    拿到 kernel 的 Slang body，然后由
-   [`compose_slang_source()`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L210)
+   [`compose_slang_source()`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L210)
    补 prelude、include，保存为 `.slang`。这是为了让读者看到生成结果。
 2. **实际编译生成**：`device.compile()` 内部再次调用同一个
    `AstToSlangSource::generate()`，然后继续走 Slang 编译器。两次生成使用同一套
@@ -706,7 +706,7 @@ bindless surface。
 <body>
 ```
 
-示例的 [`compose_slang_source()`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L210)
+示例的 [`compose_slang_source()`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L210)
 复制了同样的 prelude，并额外加上 `OC_NATIVE_FLOAT32_FMA`（如果设备支持），这样保存的
 `.slang` 可以直接阅读，也可以配合 `slangc -I <runtime>/slang` 单独编译。
 
@@ -830,7 +830,7 @@ Image::save_image(image_path, PixelStorage::FLOAT4, resolution, pixels.data());
 
 ## 7. Shader 逻辑（简略）
 
-kernel 代码在 [`example_ocarina_dsl.cpp:134`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L134)：
+kernel 代码在 [`example_ocarina_dsl.cpp:134`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp#L134)：
 
 - 用 `dispatch_idx().xy()` 得到像素坐标，`dispatch_dim().xy()` 得到尺寸；
 - 生成 NDC 坐标，翻转 y，保持图像方向；
@@ -871,7 +871,7 @@ kernel 代码在 [`example_ocarina_dsl.cpp:134`](../examples/example_ocarina_dsl
 
 | 文件 | 作用 |
 | --- | --- |
-| [`examples/example_ocarina_dsl/example_ocarina_dsl.cpp`](../examples/example_ocarina_dsl/example_ocarina_dsl.cpp) | 示例入口、kernel、Slang 保存、dispatch |
+| [`examples/example_ocarina_dsl/example_ocarina_dsl.cpp`](https://github.com/CoronaEngine/Horizon/blob/4177351f122a3e4fa92144af3b3ddb0ef9c5034f/examples/example_ocarina_dsl/example_ocarina_dsl.cpp) | 示例入口、kernel、Slang 保存、dispatch |
 | [`src/dsl/core/var.h`](../src/dsl/core/var.h) | `Var<T>`、局部变量、`Texture2DVar` 等类型别名 |
 | [`src/dsl/core/ref.h`](../src/dsl/core/ref.h) | `Ref<T>` 表达式包装、纹理/资源代理 |
 | [`src/dsl/core/expr.h`](../src/dsl/core/expr.h) | `Expr<T>` 和 host 值到表达式的转换 |

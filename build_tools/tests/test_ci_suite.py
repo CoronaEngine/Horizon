@@ -140,9 +140,10 @@ class CiEvidenceTests(unittest.TestCase):
         driver = self.root / "driver.json"
         driver_data = {"name": "MoltenVK", "version": "test-version", "commit": "driver-commit"}
         driver.write_text(json.dumps(driver_data))
-        with patch.dict(os.environ, {"GITHUB_EVENT_PATH": str(event), "GITHUB_SHA": "b" * 40,
-                                     "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2",
-                                     "HORIZON_CI_DRIVER_METADATA": str(driver)}):
+        metadata_env = dict(os.environ, GITHUB_EVENT_PATH=str(event), GITHUB_SHA="b" * 40,
+                            GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2",
+                            HORIZON_CI_DRIVER_METADATA=str(driver))
+        with patch.object(os, "environ", metadata_env):
             metadata = suite.execution_metadata()
         self.assertEqual(metadata["source_revision"], "a" * 40)
         self.assertRegex(metadata["checkout_revision"], r"^[0-9a-f]{40}$")

@@ -23,6 +23,14 @@ namespace EmbeddedShader::Ast
         std::vector<const DefineLocalVariate*> localDefinitions;
     };
 
+    struct BindingUse
+    {
+        std::shared_ptr<Variate> variable;
+        AccessPermissions access;
+        std::vector<std::pair<size_t, bool>> conditions;
+        bool sampled = false;
+    };
+
 	struct ParseOutput
 	{
 		std::string output;
@@ -30,6 +38,7 @@ namespace EmbeddedShader::Ast
 		ShaderStage stage;
 	    std::vector<BranchOutput> branches;
 	    std::string typeHeader;
+        std::vector<BindingUse> bindings;
 	};
 
 	class Parser
@@ -39,8 +48,7 @@ namespace EmbeddedShader::Ast
 	public:
 		static void beginShaderParse(ShaderStage stage);
 		static std::vector<ParseOutput> endPipelineParse();
-		static void setBindless(bool bindless);
-        static bool getBindless();
+        static void recordBindingUse(Variate& variable, AccessPermissions access);
         static void setInputPush(bool push);
         static bool getInputPush();
     private:
@@ -57,6 +65,8 @@ namespace EmbeddedShader::Ast
 		size_t currentAggregateTypeIndex = 0;
 		size_t nextRenderTargetLocation = 0;
 	    size_t currentBranchIndex = 0;
+        std::vector<std::pair<size_t, bool>> bindingConditions;
+        std::vector<BindingUse> bindings;
 
 	    bool bInputPush = true;
 
@@ -69,7 +79,6 @@ namespace EmbeddedShader::Ast
 		std::shared_ptr<Variate> vertexIndexInput;
 
 		std::shared_ptr<Variate> globalUBO;
-		std::shared_ptr<Variate> globalParameterBlock;
 		std::shared_ptr<Variate> globalPushConstant;
 
 	    std::shared_ptr<Variate> stageInput;
@@ -86,8 +95,6 @@ namespace EmbeddedShader::Ast
 	    //////////////Branch Pruning///////////////
 
 		bool isInShaderParse = false;
-
-		bool bindless = false;
 
         static thread_local std::unique_ptr<Parser> currentParser;
 	public:

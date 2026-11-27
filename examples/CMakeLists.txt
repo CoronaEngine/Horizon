@@ -1,152 +1,64 @@
-set(HORIZON_EXAMPLE_SOURCES
+add_executable(HorizonExamples
     main.cpp
-    common.cpp
-    imgui_horizon.cpp
-    example_baseline/example_baseline.cpp
-    example_glsl/example_glsl.cpp
-    example_edsl/example_edsl.cpp
-    example_ibl/example_ibl.cpp
-    example_edsl_ibl/example_edsl_ibl.cpp
-    example_drawstress/example_drawstress.cpp
-    example_raymarch/example_raymarch.cpp
-    example_bump/example_bump.cpp
-    example_deferred/example_deferred.cpp
-    example_sponza/example_sponza.cpp
-    example_shadowmaps/example_shadowmaps.cpp
-    example_edsl_shadowmaps/example_edsl_shadowmaps.cpp
-    example_shadowvolumes/example_shadowvolumes.cpp
-    example_edsl_shadowvolumes/example_edsl_shadowvolumes.cpp
-    example_assao/example_assao.cpp
-    example_sky/example_sky.cpp
-    example_ssr/example_ssr.cpp
-    example_edsl_ssr/example_edsl_ssr.cpp
-    example_edsl_sky/example_edsl_sky.cpp
-    example_gpudrivenrendering/example_gpudrivenrendering.cpp
-    example_disney_pbr/example_disney_pbr.cpp
-    example_edsl_disney_pbr/example_edsl_disney_pbr.cpp
-    example_rsm/example_rsm.cpp
-    example_edsl_rsm/example_edsl_rsm.cpp
-    example_edsl_sponza/example_edsl_sponza.cpp
-    example_edsl_compile/example_edsl_compile.cpp
-    example_edsl_compile_comparison/example_edsl_compile_comparison.cpp
+    Baseline/Tutorial/28_model_loading.cpp
+    Baseline/EDSL/example_baseline_edsl.cpp
+    Baseline/Slang/BaselineSlang.h
+    Baseline/Slang/example_baseline_slang.cpp
+    Baseline/Mesh/example_baseline_mesh.cpp
+    Baseline/Ocarina/example_baseline_ocarina.cpp
+    Disney/EDSL/example_disney_edsl.cpp
+    Disney/Slang/DisneySlang.h
+    Disney/Slang/example_disney_slang.cpp
+    Disney/Mesh/example_disney_mesh.cpp
+    Disney/Ocarina/example_disney_ocarina.cpp
+    DrawStress/EDSL/example_drawstress_edsl.cpp
+    DrawStress/Slang/DrawStressSlang.h
+    DrawStress/Slang/example_drawstress_slang.cpp
+    DrawStress/Mesh/example_drawstress_mesh.cpp
+    DrawStress/Ocarina/example_drawstress_ocarina.cpp
+    Baseline/RayTrace/example_baseline_raytrace.cpp
+    Disney/RayTrace/example_disney_raytrace.cpp
+    DrawStress/RayTrace/example_drawstress_raytrace.cpp
+    Feature/example_edsl_feature.cpp
 )
-
-# example_ocarina_dsl/example_ocarina_dsl.cpp is appended by
-# horizon_ocarina.cmake when HORIZON_BUILD_OCARINA and HorizonExamples are both
-# enabled; Ocarina targets are defined after this directory.
-
-if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
-    list(APPEND HORIZON_EXAMPLE_SOURCES
-        example_baseline/baseline_hotfix_test.cpp)
+find_program(TUTORIAL_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
+set(baseline_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Tutorial")
+if(TUTORIAL_GLSLC)
+    set(baseline_shader_dir "${CMAKE_CURRENT_BINARY_DIR}/baseline_shaders")
+    foreach(stage IN ITEMS vert frag)
+        set(source "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Tutorial/27_shader_depth.${stage}")
+        set(output "${baseline_shader_dir}/${stage}.spv")
+        add_custom_command(OUTPUT "${output}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${baseline_shader_dir}"
+            COMMAND "${TUTORIAL_GLSLC}" "${source}" -o "${output}"
+            DEPENDS "${source}" VERBATIM)
+        target_sources(HorizonExamples PRIVATE "${output}")
+    endforeach()
 endif()
-
-set(HORIZON_EXAMPLE_HEADERS
-    common.h
-    glfw_native.h
-    imgui_horizon.h
-    example_baseline/example_baseline.h
-    example_glsl/example_glsl.h
-    example_edsl/example_edsl.h
-    example_ibl/example_ibl.h
-    example_edsl_ibl/example_edsl_ibl.h
-    example_drawstress/example_drawstress.h
-    example_raymarch/example_raymarch.h
-    example_bump/example_bump.h
-    example_deferred/example_deferred.h
-    example_sponza/example_sponza.h
-    example_shadowmaps/example_shadowmaps.h
-    example_edsl_shadowmaps/example_edsl_shadowmaps.h
-    example_shadowvolumes/example_shadowvolumes.h
-    example_edsl_shadowvolumes/example_edsl_shadowvolumes.h
-    example_assao/example_assao.h
-    example_sky/example_sky.h
-    example_ssr/example_ssr.h
-    example_edsl_ssr/example_edsl_ssr.h
-    example_edsl_sky/example_edsl_sky.h
-    example_gpudrivenrendering/example_gpudrivenrendering.h
-    example_disney_pbr/example_disney_pbr.h
-    example_edsl_disney_pbr/example_edsl_disney_pbr.h
-    example_rsm/example_rsm.h
-    example_edsl_rsm/example_edsl_rsm.h
-    example_edsl_sponza/example_edsl_sponza.h
-    example_edsl_compile/example_edsl_compile.h
-    example_edsl_compile_comparison/example_edsl_compile_comparison.h
-    example_ocarina_dsl/example_ocarina_dsl.h
-)
-
-if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
-    list(APPEND HORIZON_EXAMPLE_HEADERS
-        example_baseline/baseline_hotfix_test.h)
-endif()
-
-add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})
-
-if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
-    target_compile_definitions(HorizonExamples PRIVATE
-        HORIZON_EXAMPLE_HOTFIX_ENABLED=1)
-
-    target_link_libraries(HorizonExamples PRIVATE
-        horizon-hotfix horizon-hotfix-build-cmake)
-    if(WIN32)
-        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-process-windows)
-    else()
-        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-process-posix)
-    endif()
-
-    configure_file(example_baseline/baseline_hotfix_config.h.in
-        "${CMAKE_CURRENT_BINARY_DIR}/generated/baseline_hotfix_config.h.configured" @ONLY)
-    file(GENERATE
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>/baseline_hotfix_config.h"
-        INPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/baseline_hotfix_config.h.configured")
-    target_include_directories(HorizonExamples PRIVATE
-        "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
-
-    # Rebuild the original editable source independently of the running host.
-    add_library(horizon-baseline-hotfix-patch MODULE EXCLUDE_FROM_ALL
-        example_baseline/baseline_hotfix_test.cpp)
-    include(horizon_hotfix_manifest)
-    horizon_register_hotfix_module(horizon-baseline-hotfix-patch)
-endif()
-
-target_include_directories(HorizonExamples PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${PROJECT_SOURCE_DIR}/src"
-)
-
+set_property(SOURCE Baseline/Tutorial/28_model_loading.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS
+        "TUTORIAL_ASSET_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/Baseline/assets\""
+        "TUTORIAL_SHADER_DIR=\"${baseline_shader_dir}\"")
+# Run beside the shared logging provider and Ocarina backends.
+set_target_properties(HorizonExamples PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+target_include_directories(HorizonExamples PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(HorizonExamples PRIVATE
-    horizon::glm
-    horizon::glfw
-    horizon::stb
-    horizon::tinyobjloader
-    horizon_imgui
-    Horizon)
-
-target_compile_definitions(HorizonExamples PRIVATE
-    HORIZON_IMGUI_RENDER_ENABLED=$<BOOL:${HORIZON_ENABLE_IMGUI_RENDER}>)
-
-# Profiling opt-in。Horizon 以 PRIVATE 持有 Tracy（profiling 不是公共 API），所以
-# 想埋点的目标得自己声明。example_drawstress 的应用侧 zone 与引擎侧的
-# Horizon::encode / Horizon::commit 配对才能读出提交路径的时间分布。
-#
-# 由同一个 HORIZON_ENABLE_TRACY 驱动，避免与 src/ 那处不一致。缺 define 时埋点宏
-# 静默展开为空，不会报错——改这里之后请 grep 产物里的 zone 名验证。
-if(HORIZON_ENABLE_TRACY)
-    target_link_libraries(HorizonExamples PRIVATE Tracy::TracyClient)
-    target_compile_definitions(HorizonExamples PRIVATE HORIZON_TRACY_ENABLED=1)
-endif()
-
-add_custom_command(TARGET HorizonExamples POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
-            "$<TARGET_FILE_DIR:HorizonExamples>/shaders"
-    COMMENT "Copying example shaders to HorizonExamples output directory"
-    VERBATIM)
-
+    Horizon ocarina-native horizon::ktm horizon::glm horizon::glfw horizon::stb horizon::tinyobjloader)
 helicon_install_runtime_deps(HorizonExamples)
-if(HORIZON_BUILD_OCARINA)
-    horizon_copy_runtime_files(HorizonExamples "$<TARGET_FILE:horizon-logging>")
+helicon_compile_shaders(HorizonExamples
+    RASTER_PAIRS
+    Baseline/Slang/baseline.pipeline.hpp Baseline/Slang/baseline_vert.slang Baseline/Slang/baseline_frag.slang
+    Disney/Slang/disney.pipeline.hpp Disney/Slang/disney_vert.slang Disney/Slang/disney_frag.slang
+    DrawStress/Slang/drawstress.pipeline.hpp DrawStress/Slang/drawstress_vert.slang DrawStress/Slang/drawstress_frag.slang
+    RAY_TRACE_PIPELINES
+    Baseline/RayTrace/baseline.pipeline.hpp Baseline/RayTrace/baseline_raygen.slang Baseline/RayTrace/baseline_miss.slang Baseline/RayTrace/baseline_closest_hit.slang
+    Disney/RayTrace/disney.pipeline.hpp Disney/RayTrace/disney_raygen.slang Disney/RayTrace/disney_miss.slang Disney/RayTrace/disney_closest_hit.slang
+    DrawStress/RayTrace/drawstress.pipeline.hpp DrawStress/RayTrace/drawstress_raygen.slang DrawStress/RayTrace/drawstress_miss.slang DrawStress/RayTrace/drawstress_closest_hit.slang
+    MESH_PAIRS
+    Baseline/Mesh/baseline.pipeline.hpp Baseline/Mesh/baseline_mesh.slang Baseline/Slang/baseline_frag.slang
+    Disney/Mesh/disney.pipeline.hpp Disney/Mesh/disney_mesh.slang Disney/Slang/disney_frag.slang
+    DrawStress/Mesh/drawstress.pipeline.hpp DrawStress/Mesh/drawstress_mesh.slang DrawStress/Slang/drawstress_frag.slang)
+
+if(HORIZON_BUILD_TESTS)
+    add_dependencies(horizon-tests HorizonExamples)
 endif()
-if(COMMAND corona_copy_tbb_runtime_artifacts)
-    corona_copy_tbb_runtime_artifacts(HorizonExamples)
-endif()
-helicon_compile_shaders(HorizonExamples)

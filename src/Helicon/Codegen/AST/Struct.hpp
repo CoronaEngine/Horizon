@@ -1,5 +1,6 @@
 #pragma once
 #include <Codegen/AST/Enum.hpp>
+#include <functional>
 #include <memory>
 #include <set>
 #include <unordered_set>
@@ -32,7 +33,8 @@ namespace EmbeddedShader::Ast
 
 	struct EmbeddedShaderStructure
 	{
-		ShaderStage stage;
+		ShaderStage stage{};
+        bool hasIndirectResource = false;
 		std::vector<std::shared_ptr<Statement>> globalStatements;
 		std::deque<std::shared_ptr<Statement>> inputStatements;
 		std::vector<std::shared_ptr<Statement>> outputStatements;

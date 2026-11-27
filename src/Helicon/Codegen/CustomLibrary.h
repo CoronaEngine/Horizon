@@ -66,6 +66,15 @@ namespace EmbeddedShader::CustomLibrary
 		return {Ast::AST::callFunc("dot", Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(a)>(a)), proxy_wrap(std::forward<decltype(b)>(b))},Ast::AccessPermissions::ReadOnly))};
 	}
 
+	template<typename Type> requires (ktm::is_vector_v<base_type_t<Type>> && ktm::vec_traits_len<base_type_t<Type>> == 3 &&
+	                                  std::is_floating_point_v<ktm::vec_traits_base_t<base_type_t<Type>>>)
+	VariateProxy<base_type_t<Type>> cross(Type&& a, proxy_wrapper<Type> auto&& b)
+	{
+		return {Ast::AST::callFunc("cross", Ast::AST::createType<base_type_t<Type>>(),
+			Ast::Node::accessAll({proxy_wrap(std::forward<Type>(a)), proxy_wrap(std::forward<decltype(b)>(b))},
+			                     Ast::AccessPermissions::ReadOnly))};
+	}
+
 	template<typename Type>
 	VariateProxy<base_type_t<Type>> lerp(Type&& x, proxy_wrapper<Type> auto&& y,proxy_wrapper<Type> auto&& s)
 	{

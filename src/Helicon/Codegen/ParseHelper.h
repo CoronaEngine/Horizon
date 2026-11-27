@@ -95,20 +95,13 @@ namespace EmbeddedShader
 		}
 
 		template<typename ReturnType1,typename ReturnType2,typename... ParamTypes1,typename... ParamTypes2>
-		static constexpr bool isMatchInputAndOutput(const std::function<ReturnType1(ParamTypes1...)>& fOutput,const std::function<ReturnType2(ParamTypes2...)>& fInput)
+		static constexpr auto isMatchInputAndOutput(const std::function<ReturnType1(ParamTypes1...)>&,
+		                                           const std::function<ReturnType2(ParamTypes2...)>&)
 		{
-			//1.没有输入输出
-			//2. 输入和输出类型相同
-			//note:这里的if constexpr不能省略，因为std::is_same_v<ReturnType1,ParamTypes2...>这条代码必须要求sizeof...(ParamTypes2) == 1
-			if constexpr (std::is_same_v<ReturnType1, void> && sizeof...(ParamTypes2) == 0)
-				return true;
-			else if constexpr (!std::is_same_v<ReturnType1, void> && sizeof...(ParamTypes2) == 1)
-			{
-				if constexpr (std::is_same_v<ReturnType1,ParamTypes2...>)
-					return true;
-			}
+			if constexpr (std::is_void_v<ReturnType1>)
+				return std::bool_constant<sizeof...(ParamTypes2) == 0>{};
 			else
-				return false;
+				return std::is_same<std::tuple<ReturnType1>, std::tuple<ParamTypes2...>>{};
 		}
 
 		template<typename T,typename... ParamTypes>

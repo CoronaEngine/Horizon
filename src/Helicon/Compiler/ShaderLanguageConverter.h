@@ -54,10 +54,8 @@ namespace EmbeddedShader
 
 	struct ShaderLanguageConverter
 	{
-	    // 离线工具（tools/main.cpp）用：把源码编译成可序列化 Slang module，或做声明级反射。
+	    // 离线工具（tools/main.cpp）用：把源码编译成可序列化 Slang module。
 	    static SlangModule slangModuleCompiler(SlangModuleCompileArgs arg);
-	    static void slangModuleReflection(SlangModuleReflectionArgs arg);
-        static ShaderCodeModule::ShaderResources slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg);
 
 	    // Slang 低层 helper：负责 session/module/entry point 的创建和序列化。
 	    // 运行时分支切换由 ShaderCodeCompiler 直接使用首次编译缓存的 session/module，

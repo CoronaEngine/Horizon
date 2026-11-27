@@ -17,7 +17,6 @@ include(horizon_image_dependencies)
 if(HORIZON_BUILD_ENGINE)
     include(horizon_engine_dependencies)
     include(horizon_slang)
-    include(horizon_tracy)
     include(horizon_runtime_deps)
 
     # ======================== Shader 自动编译模块 ========================
@@ -27,7 +26,8 @@ endif()
 add_subdirectory(src)
 add_subdirectory(src/hotfix)
 
-if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
+if(NOT TARGET ShaderCompileScripts AND
+   (HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES OR (HORIZON_BUILD_ENGINE AND HORIZON_BUILD_TESTS)))
     add_subdirectory(tools)
 endif()
 
@@ -41,6 +41,7 @@ if(HORIZON_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.
 endif()
 
 if(HORIZON_BUILD_EXAMPLES)
+    include(horizon_tracy)
     include(horizon_example_dependencies)
     add_subdirectory(examples)
 endif()
@@ -55,8 +56,3 @@ if (MSVC)
 endif()
 
 include(horizon_ocarina)
-
-if(HORIZON_BUILD_BASELINE_WINDOW_TEST)
-    enable_testing()
-    add_subdirectory(tests/hotfix/baseline_window)
-endif()

@@ -31,15 +31,15 @@ int main(int argc, char **argv) {
 
     // A fresh cache forces Slang to diagnose every kernel on every test run.
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto cache = ocarina::format(".cache-slang-capabilities-{}", stamp);
-    const auto diagnostics_path = std::filesystem::path{cache} / "diagnostics.log";
+    const auto cache = fs::absolute(ocarina::format(".cache-slang-capabilities-{}", stamp));
+    const auto diagnostics_path = cache / "diagnostics.log";
     horizon::core::LoggingOptions logging;
     // Keep fatal compiler diagnostics visible in CTest as well as the file
     // inspected below, including failures before the final file read.
     logging.console = true;
     logging.file_path = diagnostics_path;
     horizon::core::initialize_logging(logging);
-    RHIContext::instance().init(argv[0], cache);
+    test::RHIContextTestAccess::set_cache_directory(cache);
     auto device = create_test_device();
     if (warp32 && skip_without_feature(test_device_supports_warp32(device), "DSL warp32")) return 77;
     if (ray_query && skip_without_feature(device.trace_capabilities().ray_query, "ray queries")) return 77;

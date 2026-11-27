@@ -1,15 +1,274 @@
-// Deliberately include the command header first and twice, without backend headers.
-#include "HardwareCommands_old.h"
-#include "Horizon_old.h"
-#include "HardwareCommands_old.h"
+// Include the public header twice to check its include guard.
+#include "Horizon.h"
+#include "Horizon.h"
 
+#include <array>
+#include <bit>
 #include <type_traits>
 
-static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uintptr_t>);
-static_assert(std::is_copy_constructible_v<HardwareBuffer>);
-static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
-static_assert(std::is_same_v<Corona::Horizon::HardwareBuffer, ::HardwareBuffer>);
-static_assert(!std::is_constructible_v<ComputePipelineBase, const std::vector<uint32_t>&>);
-static_assert(!std::is_constructible_v<RasterizerPipelineBase, std::vector<uint32_t>, std::vector<uint32_t>>);
+static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image, const HardwareDisplayer& display) {
+    { buffer.copyTo(buffer) } -> std::same_as<HardwareExecutor::Command>;
+    { buffer.copyTo(image) } -> std::same_as<HardwareExecutor::Command>;
+    { image.copyTo(image) } -> std::same_as<HardwareExecutor::Command>;
+    { image.copyTo(buffer) } -> std::same_as<HardwareExecutor::Command>;
+    { image.copyFrom(nullptr) } -> std::same_as<HardwareExecutor::Command>;
+    { display(image) } -> std::same_as<HardwareExecutor::Command>;
+});
+
+template<class T>
+concept ExposesResourceID = requires(const T& value) { value.getBufferID(); } ||
+                           requires(const T& value) { value.getImageID(); } ||
+                           requires(const T& value) { value.getExecutorID(); } ||
+                           requires(const T& value) { value.getDisplayerID(); };
+static_assert(!ExposesResourceID<HardwareBuffer> && !ExposesResourceID<HardwareImage> &&
+              !ExposesResourceID<HardwareExecutor> && !ExposesResourceID<HardwareDisplayer>);
+static_assert(std::copyable<HardwareBuffer> && std::is_nothrow_move_constructible_v<HardwareBuffer> &&
+              std::is_nothrow_move_assignable_v<HardwareBuffer>);
+using Descriptor = HardwareExecutor::Descriptor;
+static_assert(std::copyable<Descriptor> && !std::default_initializable<Descriptor> &&
+              std::is_nothrow_move_constructible_v<Descriptor> && !std::convertible_to<Descriptor, uint32_t>);
+using DescriptorUse = Descriptor::Use;
+static_assert(std::same_as<std::underlying_type_t<DescriptorUse>, uint8_t>);
+static_assert(DescriptorUse::Read != DescriptorUse::Write && DescriptorUse::Read != DescriptorUse::ReadWrite &&
+              DescriptorUse::Read != DescriptorUse::Sampled && DescriptorUse::Write != DescriptorUse::ReadWrite &&
+              DescriptorUse::Write != DescriptorUse::Sampled && DescriptorUse::ReadWrite != DescriptorUse::Sampled);
+static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image) {
+    { buffer.storeReadDescriptor() } -> std::same_as<Descriptor>;
+    { buffer.storeWriteDescriptor() } -> std::same_as<Descriptor>;
+    { buffer.storeReadWriteDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeSampledDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeReadDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeWriteDescriptor() } -> std::same_as<Descriptor>;
+    { image.storeReadWriteDescriptor() } -> std::same_as<Descriptor>;
+});
+static_assert(requires(HardwareBuffer& buffer) {
+    { buffer.exportBufferMemory() } -> std::same_as<HardwareBuffer::ExternalHandle>;
+    HardwareBuffer(buffer.exportBufferMemory(), 1, 4, 4, HardwareBuffer::Usage::StorageBuffer);
+});
+static_assert(std::is_constructible_v<HardwareBuffer, const uint16_t(&)[3], HardwareBuffer::Usage>);
+static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<bool>, HardwareBuffer::Usage>);
+static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<std::string>, HardwareBuffer::Usage>);
+static_assert(std::copyable<HardwareImage> && std::is_nothrow_move_constructible_v<HardwareImage> &&
+              std::is_nothrow_move_assignable_v<HardwareImage>);
+static_assert(std::is_aggregate_v<HardwareImage::CreateInfo>);
+constexpr HardwareImage::CreateInfo imageDefaults{};
+static_assert(imageDefaults.width == 0 && imageDefaults.height == 0 &&
+              imageDefaults.format == HardwareImage::Format::RGBA8_SRGB && imageDefaults.usage == HardwareImage::Usage::SampledImage &&
+              imageDefaults.arrayLayers == 1 && imageDefaults.mipLevels == 1 && !imageDefaults.cube && !imageDefaults.linearFiltering);
+static_assert(!std::is_constructible_v<EmbeddedShader::Texture2DProxy<ktm::fvec4>, HardwareImage&&>);
+static_assert(!std::is_constructible_v<EmbeddedShader::TextureCubeProxy<ktm::fvec4>, HardwareImage&&>);
+
+template<class T>
+concept MoveOnlyHandle = std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T> &&
+                         !std::is_copy_constructible_v<T> && !std::is_copy_assignable_v<T>;
+static_assert(MoveOnlyHandle<HardwareExecutor> && MoveOnlyHandle<HardwareDisplayer>);
+static_assert(std::copyable<HardwareExecutor::Command> && !std::default_initializable<HardwareExecutor::Command> &&
+              !std::is_constructible_v<bool, HardwareExecutor::Command>);
+static_assert(MoveOnlyHandle<ComputePipeline<>> && MoveOnlyHandle<RasterPipeline<>>);
+static_assert(MoveOnlyHandle<EmbeddedShader::Texture2DProxy<ktm::fvec4>>);
+static_assert(MoveOnlyHandle<EmbeddedShader::TextureCubeProxy<ktm::fvec4>>);
+
+template<class Shader>
+concept RawPipelineInput = std::is_constructible_v<ComputePipeline<>, const Shader&> ||
+                           std::is_constructible_v<RasterPipeline<>, const Shader&, const Shader&>;
+static_assert(!RawPipelineInput<std::string>);
+static_assert(!RawPipelineInput<std::vector<uint32_t>>);
+static_assert(!RawPipelineInput<EmbeddedShader::ShaderCodeModule>);
+static_assert(!RawPipelineInput<EmbeddedShader::SlangModule>);
+
+template<class R>
+concept CanReadBackInto = requires(const HardwareBuffer& buffer, R&& output) {
+    { buffer.copyToData(std::forward<R>(output)) } -> std::same_as<bool>;
+};
+static_assert(CanReadBackInto<std::vector<uint16_t>&> && CanReadBackInto<std::span<std::byte>> &&
+              CanReadBackInto<uint32_t(&)[4]>);
+static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<std::span<volatile uint16_t>> &&
+              !CanReadBackInto<std::vector<std::string>&> && !CanReadBackInto<std::vector<bool>&> &&
+              !CanReadBackInto<std::vector<uint16_t>>);
+
+using Raster = RasterPipeline<>;
+static_assert(std::bit_cast<std::array<uint32_t, 8>>(Raster::IndirectPacket{
+    .vertexCount = 1, .instanceCount = 2, .firstVertex = 3, .firstInstance = 4,
+    .geometryIndex = 5, .firstIndex = 6, .baseVertex = -7, .parameterWord = 8,
+}) == std::array<uint32_t, 8>{1, 2, 3, 4, 5, 6, uint32_t(-7), 8});
+
+template<class... Args>
+concept CanCallRaster = requires(RasterPipeline<>& pipeline, const HardwareBuffer& buffer, Args&&... args) {
+    { pipeline(buffer, buffer, buffer, 1, std::forward<Args>(args)...) } -> std::same_as<HardwareExecutor::Command>;
+};
+static_assert(CanCallRaster<> && CanCallRaster<const HardwareBuffer&>);
+static_assert(CanCallRaster<const HardwareBuffer&, const HardwareImage&, Raster::ScissorRect, Raster::Pass, ktm::uvec2>);
+static_assert(!CanCallRaster<std::span<const float>>);
+static_assert(!CanCallRaster<std::size_t, void (*)(std::span<std::byte>)>);
+
+template<class T>
+concept HasNamedDraw = requires(T& pipeline, const HardwareBuffer& buffer) {
+    pipeline.drawIndirect(buffer, buffer, buffer, 1);
+};
+static_assert(!HasNamedDraw<RasterPipeline<>>);
+
+struct RasterPipelineAdapter {
+    operator RasterPipeline<>() const;
+};
+
+struct ComputePipelineAdapter {
+    operator ComputePipeline<>() const;
+};
+
+template<class T>
+concept DeducesPipeline = requires(T value) { ComputePipeline(value); } || requires(T value) { RasterPipeline(value); };
+static_assert(!DeducesPipeline<ComputePipelineAdapter> && !DeducesPipeline<RasterPipelineAdapter>);
+static_assert(std::same_as<decltype(ComputePipeline<>(ComputePipelineAdapter{})), ComputePipeline<>>);
+static_assert(requires(decltype([] {}) shader, const std::source_location& location) {
+    { ComputePipeline{} } -> std::same_as<ComputePipeline<>>;
+    { ComputePipeline(shader) } -> std::same_as<ComputePipeline<>>;
+    { ComputePipeline(shader, {4, 2, 1}, {.enableMatrixColumnMajor = true}, location) }
+        -> std::same_as<ComputePipeline<>>;
+});
+
+static_assert(requires(RasterPipeline<>& pipeline, RasterPipelineAdapter adapter) {
+    { RasterPipeline{} } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(std::move(pipeline)) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline<>(adapter) } -> std::same_as<RasterPipeline<>>;
+});
+
+using ShaderVector = EmbeddedShader::VariateProxy<ktm::fvec4>;
+using VectorVertex = decltype([](ShaderVector value) { return value; });
+using OtherVectorFragment = decltype([](EmbeddedShader::VariateProxy<ktm::fvec2>) {});
+using NoStageIO = decltype([] {});
+
+template<class V, class F, class... Args>
+concept AcceptsRasterPair = std::constructible_from<RasterPipeline<>, V, F, Args...> ||
+    requires(V vertex, F fragment, Args... args) { RasterPipeline(vertex, fragment, args...); };
+static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment>);
+static_assert(!AcceptsRasterPair<VectorVertex, OtherVectorFragment, Raster::State, EmbeddedShader::CompilerOption,
+                                uint32_t, std::source_location>);
+static_assert(!AcceptsRasterPair<VectorVertex, NoStageIO> && !AcceptsRasterPair<NoStageIO, OtherVectorFragment>);
+static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
+                       decltype([](ShaderVector) {}) fragment, EmbeddedShader::CompilerOption options,
+                       const std::source_location& location) {
+    { RasterPipeline(vertex, fragment, {.blend = Raster::Blend::Opaque, .topology = Raster::Topology::TriangleStrip}) }
+        -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {}, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterPipeline<>>;
+    { RasterPipeline(vertex, fragment, {}, options, 2, location) } -> std::same_as<RasterPipeline<>>;
+});
+
+template<class T>
+concept CanEnqueue = requires(HardwareExecutor& executor, T&& value) { executor << std::forward<T>(value); };
+static_assert(!CanEnqueue<Descriptor>);
+static_assert(!CanEnqueue<HardwareExecutor&> && !CanEnqueue<ComputePipeline<>&> &&
+              !CanEnqueue<RasterPipeline<>&> && !CanEnqueue<HardwareDisplayer&>);
+static_assert(std::same_as<decltype(&HardwareExecutor::operator<<), HardwareExecutor& (HardwareExecutor::*)(HardwareExecutor::Command)>);
+static_assert(std::same_as<decltype(&HardwareExecutor::wait), HardwareExecutor& (HardwareExecutor::*)(HardwareExecutor*)>);
+static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const HardwareExecutor::Command& saved, ComputePipeline<>& pipeline) {
+    { pipeline(1) } -> std::same_as<HardwareExecutor::Command>;
+    { a.commit().wait() } -> std::same_as<HardwareExecutor&>;
+    { b.wait(&a) << saved << pipeline(1) } -> std::same_as<HardwareExecutor&>;
+});
 
 void check_legacy_public_headers() {}
+
+#include "Codegen/ControlFlows.h"
+#include SLANG(compute_write.slang)
+
+using NamedCompute = ComputePipeline<compute_write_slang_t>;
+template<class T>
+concept HasOutputs = requires(T& value) { value.outputs; };
+template<class T>
+concept HasComputeBindings = requires { typename T::template Bindings<ComputePipeline<>>; };
+static_assert(!HasOutputs<compute_write_slang_t>);
+static_assert(!HasComputeBindings<compute_write_slang_t>);
+struct ComputeStageAdapter { operator compute_write_slang_t() const; };
+static_assert(!DeducesPipeline<ComputeStageAdapter>);
+static_assert(std::same_as<decltype(&NamedCompute::params), decltype(NamedCompute::params) NamedCompute::*>);
+static_assert(std::same_as<decltype(&NamedCompute::outputs), decltype(NamedCompute::outputs) NamedCompute::*>);
+static_assert(MoveOnlyHandle<NamedCompute>);
+static_assert(!CanEnqueue<NamedCompute&>);
+static_assert(requires(NamedCompute& pipeline, HardwareBuffer& buffer) {
+    { NamedCompute{} } -> std::same_as<NamedCompute>;
+    { ComputePipeline(compute_write_slang) } -> std::same_as<NamedCompute>;
+    pipeline.outputs = buffer;
+    { pipeline(1, 2, 3) } -> std::same_as<HardwareExecutor::Command>;
+});
+
+#include SLANG(examples/Disney/Slang/disney_frag.slang)
+
+template<class Stage>
+concept CompleteStage = requires { sizeof(Stage); };
+struct drawstress_frag_slang_t;
+static_assert(!CompleteStage<drawstress_frag_slang_t>);
+
+#include SLANG(examples/DrawStress/Slang/drawstress_frag.slang)
+
+struct disney_vert_slang_t;
+static_assert(!CompleteStage<disney_vert_slang_t>);
+
+#include SLANG(examples/Disney/Slang/disney_vert.slang)
+
+static_assert(!DeducesPipeline<disney_vert_slang_t> && !DeducesPipeline<disney_frag_slang_t>);
+static_assert(!std::constructible_from<EmbeddedShader::VertexEntry, disney_frag_slang_t> &&
+              !std::constructible_from<EmbeddedShader::FragmentEntry, disney_vert_slang_t> &&
+              !std::constructible_from<EmbeddedShader::ComputeEntry, disney_vert_slang_t>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO> && !AcceptsRasterPair<VectorVertex, disney_frag_slang_t>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, NoStageIO, Raster::State> &&
+              !AcceptsRasterPair<VectorVertex, disney_frag_slang_t, Raster::State>);
+using DisneyRaster = RasterPipeline<disney_vert_slang_t, disney_frag_slang_t>;
+using SharedVertexRaster = RasterPipeline<disney_vert_slang_t, drawstress_frag_slang_t>;
+static_assert(!HasNamedDraw<DisneyRaster> && !CanEnqueue<DisneyRaster&>);
+template<class T>
+concept HasManualResourceUses = requires(T& pipeline) { pipeline.uses({}); };
+static_assert(!HasManualResourceUses<ComputePipeline<>> && !HasManualResourceUses<NamedCompute>);
+static_assert(!HasManualResourceUses<Raster> && !HasManualResourceUses<DisneyRaster>);
+template<class T>
+concept HasOutColor = requires(T& value) { value.outColor; };
+static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
+static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer, const HardwareImage& depth) {
+    { DisneyRaster{} } -> std::same_as<DisneyRaster>;
+    { DisneyRaster({.blend = Raster::Blend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
+    { RasterPipeline(disney_vert_slang, disney_frag_slang, {.blend = Raster::Blend::Opaque}, 2) } -> std::same_as<DisneyRaster>;
+    pipeline.vsp.proj_view;
+    { pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;
+    { executor << pipeline(buffer, buffer, buffer, 1, {}, depth, Raster::ScissorRect{}, Raster::Pass{}) }
+        -> std::same_as<HardwareExecutor&>;
+});
+static_assert(requires(SharedVertexRaster& pipeline) {
+    { RasterPipeline(disney_vert_slang, disney_frag_slang) } -> std::same_as<DisneyRaster>;
+    { RasterPipeline(disney_vert_slang, drawstress_frag_slang, Raster::State{}) } -> std::same_as<SharedVertexRaster>;
+    pipeline.vsp.proj_view;
+    pipeline.outColor;
+});
+
+#include "Disney/Slang/disney.pipeline.hpp"
+#include "Baseline/Slang/baseline.pipeline.hpp"
+
+static_assert(AcceptsRasterPair<baseline_vert_slang_t, baseline_frag_slang_t>);
+// The Disney VS and Baseline FS each have a different registered partner.
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, baseline_frag_slang_t>);
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, baseline_frag_slang_t, Raster::State, uint32_t>);
+
+struct RasterFragmentAdapter { operator disney_frag_slang_t() const; };
+static_assert(!AcceptsRasterPair<disney_vert_slang_t, RasterFragmentAdapter>);
+
+// Reverse the stage order used by the GPU test. Each specialization appears only
+// once every header in its registered group has been included.
+#include SLANG(examples/Baseline/Mesh/baseline_mesh.slang)
+using TexturedMesh = MeshPipeline<baseline_mesh_slang_t, baseline_frag_slang_t>;
+static_assert(std::same_as<decltype(MeshPipeline(baseline_mesh_slang, baseline_frag_slang)), TexturedMesh>);
+#include SLANG(mesh_task.slang)
+using TexturedTaskMesh = MeshPipeline<mesh_task_slang_t, baseline_mesh_slang_t, baseline_frag_slang_t>;
+static_assert(std::same_as<decltype(MeshPipeline(mesh_task_slang, baseline_mesh_slang, baseline_frag_slang)), TexturedTaskMesh>);
+static_assert(MoveOnlyHandle<TexturedMesh> && MoveOnlyHandle<TexturedTaskMesh>);
+static_assert(std::bit_cast<std::array<uint32_t, 3>>(MeshPipeline<>::IndirectPacket{2, 3, 4}) ==
+              std::array<uint32_t, 3>{2, 3, 4});
+template<class... Stages>
+concept DeducesMeshPipeline = requires(Stages... stages) { MeshPipeline(stages...); };
+static_assert(!DeducesMeshPipeline<baseline_mesh_slang_t, disney_frag_slang_t> &&
+              !DeducesMeshPipeline<baseline_mesh_slang_t, mesh_task_slang_t, baseline_frag_slang_t>);
+static_assert(requires(TexturedTaskMesh& mesh, const HardwareBuffer& groups, const HardwareImage& target) {
+    mesh.outColor = target;
+    mesh.geometry[0] = groups;
+    mesh.task.groupCount = 2u;
+    mesh.vp.view = ktm::fmat4x4::from_eye();
+    { mesh(groups, 1, target, Raster::ScissorRect{}, Raster::Pass{}, ktm::uvec2(4, 2)) }
+        -> std::same_as<HardwareExecutor::Command>;
+});

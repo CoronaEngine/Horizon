@@ -69,6 +69,16 @@ jobs:
       - name: Run all registered infrastructure tests
         run: ctest --test-dir build/conan/core/debug -C Debug --output-on-failure
 
+      - name: Build the Horizon examples and engine tests
+        if: runner.os == 'Windows'
+        env:
+          HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
+        run: python build_tools/dev.py build HorizonExamples horizon-tests --configuration RelWithDebInfo
+
+      - name: Run the Horizon tests supported on hosted Windows
+        if: runner.os == 'Windows'
+        run: ctest --preset examples-relwithdebinfo -LE gpu
+
       - name: Build Release allocator CRT regression
         run: >-
           python build_tools/dev.py build horizon-test-core-allocator-crt

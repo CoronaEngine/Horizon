@@ -37,30 +37,6 @@ target_link_libraries(ocarina-native INTERFACE
 add_library(ocarina SHARED src/main.cpp)
 target_link_libraries(ocarina ocarina-native)
 
-# The Ocarina DSL example lives in the root examples/ tree and is dispatched by
-# the existing HorizonExamples host. examples/ is configured before this file,
-# so attach the Ocarina-dependent sources and libraries here, after the Ocarina
-# targets exist.
-if(HORIZON_BUILD_EXAMPLES AND TARGET HorizonExamples)
-    target_sources(HorizonExamples PRIVATE
-        ${PROJECT_SOURCE_DIR}/examples/example_ocarina_dsl/example_ocarina_dsl.cpp
-        # Compile the backend's Slang emitter into the example so it can show
-        # the generated source before device.compile() compiles the same kernel.
-        ${PROJECT_SOURCE_DIR}/src/backends/vulkan_compute/ast_to_slang_source.cpp)
-    target_include_directories(HorizonExamples PRIVATE
-        ${PROJECT_SOURCE_DIR}/src/backends/vulkan_compute)
-    target_link_libraries(HorizonExamples PRIVATE
-        ocarina-native
-        horizon::vulkan_headers
-        vulkan-memory-allocator::vulkan-memory-allocator)
-    target_compile_definitions(HorizonExamples PRIVATE HORIZON_OCARINA_EXAMPLE_ENABLED=1)
-    # Keep the example next to the Ocarina backend DLL and the copied slang/
-    # headers so RHIContext can load the backend from the executable directory.
-    set_target_properties(HorizonExamples PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-    add_dependencies(HorizonExamples ocarina-backend-vulkan-compute copy_slang_headers)
-endif()
-
 
 # ocarina tests are opt-in from the root Horizon project.
 if(HORIZON_BUILD_OCARINA_TESTS)

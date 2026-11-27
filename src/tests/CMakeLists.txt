@@ -125,6 +125,11 @@ ocarina_add_test(test-slang-conversions GPU CATEGORY codegen SOURCES codegen/tes
 target_link_libraries(test-codegen-slang-conversions PRIVATE slang::slang)
 ocarina_add_test(test-slang-alias-diagnostics GPU CATEGORY codegen SOURCES codegen/test_slang_alias_diagnostics.cpp)
 target_link_libraries(test-codegen-slang-alias-diagnostics PRIVATE slang::slang)
+if(TEST ocarina.test-codegen-slang-alias-diagnostics.vulkan-compute)
+    # Exercise backend and Slang builtin discovery from outside the executable directory.
+    set_tests_properties(ocarina.test-codegen-slang-alias-diagnostics.vulkan-compute PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 
 # Resource and buffer tests.
 ocarina_add_test(test-host-bytebuffer CATEGORY resources SOURCES resources/test_host_byte_buffer.cpp)

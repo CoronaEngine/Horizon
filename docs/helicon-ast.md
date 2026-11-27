@@ -29,7 +29,7 @@ src/Helicon/
 │   ├── ControlFlows.h                     # $IF/$ELSE/$WHILE/$DO/$FOR/$DISCARD 与 include 宏
 │   ├── TypeAlias.h                        # Float/Float4/Texture2D/Array/Aggregate 等别名
 │   ├── ParseHelper.h / .cpp               # lambda 调用、参数输入、聚合展开状态
-│   ├── RasterizedPipelineObject.h         # 光栅管线入口：VS/FS 解析、bindless 变体、auto-bind
+│   ├── RasterPipelineObject.h             # 光栅管线入口：VS/FS 解析、bindless 变体、auto-bind
 │   └── ComputePipelineObject.h            # 计算管线入口
 ├── Compiler/
 │   ├── ShaderCommon.h                     # ShaderLanguage/ShaderStage 等公共类型
@@ -74,7 +74,7 @@ Ocarina AST 是**带 Function 上下文的类型化 AST**：节点由 `Function`
 | C++ EDSL | `TypeAlias.h`、`VariateProxy.h`、`CustomLibrary.h` | 提供可重载运算符的 shader 值类型、资源代理和函数代理 |
 | AST | `Ast::AST`、`Ast::Parser`、`Node.hpp` | 构造 `Value`/`Statement`/`Type` 节点，维护当前作用域和解析状态 |
 | 生成器 | `Generator::SlangGenerator` | 把节点树展开为 Slang 源码，并产出 branch 模块和 type header |
-| 管线入口 | `RasterizedPipelineObject`、`ComputePipelineObject` | 调用 shader lambda、处理 VS/FS 衔接、bindless 变体、auto-bind |
+| 管线入口 | `RasterPipelineObject`、`ComputePipelineObject` | 调用 shader lambda、处理 VS/FS 衔接、bindless 变体、auto-bind |
 | 编译器 | `ShaderCodeCompiler`、`ShaderLanguageConverter` | Slang session、模块加载、compose/link、反射和结果缓存 |
 | 构建期 | `HeliconShaderCompile.cmake`、`ShaderCompileScripts` | 扫描 `#include HLSL/GLSL/SLANG(...)`，生成 C++ shader 头 |
 
@@ -111,7 +111,7 @@ AST 状态，不会互相覆盖。
 
 #### 1.1 从 lambda 到两段 stage
 
-光栅管线的入口是 `RasterizedPipelineObject::compile()`：
+光栅管线的入口是 `RasterPipelineObject::compile()`：
 
 ```cpp
 auto vs = [&](Aggregate<VsIn> in) {
@@ -125,10 +125,10 @@ auto fs = [&](Aggregate<VsOut> in) {
     output_color << Float4(normalize(in->normal), 1.0f);
 };
 
-horizon::RasterizerPipeline pipeline(vs, fs);
+RasterPipeline pipeline(vs, fs);
 ```
 
-`RasterizedPipelineObject::compile()` 的实际流程：
+`RasterPipelineObject::compile()` 的实际流程：
 
 1. 先 `Ast::Parser::setBindless(false)`，解析一次非 bindless 变体。
 2. `parse()` 用 `static_assert` 检查 VS 返回类型和 FS 输入参数匹配。
@@ -219,7 +219,8 @@ struct ParseOutput
   stage 为 `type name : LOCATION<location>;`
 - `DefineSystemSemanticVariate`：`position()`、`isFrontFace()`、
   `dispatchThreadID()` 等内建变量使用 `SV_POSITION`、`SV_IsFrontFace`、
-  `SV_DispatchThreadID`、`SV_DrawIndex`、`SV_InstanceID`、`SV_VertexID`。
+  `SV_DispatchThreadID`、`SV_DrawIndex`、`SV_VulkanInstanceID`、`SV_VertexID`。
+  `instanceIndex()` 包含间接命令指定的 `firstInstance`。
 
 示意（实际变量名由生成器分配）：
 
@@ -289,26 +290,15 @@ SlangStageModules bindlessStageModules;
 
 #### 1.6 反射与 auto-bind
 
-编译完成后，`RasterizedPipelineObject::updateAutoBind()` / 
-`ComputePipelineObject::updateAutoBind()` 会遍历全局 statement，把代理侧记录的
-资源指针和反射表对应起来：
+EDSL 在解析每个 shader stage 时记录代理的访问方向和所在的主机条件分支。
+`ComputePipelineObject::updateAutoBind()` 和 `RasterPipelineObject::updateAutoBind()`
+根据当前变体选择记录，再按变量名查 Slang 反射，取得参数字段的偏移、大小和绑定类型。
+GPU 条件的各条路径都在同一个变体内，因此会合并这些路径可能访问的资源。
 
-- `UniformVariate::boundValueRef`：指向代理保存的宿主值；
-- `UniversalTexture::boundResourceRef`：指向代理保存的 `HardwareImage*`；
-- `UniversalArray::boundResourceRef`：指向代理保存的 `HardwareBuffer*`；
-- `dirtyVersion`：宿主值变化时递增，供绑定时判断是否需要重写；
-- `renderTargetLocation >= 0`：该纹理在 FS 中被 `<<` 当作渲染目标使用。
-
-生成 `AutoBindEntry` 时会读取反射得到的 `byteOffset`、`typeSize`、`bindType`、
-`location`。bindless 下，push constant 中的 handle 在反射里会报成
-`pushConstantMembers`，因此需要按资源种类重映射：
-
-| 反射结果 | 资源 | 重映射后的 bind type |
-| --- | --- | --- |
-| `pushConstantMembers` | 采样纹理 | `sampledImages` |
-| `pushConstantMembers` | 读写纹理 | `storageTexture` |
-| `pushConstantMembers` | `Array<T>` | `storageBuffer` |
-| `stageOutputs` | `texture << value` 的输出 | `stageOutputs`，location 为 `SV_TARGET` 序号 |
+`AutoBindEntry` 引用代理保存的宿主值、缓冲或图像。创建命令时，后端将宿主值写入参数块，
+捕获资源及其访问方向，并根据用途选择采样图像表、存储缓冲表或存储图像表。
+参数索引在提交时写入命令快照。片元 shader 中 `texture << value` 的目标按
+`renderTargetLocation` 绑定为颜色附件。
 
 `ShaderCodeModule::ShaderResources` 保存反射结果，主要字段包括
 `pushConstantSize/Name`、`uniformBufferSize/Name`、`bindInfoPool` 和
@@ -359,26 +349,19 @@ Helicon 里有两条不同的“包含”路径，理解 AST 行为时要区分�
 5. 把生成的 `.hpp` 设为 `GENERATED`，挂到目标的 `OBJECT_DEPENDS` 和
    `target_sources` 上，并把输出根目录以 `BEFORE PUBLIC` 加进 include path。
 
-当前仓库里只有 `HorizonExamples` 调用了 `helicon_compile_shaders`；新 target
-需要自己显式调用，不能只在源码里写 `#include GLSL(...)`。
+使用生成头的目标需要调用 `helicon_compile_shaders`。具名光栅管线通过该函数的
+`RASTER_PAIRS` 参数登记生成头路径和对应的 VS、FS 源文件。
 
 `ShaderCompileScripts`（`tools/main.cpp`）的离线流程：
 
 1. 读取 `.glsl/.hlsl/.slang`，若没有显式 `-t`，按扩展名、文件名关键字、源码
    特征推断 stage；
-2. 若源码没有入口点，按 module-only 处理：仍然生成模块和声明级 C++ 包装，但
-   不生成 `ShaderResources` 反射；
-3. `ShaderLanguageConverter::slangModuleCompiler()` 用 `SLANG_CPP_SOURCE` target
-   加载源码，打开 `NoMangle`、`IncompleteLibrary`，按 `GLSL/HLSL/Slang` 设置
-   `Language` option，并把源码序列化成 `SlangModule`；
-4. 无论是否有入口点，都会用 `slangModuleReflection()` 遍历声明生成 C++ 包装；
-   有入口点时额外用 `slangModuleReflectShaderResource()` 得到 `ShaderResources`。
-   生成内容包括：
-   - `static inline ::EmbeddedShader::SlangModule slang_module_<name>`；
-   - `static inline auto& slangModule` 别名；
-   - 非入口函数的 `FunctionProxy<...>`；
-   - `BindingKey`、`ResourceBindings<P>`、`OutputBindings<P>`、`Bindings<P>`；
-5. 输出 C++ 头，外层结构名由 `sanitizePath()` / `sanitizeFilename()` 清理。
+2. 加载并序列化源码。光栅配对生成器在构建时读取阶段的 `.slang-module` 文件。
+3. 对有入口点的文件，按阶段链接 `main`，从同一个程序取得 SPIR-V 和反射。
+   两者写入生成头的 `shaderModule`，资源和输出声明用于生成 C++ 绑定字段。
+4. 对可供 EDSL 导入的普通函数，生成头保留序列化的 Slang IR，并为函数生成
+   `FunctionProxy`。纯辅助模块只需要导入信息。一个文件同时含有 `main`
+   和可导入函数时，可用于创建管线，也可在 EDSL 中调用其辅助函数。
 
 生成的头通常这样使用：
 
@@ -387,32 +370,22 @@ Helicon 里有两条不同的“包含”路径，理解 AST 行为时要区分�
 
 auto fs = [&](Aggregate<Varyings> in) {
     // my_helpers.glsl 中非入口函数被包装成 FunctionProxy
-    return tonemap(in->color);
+    return my_helpers_glsl.tonemap(in->color);
 };
 ```
 
-注意：带 `main` 的入口函数不会被包装成 `FunctionProxy`；这类 shader 应该用
-`RasterizerPipeline<VertShader, FragShader>` / `ComputePipeline<Shader>` 通过
-生成头里的 `slangModule` 来使用，而不是在 EDSL lambda 里直接调用 `main`。
+把生成的阶段对象传给 `ComputePipeline(cs)` 或 `RasterPipeline(vs, fs)` 即可使用其
+`main` 入口。构造函数直接使用构建时生成的 SPIR-V 和反射。
 
 #### 2.2 生成头里的模块和绑定代理
 
-生成的 shader 头同时承担两件事：
-
-- 把 `SlangModule`（模块名、路径、序列化 IR）暴露给管线；
-- 把反射得到的绑定信息生成为 `BindingKey` 和 `Bindings<P>`，供
-  `pipeline.<UniformBlock>.<member> = value` 之类的直接成员访问使用。
-
-旧版 `Horizon_old.h` 的 `RasterizerPipeline<VS, FS>` 会静态检查：
-
-```cpp
-static_assert(VS::pushConstantBlockSize == FS::pushConstantBlockSize);
-static_assert(VS::uniformBufferBlockSize == FS::uniformBufferBlockSize);
-```
-
-当前 `horizon.h` 的 typed pipeline 不再重复这两条 `static_assert`，但同样要求
-VS/FS 的反射契约一致；如果只改了一侧 shader，需要重新生成另一侧或确认布局仍然
-一致。
+带入口点的单阶段头提供编译好的 `shaderModule` 和反射得到的绑定信息。
+已登记配对的阶段头在声明阶段对象后标记自身可见，并逐一检查配对的另一阶段是否已经可见。
+因此按任意顺序包含 VS 和 FS，第二个阶段都会引入对应的配对头。配对头也可以直接包含，
+它会引入两个阶段头并定义对应的 `RasterPipeline<VS, FS>` 特化。
+颜色输出字段来自片元着色器。资源字段默认来自顶点着色器，只有片元着色器有 UBO
+而顶点着色器没有时才改取片元阶段。两阶段都有 UBO 时，生成器检查两者的总字节数一致。
+这些具名字段都是特化的直接成员，每个实例将它们绑定到自己的管线状态。
 
 #### 2.3 Slang 模块导入
 
@@ -652,18 +625,13 @@ core + entryPoint + type_header + dependency modules + 每个分支选中的 tru
 
 #### 3.6 运行时切换
 
-光栅管线的 `RasterizerPipelineBase` 在 `clear_records()` 和
-`record_indirect()` 开头调用 `sync_shader_conditions()`：
+调用光栅管线 `pipeline(vertices, indices, commands, count)` 创建绘制命令时，EDSL 管线会比较 VS、FS
+当前的条件和上次记录的条件。条件变化时，管线取出对应的着色器变体并更新自动绑定。
+绘制命令捕获当次管线和绑定，可在后续条件变化后再入队。
 
-1. 从当前 pipeline 读取 shader 条件；
-2. 与上次的 `vert_condition_info_` / `frag_condition_info_` 比较；
-3. 变化时对 VS/FS 调用 `getShaderCode(..., conditionInfo)`，更新
-   `autoBindEntries`，并用 `getCombinedKey()` 在 `pipeline_pool_` 中查找或创建
-   新的 Vulkan 管线；
-4. 条件不变时只做一次轻量比较，不重新链接。
-
-计算管线对应 `ComputePipelineBase::sync_shader_conditions()`。`getCombinedKey()`
-把条件位编码成字符串，保证同一组条件复用同一个 Vulkan pipeline。
+调用计算管线的 `pipeline(x, y, z)` 时会重新读取 EDSL 条件。条件发生变化时，管线切换
+着色器变体并更新自动绑定。返回的 `HardwareExecutor::Command` 记录本次变体、绑定与工作组数量，
+可在后续调度改变这些状态后再入队。
 
 #### 3.7 限制与排查
 
@@ -862,7 +830,7 @@ hardcode 的启用条件：
 
 这里只扩展 AST 层。Helicon 的 C++ EDSL 前端（`VariateProxy`、`ParseHelper`、
 `TypeAlias`、`BuiltinVariate`、`CustomLibrary`、`$IF/$ELSE/$WHILE` 宏、
-`RasterizedPipelineObject`、`ComputePipelineObject`）不迁移；它们只是
+`RasterPipelineObject`、`ComputePipelineObject`）不迁移；它们只是
 Helicon AST 的构造者和使用示例。扩展内容是：节点语义、类型/变量/使用标记、
 分支剪枝所需的 AST 元数据和分析、以及 AST 到 Slang 的生成契约。
 
@@ -1150,7 +1118,7 @@ Ocarina AST 目前是 compute/raytracing AST：
 因此：
 
 - 如果目标只是 Ocarina compute/RT：**不要迁移** Helicon 的 `ShaderStage`、
-  `EmbeddedShaderStructure` 的 input/output 分区、`RasterizedPipelineObject`、
+  `EmbeddedShaderStructure` 的 input/output 分区、`RasterPipelineObject`、
   `position()`、`SV_TARGET`、`discard`。这些在 Ocarina AST 里没有对应语义，
   强行塞进 `Function` 会让 codegen 和 ABI 都变复杂。
 - 如果目标必须包含光栅 stage：需要单独设计 `EntryPoint`/stage/IO 元数据，

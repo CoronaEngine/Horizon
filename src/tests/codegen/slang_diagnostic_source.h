@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rhi/context.h"
+#include "tests/backend_test.h"
 #include <chrono>
 
 namespace ocarina::test {
@@ -12,10 +12,7 @@ class SlangDiagnosticSource {
 public:
     explicit SlangDiagnosticSource(string_view test_name) {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        auto &context = RHIContext::instance();
-        const auto runtime = context.runtime_directory();
-        context.init(runtime, ocarina::format(".cache-{}-{}", test_name, stamp));
-        directory_ = context.cache_directory();
+        directory_ = RHIContextTestAccess::set_cache_directory(ocarina::format(".cache-{}-{}", test_name, stamp));
     }
     ~SlangDiagnosticSource() { fs::remove_all(directory_); }
 

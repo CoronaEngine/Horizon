@@ -26,7 +26,11 @@ public:
     protected:
         AccelUsageTag usage_tag_{FAST_TRACE};
         vector<RHIMesh> meshes_;
-        vector<float4x4> transforms_;
+        struct Instance {
+            size_t mesh_index;
+            float4x4 transform;
+        };
+        vector<Instance> instances_;
         BuildAction last_build_action_{BuildAction::NONE};
         uint build_count_{};
         uint update_count_{};
@@ -38,6 +42,8 @@ public:
         Impl &operator=(const Impl &) = delete;
         Impl &operator=(Impl &&) = delete;
         virtual OC_RHI_API void add_instance(RHIMesh mesh, float4x4 transform) noexcept;
+        OC_RHI_API void add_instance(size_t source_instance, float4x4 transform);
+        const RHIMesh& instance_mesh(size_t i) const { return meshes_[instances_.at(i).mesh_index]; }
         virtual OC_RHI_API void set_transform(size_t index, float4x4 transform) noexcept;
         OC_RHI_API void mark_build() noexcept;
         OC_RHI_API void mark_update() noexcept;
@@ -47,7 +53,7 @@ public:
         [[nodiscard]] uint update_count() const noexcept { return update_count_; }
         [[nodiscard]] virtual handle_ty handle() const noexcept = 0;
         [[nodiscard]] virtual const void *handle_ptr() const noexcept = 0;
-        [[nodiscard]] size_t mesh_num() const noexcept { return meshes_.size(); }
+        [[nodiscard]] size_t mesh_num() const noexcept { return instances_.size(); }
         [[nodiscard]] virtual size_t data_size() const noexcept = 0;
         virtual OC_RHI_API void clear() noexcept;
         [[nodiscard]] virtual size_t data_alignment() const noexcept = 0;
@@ -63,6 +69,9 @@ public:
     [[nodiscard]] const Impl *impl() const noexcept { return reinterpret_cast<const Impl *>(handle_); }
 
     void add_instance(RHIMesh mesh, float4x4 transform) noexcept;
+
+    // Reuse the BLAS of an existing instance with a new world transform.
+    void add_instance(size_t source_instance, float4x4 transform);
 
     void set_transform(size_t index, float4x4 transform) noexcept;
 

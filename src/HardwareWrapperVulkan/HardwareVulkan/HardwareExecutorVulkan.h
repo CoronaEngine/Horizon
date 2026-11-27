@@ -1,42 +1,22 @@
-﻿#pragma once
+#pragma once
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <variant>
 
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "Horizon_old.h"
+#include "Horizon.h"
 
 struct HardwareExecutorVulkan;
-struct CommandRecordVulkan;
+struct ResourceAccessList;
 
-struct CopyCommandImpl
-{
-    virtual ~CopyCommandImpl() = default;
-    virtual CommandRecordVulkan* getCommandRecord() = 0;
-};
-
-// Generic resource holder for keeping objects alive until GPU work is done
-struct ResourceHolderCommand : public CopyCommandImpl
-{
-    std::vector<HardwareBuffer> buffers;
-    std::vector<HardwareImage> images;
-    // Add other resources if needed (e.g., PushConstants)
-
-    CommandRecordVulkan* getCommandRecord() override { return nullptr; }
-};
-
-// ========== 延迟释放条目 ==========
-struct DeferredRelease
-{
-    uint64_t timelineValue;                    // GPU 完成此值后可释放
-    std::shared_ptr<CopyCommandImpl> resource; // 持有资源的引用
-    VkSemaphore semaphore;                     // 对应的 timeline semaphore
-};
-
+namespace horizon::detail {
 struct CommandRecordVulkan
 {
     enum class ExecutorType
@@ -47,32 +27,75 @@ struct CommandRecordVulkan
         Invalid
     };
 
-    struct RequiredBarriers
-    {
-        std::vector<VkMemoryBarrier2> memoryBarriers;
-        std::vector<VkBufferMemoryBarrier2> bufferBarriers;
-        std::vector<VkImageMemoryBarrier2> imageBarriers;
-    };
-
-    CommandRecordVulkan() = default;
     virtual ~CommandRecordVulkan() = default;
+    virtual void commitCommand(HardwareExecutorVulkan &executor) = 0;
+    virtual void resolveResourceUses(ResourceAccessList&) = 0;
+    virtual ExecutorType getExecutorType() = 0;
+};
+} // namespace horizon::detail
 
-    virtual void commitCommand(HardwareExecutorVulkan &executor)
+using horizon::detail::CommandRecordVulkan;
+
+// The owner retains captured GPU resources through recording and submission.
+struct RecordedCommand
+{
+    CommandRecordVulkan* command{};
+    std::shared_ptr<void> owner;
+    CommandRecordVulkan::ExecutorType type{CommandRecordVulkan::ExecutorType::Invalid};
+
+    RecordedCommand() = default;
+    explicit RecordedCommand(CommandRecordVulkan& record, std::shared_ptr<void> owner = {})
+        : command(&record), owner(std::move(owner)), type(record.getExecutorType()) {}
+};
+
+struct HardwareExecutor::Command::Impl
+{
+    struct Draw;
+    struct Dispatch;
+    struct BuildAS;
+    struct Trace;
+    struct Display;
+    struct BufferToBuffer;
+    struct BufferToImage;
+    struct ImageToImage;
+    struct ImageToBuffer;
+
+    using Entry = std::variant<RecordedCommand, std::shared_ptr<const Display>>;
+
+    virtual ~Impl() = default;
+    virtual Entry queueEntry(std::shared_ptr<Impl> owner) = 0;
+};
+
+struct HardwareExecutor::Command::Impl::Display : HardwareExecutor::Command::Impl
+{
+    Display(std::shared_ptr<HardwareDisplayer::Impl> target, const HardwareImage& image)
+        : target(std::move(target)), image(image) {}
+
+    Entry queueEntry(std::shared_ptr<Impl> owner) final
     {
+        return std::shared_ptr<const Display>(std::move(owner), this);
     }
+    virtual void submit(HardwareExecutorVulkan& executor) const;
 
-    virtual RequiredBarriers getRequiredBarriers(HardwareExecutorVulkan &executor)
-    {
-        return RequiredBarriers{};
-    }
+    std::shared_ptr<HardwareDisplayer::Impl> target;
+    HardwareImage image;
+};
 
-    virtual ExecutorType getExecutorType()
-    {
-        return ExecutorType::Invalid;
-    }
+// A borrowed completion point. Queue storage and its device must outlive use;
+// public executors use DeviceManager queues, which remain stable after initialization.
+struct SubmissionPoint
+{
+    const DeviceManager::QueueUtils* queue{nullptr};
+    uint64_t value{0};
 
-  protected:
-    ExecutorType executorType{ExecutorType::Invalid};
+    explicit operator bool() const noexcept { return queue != nullptr && value != 0; }
+};
+
+// One submitted batch retains its commands and resources until GPU completion.
+struct DeferredRelease
+{
+    SubmissionPoint point;
+    std::vector<RecordedCommand> commands;
 };
 
 struct HardwareExecutorVulkan
@@ -85,7 +108,6 @@ struct HardwareExecutorVulkan
             throw std::invalid_argument("Hardware context cannot be null");
         }
         // 预分配以减少重分配
-        pendingResources.reserve(32);
         deferredReleaseQueue.reserve(128);
     }
 
@@ -94,89 +116,59 @@ struct HardwareExecutorVulkan
         : hardwareContext(getHardwareContext().getMainDevice())
     {
         // 预分配以减少重分配
-        pendingResources.reserve(32);
         deferredReleaseQueue.reserve(128);
     }
 
     ~HardwareExecutorVulkan();
 
-    HardwareExecutorVulkan &operator<<(CommandRecordVulkan *commandRecord)
+    HardwareExecutorVulkan(const HardwareExecutorVulkan&) = delete;
+    HardwareExecutorVulkan& operator=(const HardwareExecutorVulkan&) = delete;
+
+    [[nodiscard]] SubmissionPoint getSubmissionPoint() const noexcept
     {
-        if (commandRecord && commandRecord->getExecutorType() != CommandRecordVulkan::ExecutorType::Invalid)
-        {
-            commandList.push_back(commandRecord);
+        return lastSubmission;
+    }
+
+    // Borrowed commands must outlive recording; their GPU resources must outlive execution.
+    // Supply an owner when the queue should retain the command.
+    HardwareExecutorVulkan &record(CommandRecordVulkan *commandRecord,
+                                  std::shared_ptr<void> owner = {})
+    {
+        if (commandRecord) {
+            RecordedCommand entry(*commandRecord, std::move(owner));
+            if (entry.type != CommandRecordVulkan::ExecutorType::Invalid)
+                commandList.push_back(std::move(entry));
         }
         return *this;
     }
 
-    HardwareExecutorVulkan &operator<<(HardwareExecutorVulkan &other)
+    HardwareExecutorVulkan &wait(const HardwareExecutorVulkan &other)
     {
-        return other;
+        return wait(other.getSubmissionPoint());
     }
 
-    HardwareExecutorVulkan &wait(const std::vector<VkSemaphoreSubmitInfo> &waitInfos = {},
-                                 const std::vector<VkSemaphoreSubmitInfo> &signalInfos = {})
+    HardwareExecutorVulkan &wait(SubmissionPoint point)
     {
-        // waitFence = fence;
-        waitSemaphores.insert(waitSemaphores.end(), waitInfos.begin(), waitInfos.end());
-        signalSemaphores.insert(signalSemaphores.end(), signalInfos.begin(), signalInfos.end());
-        return *this;
-    }
-
-    HardwareExecutorVulkan &wait(HardwareExecutorVulkan &other)
-    {
-        if (other)
+        if (point)
         {
-            // 跨设备时自动解析为本设备可用的 imported semaphore；同设备零开销直接返回
-            VkSemaphore resolvedSemaphore = hardwareContext->deviceManager.getOrImportTimelineSemaphore(
-                *other.currentRecordQueue);
-
-            if (resolvedSemaphore == VK_NULL_HANDLE)
-            {
-                // CPU-bridge fallback：跨设备 semaphore 导入不可用（不同架构 GPU），
-                // 回退到 host 侧等待外部设备完成，再让本地 GPU 继续
-                uint64_t waitValue = other.lastSignalValue;
-                VkSemaphore foreignSem = other.currentRecordQueue->timelineSemaphore;
-                VkDevice foreignDevice = other.currentRecordQueue->deviceManager->getLogicalDevice();
-
-                VkSemaphoreWaitInfo cpuWaitInfo{};
-                cpuWaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-                cpuWaitInfo.pNext = nullptr;
-                cpuWaitInfo.flags = 0;
-                cpuWaitInfo.semaphoreCount = 1;
-                cpuWaitInfo.pSemaphores = &foreignSem;
-                cpuWaitInfo.pValues = &waitValue;
-
-                VkResult r = vkWaitSemaphores(foreignDevice, &cpuWaitInfo, 5'000'000'000ULL);
-                if (r != VK_SUCCESS)
+            for (auto& pending : pendingWaits)
+                if (pending.queue == point.queue)
                 {
-                    CFW_LOG_ERROR("[wait] CPU-bridge fallback: vkWaitSemaphores on foreign device failed, VkResult={}",
-                                  static_cast<int>(r));
+                    if (point.value > pending.value) pending.value = point.value;
+                    return *this;
                 }
-                // 外部 GPU 工作已在 CPU 时间线上确认完成，无需添加 GPU 侧 wait semaphore
-                return *this;
-            }
-
-            VkSemaphoreSubmitInfo timelineWaitSemaphoreSubmitInfo{};
-            timelineWaitSemaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-            timelineWaitSemaphoreSubmitInfo.semaphore = resolvedSemaphore;
-            timelineWaitSemaphoreSubmitInfo.value = other.lastSignalValue;
-            timelineWaitSemaphoreSubmitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            waitSemaphores.push_back(timelineWaitSemaphoreSubmitInfo);
+            pendingWaits.push_back(point);
         }
         return *this;
     }
 
     explicit operator bool() const
     {
-        return currentRecordQueue != nullptr;
+        return static_cast<bool>(lastSubmission);
     }
 
-    HardwareExecutorVulkan &commit();
-    //HardwareExecutorVulkan &commitTest();
+    HardwareExecutorVulkan &commit(bool submitPendingWaits = false);
 
-    // ========== 延迟释放相关接口 ==========
-    void cleanupCompletedResources();
     void waitForAllDeferredResources();
 
     // 调试：获取统计信息
@@ -194,22 +186,37 @@ struct HardwareExecutorVulkan
     // void disposeWhenCommitCompletes(std::shared_ptr<Buffer> buffer);
     // void disposeWhenCommitCompletes(std::function<void()> &&deallocator);
 
-    DeviceManager::QueueUtils *pickQueueAndCommit(std::atomic_uint16_t &queueIndex,
-                                                  std::vector<DeviceManager::QueueUtils> &queues,
-                                                  std::function<bool(DeviceManager::QueueUtils *currentRecordQueue)> commitCommand);
-
     DeviceManager::QueueUtils *currentRecordQueue{nullptr};
-    uint64_t lastSignalValue{0}; // 记录最近一次提交的 signal timeline 值，避免跨原子操作竞态
+    // Number of vkCmdBeginRenderPass calls recorded by the most recent nonempty commit.
+    uint32_t recordedRasterPassCount{};
     std::shared_ptr<HardwareContext::HardwareUtils> hardwareContext;
-    std::vector<CommandRecordVulkan *> commandList;
+    std::vector<RecordedCommand> commandList; // GPU batch currently being submitted.
     std::vector<VkSemaphoreSubmitInfo> waitSemaphores;
     std::vector<VkSemaphoreSubmitInfo> signalSemaphores;
-    // std::vector<VkFence> prentFences;
-    VkFence waitFence{VK_NULL_HANDLE};
-    // std::unordered_map<VkFence, DeviceManager::QueueUtils*> fenceToPresent;
-    // std::vector<std::vector<std::shared_ptr<Buffer>>> buffer_to_dispose_;
 
     // ========== 延迟释放成员 ==========
-    std::vector<std::shared_ptr<CopyCommandImpl>> pendingResources;
     std::vector<DeferredRelease> deferredReleaseQueue;
+
+  private:
+    void cleanupCompletedResources();
+    std::vector<SubmissionPoint> pendingWaits; // Freeze the exact submissions at wait() time.
+    SubmissionPoint lastSubmission; // Published only after a successful queue submission.
+    SubmissionPoint lastCompleted;  // Observed from the device or a successful host wait.
+};
+
+struct HardwareExecutor::Impl
+{
+    HardwareExecutorVulkan backend;
+
+    std::deque<Command::Impl::Entry> pending;
+};
+
+struct HardwareBackendAccess
+{
+    static HardwareExecutor::Impl& state(HardwareExecutor& executor)
+    {
+        if (!executor.impl_)
+            throw std::runtime_error("Empty HardwareExecutor handle");
+        return *executor.impl_;
+    }
 };

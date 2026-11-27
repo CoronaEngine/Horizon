@@ -32,9 +32,9 @@ DEFAULT_TARGET = "HorizonExamples"
 
 TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
     "core": ("&:with_engine=False", "&:with_tests=True"),
-    "engine": ("&:with_engine=True",),
+    "engine": ("&:with_engine=True", "&:with_tests=True"),
     "tools": ("&:with_tools=True",),
-    "examples": ("&:with_examples=True",),
+    "examples": ("&:with_examples=True", "&:with_tests=True"),
     "ocarina": ("&:with_ocarina=True",),
     "ocarina-tests": (
         "&:with_ocarina=True",
@@ -44,11 +44,11 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
 
 
 def target_family_for_target(target: str) -> str:
-    if target in {"Horizon", "Helicon"}:
+    if target in {"Horizon", "Helicon", "horizon-test-legacy"}:
         return "engine"
     if target == "ShaderCompileScripts":
         return "tools"
-    if target in {"HorizonExamples", "horizon-baseline-hotfix-patch"}:
+    if target == "HorizonExamples":
         return "examples"
     if target.startswith("test-"):
         return "ocarina-tests"
@@ -64,6 +64,13 @@ def target_family_for_targets(targets: list[str]) -> str:
         return DEFAULT_TARGET_FAMILY
 
     families = {target_family_for_target(target) for target in targets}
+    if "examples" in families:
+        # The examples preset builds the engine, shader compiler, and Ocarina backend.
+        families.difference_update({"engine", "tools", "ocarina"})
+    if families & {"examples", "engine"} and "core" in families:
+        core_targets = (target for target in targets if target_family_for_target(target) == "core")
+        if all(target == "horizon-tests" or target.startswith("horizon-test-") for target in core_targets):
+            families.remove("core")
     if len(families) != 1:
         choices = ", ".join(sorted(families))
         raise ValueError(
@@ -73,24 +80,20 @@ def target_family_for_targets(targets: list[str]) -> str:
     return families.pop()
 
 
-def conan_options(target_family: str, targets: list[str] | None = None, *,
-                  extra_options: list[str] | None = None) -> list[str]:
+def conan_options(target_family: str, *, extra_options: list[str] | None = None) -> list[str]:
     try:
-        options = list(TARGET_FAMILY_OPTIONS[target_family])
+        options = TARGET_FAMILY_OPTIONS[target_family]
     except KeyError as error:
         raise ValueError(f"Unsupported target family: {target_family}") from error
-    if targets and "horizon-test-baseline-window" in targets:
-        options.append("&:with_baseline_window_test=True")
     return list(dict.fromkeys([*options, *(extra_options or [])]))
 
 
-def install(configuration: str, target_family: str, *, targets: list[str] | None = None,
-            extra_options: list[str] | None = None, update: bool = False) -> None:
+def install(configuration: str, target_family: str, *, extra_options: list[str] | None = None, update: bool = False) -> None:
     conan_install(
         REPO_ROOT,
         configuration,
         target_family=target_family,
-        options=conan_options(target_family, targets, extra_options=extra_options),
+        options=conan_options(target_family, extra_options=extra_options),
         recipes=LOCAL_RECIPES,
         recipe_toggle_env=RECIPE_TOGGLE_ENV,
         update=update,
@@ -111,23 +114,23 @@ def execute(args: argparse.Namespace) -> None:
         run_command(("conan", "--version"), cwd=REPO_ROOT)
         run_command(("cmake", "--list-presets"), cwd=REPO_ROOT)
     elif args.command in {"install", "_bootstrap"}:
-        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
+        install(configuration, target_family, extra_options=args.extra_options)
     elif args.command == "configure":
-        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
+        install(configuration, target_family, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "build":
-        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
+        install(configuration, target_family, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "build-fast":
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "rebuild":
         safe_remove(REPO_ROOT, build_dir(REPO_ROOT, configuration, target_family))
-        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
+        install(configuration, target_family, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "update":
-        install(configuration, target_family, targets=targets, extra_options=args.extra_options, update=True)
+        install(configuration, target_family, extra_options=args.extra_options, update=True)
         cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "clean":
         clean_repo(REPO_ROOT)

@@ -53,10 +53,7 @@ jobs:
               output.write(sysconfig.get_path("scripts") + "\n")
 
       - name: Build Legacy tests
-        run: |
-          python build_tools/dev.py install horizon-test-legacy --configuration Release --target-family engine --with-tests
-          cmake --preset engine-release -DHORIZON_USE_LEGACY_BACKEND=ON
-          python build_tools/dev.py build-fast horizon-test-legacy --configuration Release --target-family engine
+        run: python build_tools/dev.py build horizon-test-legacy --configuration Release --target-family engine
 
       - name: Run Legacy CPU and Vulkan tests with Lavapipe
         shell: bash

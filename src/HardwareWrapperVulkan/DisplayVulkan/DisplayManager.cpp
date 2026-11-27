@@ -3,13 +3,66 @@
 #include <algorithm>
 #include <optional>
 
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceAccess.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include <new>
 
-//#define USE_SAME_DEVICE
+namespace {
+struct PresentImageCommand final : CommandRecordVulkan
+{
+    ResourceManager::ImageHardwareWrap& source;
+    VkImage target;
+    ktm::uvec2 extent;
 
-DisplayManager::DisplayManager() = default;
+    PresentImageCommand(ResourceManager::ImageHardwareWrap& src, VkImage dst, ktm::uvec2 size)
+        : source(src), target(dst), extent(size) {}
+
+    ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
+
+    void resolveResourceUses(ResourceAccessList& uses) override
+    {
+        const auto descriptors = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+        uses.image(source, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+            (source.imageUsage & descriptors) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            {source.aspectMask, source.baseMipLevel, 1, source.baseArrayLayer, 1});
+    }
+
+    void commitCommand(HardwareExecutorVulkan& executor) override
+    {
+        const VkCommandBuffer cb = executor.currentRecordQueue->commandBuffer;
+        // The blit overwrites the entire acquired image. Chain its first transition to the acquire wait.
+        VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = target;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dependency.imageMemoryBarrierCount = 1;
+        dependency.pImageMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(cb, &dependency);
+
+        VkImageBlit region{};
+        region.srcSubresource = {source.aspectMask, source.baseMipLevel, source.baseArrayLayer, 1};
+        region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.srcOffsets[1] = {static_cast<int32_t>(source.imageSize.x), static_cast<int32_t>(source.imageSize.y), 1};
+        region.dstOffsets[1] = {static_cast<int32_t>(extent.x), static_cast<int32_t>(extent.y), 1};
+        vkCmdBlitImage(cb, source.imageHandle, source.imageLayout, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &region, source.imageSize == extent ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
+
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+        barrier.dstAccessMask = VK_ACCESS_2_NONE;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        vkCmdPipelineBarrier2(cb, &dependency);
+    }
+};
+}
 
 DisplayManager::~DisplayManager()
 {
@@ -24,12 +77,12 @@ void DisplayManager::cleanUpDisplayManager()
     {
         vkDeviceWaitIdle(device);
     }
+    displayDeviceExecutor.reset();
 
     // 按照正确的顺序清理资源
     cleanupSyncObjects();
-    cleanupDisplayImage();
-    cleanupStagingBuffers();
-    cleanupSwapChainImages();
+    cleanupCrossDeviceTransfer();
+    swapChainImages.clear();
 
     // 清理交换链
     if (swapChain != VK_NULL_HANDLE && device != VK_NULL_HANDLE)
@@ -45,19 +98,9 @@ void DisplayManager::cleanUpDisplayManager()
         vkSurface = VK_NULL_HANDLE;
     }
 
-    // 清理宿主内存
-    if (hostBufferPtr != nullptr)
-    {
-        ::operator delete(hostBufferPtr, std::align_val_t(hostBufferAlignment));
-        hostBufferPtr = nullptr;
-    }
-
     // 清理状态
-    presentQueues.clear();
-    mainDeviceExecutor.reset();
-    //displayDeviceExecutors.clear();
-    displayDeviceExecutor.reset();
-    waitedExecutor.reset();
+    presentQueue = nullptr;
+    displayDevice.reset();
     displaySurface = nullptr;
     displaySize = {0, 0};
     currentFrame = 0;
@@ -69,23 +112,7 @@ void DisplayManager::cleanupSyncObjects()
     if (device == VK_NULL_HANDLE)
         return;
 
-    for (auto &fence : acquireFences)
-    {
-        if (fence != VK_NULL_HANDLE)
-        {
-            vkDestroyFence(device, fence, nullptr);
-            fence = VK_NULL_HANDLE;
-        }
-    }
-    acquireFences.clear();
-
-    // for (auto& fence : copyFences) {
-    //     if (fence != VK_NULL_HANDLE) {
-    //         vkDestroyFence(device, fence, nullptr);
-    //         fence = VK_NULL_HANDLE;
-    //     }
-    // }
-    // copyFences.clear();
+    acquireConsumed.clear();
 
     for (auto &sem : imageAvailableSemaphores)
     {
@@ -106,28 +133,18 @@ void DisplayManager::cleanupSyncObjects()
     renderFinishedSemaphores.clear();
 }
 
-void DisplayManager::cleanupSwapChainImages()
+void DisplayManager::cleanupCrossDeviceTransfer()
 {
-    VkDevice device = displayDevice ? displayDevice->deviceManager.getLogicalDevice() : VK_NULL_HANDLE;
-    if (device == VK_NULL_HANDLE)
-        return;
-
-    for (auto &image : swapChainImages)
+    // A source copy can already be in flight if submission on the display device failed.
+    if (sourceCopy)
     {
-        if (image.imageView != VK_NULL_HANDLE)
-        {
-            vkDestroyImageView(device, image.imageView, nullptr);
-            image.imageView = VK_NULL_HANDLE;
-        }
-        // 交换链图像由交换链管理，不需要手动销毁
-        image.imageHandle = VK_NULL_HANDLE;
-        image.imageAlloc = VK_NULL_HANDLE;
+        VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+        wait.semaphoreCount = 1;
+        wait.pSemaphores = &sourceCopy.queue->timelineSemaphore;
+        wait.pValues = &sourceCopy.value;
+        vkWaitSemaphores(sourceCopy.queue->deviceManager->getLogicalDevice(), &wait, UINT64_MAX);
+        sourceCopy = {};
     }
-    swapChainImages.clear();
-}
-
-void DisplayManager::cleanupStagingBuffers()
-{
     if (srcStaging.bufferHandle != VK_NULL_HANDLE && srcStaging.resourceManager)
     {
         srcStaging.resourceManager->destroyBuffer(srcStaging);
@@ -139,32 +156,26 @@ void DisplayManager::cleanupStagingBuffers()
         dstStaging.resourceManager->destroyBuffer(dstStaging);
         dstStaging = {};
     }
-}
-
-void DisplayManager::cleanupDisplayImage()
-{
-    if (displayImage.imageHandle != VK_NULL_HANDLE &&
-        displayImage.imageAlloc != VK_NULL_HANDLE &&
-        displayDevice)
+    if (hostBufferPtr)
     {
-        // displayDevice->resourceManager.destroyImage(displayImage);
+        ::operator delete(hostBufferPtr, std::align_val_t(hostBufferAlignment));
+        hostBufferPtr = nullptr;
+    }
+    if (displayImage.resourceManager)
+    {
+        displayImage.resourceManager->destroyImage(displayImage);
         displayImage = {};
     }
 }
 
 bool DisplayManager::initDisplayManager(void *surface)
 {
-    if (surface == nullptr)
-    {
-        return false;
-    }
-
     try
     {
         createVkSurface(surface);
         choosePresentDevice();
 
-        if (!displayDevice || presentQueues.empty())
+        if (!displayDevice || !presentQueue)
         {
             throw std::runtime_error("Failed to find suitable present device/queue");
         }
@@ -191,31 +202,17 @@ void DisplayManager::createSyncObjects()
 
     imageAvailableSemaphores.resize(imageCount);
     renderFinishedSemaphores.resize(imageCount);
-    acquireFences.resize(imageCount);  // 用于 vkAcquireNextImageKHR 同步
+    acquireConsumed.resize(imageCount);
 
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;  // 首帧无需等待
-
     VkDevice device = displayDevice->deviceManager.getLogicalDevice();
 
-    for (size_t i = 0; i < imageCount; i++)
-    {
-        coronaHardwareCheck(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]));
-        coronaHardwareCheck(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]));
-        coronaHardwareCheck(vkCreateFence(device, &fenceInfo, nullptr, &acquireFences[i]));
-    }
-
-    // CFW_LOG_INFO("Using Acquire Fence for present synchronization (VK_EXT_swapchain_maintenance1 removed)");
-
-    /*displayDeviceExecutors.resize(imageCount);
-    for (size_t i = 0; i < imageCount; i++)
-    {
-        displayDeviceExecutors[i] = std::make_shared<HardwareExecutorVulkan>(displayDevice);
-    }*/
+    for (auto& semaphore : imageAvailableSemaphores)
+        coronaHardwareCheck(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore));
+    for (auto& semaphore : renderFinishedSemaphores)
+        coronaHardwareCheck(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore));
 }
 
 void DisplayManager::createVkSurface(void *surface)
@@ -261,54 +258,23 @@ void DisplayManager::createVkSurface(void *surface)
 
 void DisplayManager::choosePresentDevice()
 {
-#ifdef USE_SAME_DEVICE
-    displayDevice = getHardwareContext().getMainDevice();
-
-    auto pickQueuesRoles = [&](const DeviceManager::QueueUtils &queues) -> bool {
-        VkBool32 presentSupport = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(displayDevice->deviceManager.getPhysicalDevice(),
-                                             queues.queueFamilyIndex,
-                                             vkSurface,
-                                             &presentSupport);
-        return presentSupport;
-    };
-
-    presentQueues = displayDevice->deviceManager.pickAvailableQueues(pickQueuesRoles);
-#else
-    // 优先选择与主设备不同的设备（如果支持）
-    for (const auto &device : getHardwareContext().getAllDevices())
+    const auto renderDevice = getHardwareContext().getMainDevice();
+    for (const auto& device : getHardwareContext().getAllDevices())
     {
-        auto pickQueuesRoles = [&](const DeviceManager::QueueUtils &queues) -> bool {
-            VkBool32 presentSupport = false;
-            vkGetPhysicalDeviceSurfaceSupportKHR(device->deviceManager.getPhysicalDevice(),
-                                                 queues.queueFamilyIndex,
-                                                 vkSurface,
-                                                 &presentSupport);
-            return presentSupport;
-        };
-
-        auto queues = device->deviceManager.pickAvailableQueues(pickQueuesRoles);
-        if (!queues.empty())
-        {
-            displayDevice = device;
-            presentQueues = std::move(queues);
-
-            // 如果找到与主设备不同的设备，优先使用
-            if (displayDevice != getHardwareContext().getMainDevice())
-            {
-                break;
-            }
-        }
+        const auto* queue = device->deviceManager.findPresentQueue(vkSurface, blitQueueFamily);
+        if (!queue) continue;
+        displayDevice = device;
+        presentQueue = queue;
+        if (device == renderDevice) break;
     }
-#endif
 
-    if (!displayDevice || presentQueues.empty())
+    if (!displayDevice || !presentQueue)
     {
         throw std::runtime_error("Failed to find suitable present device");
     }
 
-    mainDeviceExecutor = std::make_shared<HardwareExecutorVulkan>(getHardwareContext().getMainDevice());
-    displayDeviceExecutor = std::make_shared<HardwareExecutorVulkan>(displayDevice);
+    if (displayDevice != renderDevice)
+        displayDeviceExecutor = std::make_unique<HardwareExecutorVulkan>(displayDevice);
 }
 
 void DisplayManager::createSwapChain()
@@ -386,25 +352,21 @@ void DisplayManager::createSwapChain()
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = {displaySize.x, displaySize.y};
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    createInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                            (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
     if ((capabilities.supportedUsageFlags & createInfo.imageUsage) != createInfo.imageUsage)
     {
         throw std::runtime_error("Swapchain does not support required image usage flags");
     }
 
-    std::vector<uint32_t> queueFamilies(displayDevice->deviceManager.getQueueFamilyNumber());
-    std::iota(queueFamilies.begin(), queueFamilies.end(), 0);
-
-    if (queueFamilies.size() > 1)
+    const uint32_t queueFamilies[] = {blitQueueFamily, presentQueue->queueFamilyIndex};
+    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (queueFamilies[0] != queueFamilies[1])
     {
         createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        createInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueFamilies.size());
-        createInfo.pQueueFamilyIndices = queueFamilies.data();
-    }
-    else
-    {
-        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.queueFamilyIndexCount = 2;
+        createInfo.pQueueFamilyIndices = queueFamilies;
     }
 
     createInfo.preTransform = capabilities.currentTransform;
@@ -413,44 +375,18 @@ void DisplayManager::createSwapChain()
     createInfo.clipped = VK_TRUE;
     createInfo.oldSwapchain = swapChain;
 
-    VkSwapchainKHR oldSwapChain = swapChain;
+    VkSwapchainKHR replacement = VK_NULL_HANDLE;
     result = vkCreateSwapchainKHR(displayDevice->deviceManager.getLogicalDevice(),
-                                  &createInfo, nullptr, &swapChain);
-
-    // 清理旧的交换链
-    if (oldSwapChain != VK_NULL_HANDLE)
-    {
-        vkDestroySwapchainKHR(displayDevice->deviceManager.getLogicalDevice(), oldSwapChain, nullptr);
-    }
-
-    if (result != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create swap chain");
-    }
+                                  &createInfo, nullptr, &replacement);
+    coronaHardwareCheck(result);
+    if (swapChain) vkDestroySwapchainKHR(displayDevice->deviceManager.getLogicalDevice(), swapChain, nullptr);
+    swapChain = replacement;
 
     // 获取交换链图像
-    vkGetSwapchainImagesKHR(displayDevice->deviceManager.getLogicalDevice(),
-                            swapChain, &imageCount, nullptr);
-
-    std::vector<VkImage> swapChainVkImages(imageCount);
-    vkGetSwapchainImagesKHR(displayDevice->deviceManager.getLogicalDevice(),
-                            swapChain, &imageCount, swapChainVkImages.data());
-
+    const VkDevice device = displayDevice->deviceManager.getLogicalDevice();
+    coronaHardwareCheck(vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr));
     swapChainImages.resize(imageCount);
-    for (uint32_t i = 0; i < imageCount; i++)
-    {
-        swapChainImages[i].imageHandle = swapChainVkImages[i];
-        swapChainImages[i].imageSize = displaySize;
-        swapChainImages[i].imageFormat = surfaceFormat.format;
-        swapChainImages[i].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        swapChainImages[i].arrayLayers = 1;
-        swapChainImages[i].mipLevels = 1;
-        swapChainImages[i].device = &displayDevice->deviceManager;
-        swapChainImages[i].resourceManager = &displayDevice->resourceManager;
-        swapChainImages[i].pixelSize = 4; // RGBA8
-
-        swapChainImages[i].imageView = displayDevice->resourceManager.createImageView(swapChainImages[i]);
-    }
+    coronaHardwareCheck(vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.data()));
 }
 
 void DisplayManager::recreateSwapChain()
@@ -459,20 +395,18 @@ void DisplayManager::recreateSwapChain()
     vkDeviceWaitIdle(device);
 
     cleanupSyncObjects();
-    //displayDeviceExecutors.clear();
-    cleanupSwapChainImages();
+    swapChainImages.clear();
 
     createSwapChain();
     createSyncObjects();
-}
-
-bool DisplayManager::needsSwapChainRecreation(const ktm::uvec2 &newSize) const
-{
-    return newSize != displaySize;
+    currentFrame = 0;
 }
 
 void DisplayManager::setupCrossDeviceTransfer(const ResourceManager::ImageHardwareWrap &sourceImage)
 {
+    displayDeviceExecutor->waitForAllDeferredResources();
+    cleanupCrossDeviceTransfer();
+    displayImage = displayDevice->resourceManager.createImage(sourceImage.imageSize, sourceImage.imageFormat, sourceImage.pixelSize, sourceImage.imageUsage);
     VkDeviceSize imageSizeBytes = static_cast<VkDeviceSize>(sourceImage.imageSize.x) *
                                   sourceImage.imageSize.y * sourceImage.pixelSize;
 
@@ -498,13 +432,6 @@ void DisplayManager::setupCrossDeviceTransfer(const ResourceManager::ImageHardwa
     // 宿主内存区域大小必须是 minImportedHostPointerAlignment 的整数倍
     VkDeviceSize alignedSize = (imageSizeBytes + requiredAlign - 1) & ~(requiredAlign - 1);
 
-    // Release imported buffers before freeing their backing host allocation.
-    cleanupStagingBuffers();
-    if (hostBufferPtr != nullptr)
-    {
-        ::operator delete(hostBufferPtr, std::align_val_t(hostBufferAlignment));
-        hostBufferPtr = nullptr;
-    }
     hostBufferAlignment = requiredAlign;
     hostBufferPtr = ::operator new(alignedSize, std::align_val_t(hostBufferAlignment));
 
@@ -516,88 +443,67 @@ void DisplayManager::setupCrossDeviceTransfer(const ResourceManager::ImageHardwa
     dstStaging = displayDevice->resourceManager.importBufferMemory(memHandle, srcStaging.elementCount, srcStaging.elementSize,srcStaging.bufferAllocInfo.size,srcStaging.bufferUsage);*/
 }
 
-bool DisplayManager::waitExecutor(HardwareExecutorVulkan &executor)
+void DisplayManager::displayFrame(void *surface, const HardwareImage& source, HardwareExecutorVulkan& producer)
 {
-    waitedExecutor = std::make_shared<HardwareExecutorVulkan>(executor);
-    return true;
-}
-
-bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
-{
-    if (surface == nullptr)
-    {
-        return false;
-    }
-
     try
     {
+#ifdef _WIN32
+        // Avoid a blocking acquire for minimized or zero-sized windows.
+        RECT client{};
+        if (!GetClientRect(static_cast<HWND>(surface), &client) || IsIconic(static_cast<HWND>(surface)) ||
+            client.right == client.left || client.bottom == client.top) return;
+#endif
         // 检查是否需要重新初始化
-        if (auto const handle = globalImageStorages.acquire_read(displayImage.getImageID());
-            this->displaySurface != surface)
+        auto* handle = ResourceManager::get(source);
+        if (this->displaySurface != surface)
         {
-            this->displaySurface = surface;
-
             if (vkSurface != VK_NULL_HANDLE || swapChain != VK_NULL_HANDLE)
+                cleanUpDisplayManager();
+
+            if (!initDisplayManager(surface)) return;
+            this->displaySurface = surface;
+        }
+        const bool crossDevice = producer.hardwareContext != displayDevice;
+        if (crossDevice &&
+            (!displayImage.imageHandle || displayImage.imageSize != handle->imageSize ||
+             displayImage.imageFormat != handle->imageFormat))
+            setupCrossDeviceTransfer(*handle);
+
+#ifdef _WIN32
+        // Query WSI again on resize; the steady-state path only reads the native client rect.
+        if (client.right - client.left != static_cast<LONG>(displaySize.x) ||
+            client.bottom - client.top != static_cast<LONG>(displaySize.y))
+#endif
+        {
+            VkSurfaceCapabilitiesKHR caps{};
+            const auto status = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(displayDevice->deviceManager.getPhysicalDevice(), vkSurface, &caps);
+            if (status == VK_ERROR_SURFACE_LOST_KHR)
             {
                 cleanUpDisplayManager();
+                return;
             }
-
-            if (!initDisplayManager(surface))
-            {
-                return false;
-            }
-
-            // 设置跨设备传输
-            if (getHardwareContext().getMainDevice() != displayDevice)
-            // if (true)
-            {
-                this->displayImage = displayDevice->resourceManager.createImage(handle->imageSize, handle->imageFormat, handle->pixelSize, handle->imageUsage);
-
-                setupCrossDeviceTransfer(*handle);
-            }
-            else
-            {
-                this->displayImage = *handle;
-            }
+            coronaHardwareCheck(status);
+            if (!caps.currentExtent.width || !caps.currentExtent.height) return;
+            const ktm::uvec2 extent{std::clamp(caps.currentExtent.width, caps.minImageExtent.width, caps.maxImageExtent.width),
+                                    std::clamp(caps.currentExtent.height, caps.minImageExtent.height, caps.maxImageExtent.height)};
+            if (extent != displaySize) recreateSwapChain();
         }
-
-        // 等待之前的执行器
-        if (waitedExecutor)
-        {
-            mainDeviceExecutor->wait(*waitedExecutor);
-            //displayDeviceExecutors[currentFrame]->wait(*waitedExecutor);
-            displayDeviceExecutor->wait(*waitedExecutor);
-        }
-
-        // 检查交换链是否需要重建
-        VkSurfaceCapabilitiesKHR capabilities;
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(displayDevice->deviceManager.getPhysicalDevice(), vkSurface, &capabilities);
-
-        ktm::uvec2 newSize{std::clamp(capabilities.currentExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
-                           std::clamp(capabilities.currentExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)};
-
-        if (newSize.x == 0u || newSize.y == 0u)
-        {
-            return false;
-        }
-
-        if (needsSwapChainRecreation(newSize))
-        {
-            recreateSwapChain();
-        }
-
-        // 等待 Acquire Fence (替代 Present Fence，用于确保图像可用)
         VkDevice device = displayDevice->deviceManager.getLogicalDevice();
-        
-        VkResult fenceResult = vkWaitForFences(device, 1, &acquireFences[currentFrame], VK_TRUE, UINT64_MAX);
-        if (fenceResult != VK_SUCCESS)
+        // Reuse an acquire semaphore only after the GPU has consumed the previous wait on it.
+        if (const auto& previous = acquireConsumed[currentFrame]; previous)
         {
-            CFW_LOG_ERROR("Failed to wait for acquire fence: {}", static_cast<int>(fenceResult));
-            return false;
+            uint64_t completed;
+            coronaHardwareCheck(vkGetSemaphoreCounterValue(device, previous.queue->timelineSemaphore, &completed));
+            if (completed < previous.value)
+            {
+                VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+                wait.semaphoreCount = 1;
+                wait.pSemaphores = &previous.queue->timelineSemaphore;
+                wait.pValues = &previous.value;
+                coronaHardwareCheck(vkWaitSemaphores(device, &wait, UINT64_MAX));
+            }
         }
-        vkResetFences(device, 1, &acquireFences[currentFrame]);
 
-        // 获取交换链图像（fence 不再传给 acquire，改为绑定到 queue submit 以保证 binary semaphore 的 wait 完成）
         uint32_t imageIndex;
         VkResult result = vkAcquireNextImageKHR(device,
                                                 swapChain,
@@ -606,70 +512,76 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
                                                 VK_NULL_HANDLE,
                                                 &imageIndex);
 
-        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_ERROR_SURFACE_LOST_KHR)
         {
-            recreateSwapChain();
-            return true;
+            cleanUpDisplayManager();
+            return;
         }
         else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
         {
             throw std::runtime_error("Failed to acquire swap chain image");
         }
 
-        // 跨设备传输（如果需要）
-        // copyCmd2 必须在 commit() 之前保持存活，提升到外层作用域
-        std::optional<CopyBufferToImageCommand> copyCmd2;
-        if (auto const handle = globalImageStorages.acquire_write(displayImage.getImageID());
-            getHardwareContext().getMainDevice() != displayDevice)
-        // if (true)
+        // Graphics work on this device can share the blit's command buffer.
+        if (crossDevice || std::ranges::any_of(producer.commandList, [](const auto& command) {
+                return command.type != CommandRecordVulkan::ExecutorType::Graphics;
+            }))
+            producer.commit();
+
+        auto sourceOwner = std::make_shared<HardwareImage>(source);
+        if (crossDevice)
         {
-            CopyImageToBufferCommand copyCmd(*handle, srcStaging);
-            (*mainDeviceExecutor) << &copyCmd << mainDeviceExecutor->commit();
-
-            // GPU B 等待 GPU A 的拷贝完成（通过 imported timeline semaphore，纯 GPU 端同步）
-            displayDeviceExecutor->wait(*mainDeviceExecutor);
-
-            copyCmd2.emplace(dstStaging, this->displayImage);
-            (*displayDeviceExecutor) << &copyCmd2.value();
+            // Both devices import the same memory. Finish the last read before overwriting it.
+            CopyImageToBufferCommand copy(*handle, srcStaging, 0, 0, 0, 1);
+            producer.wait(*displayDeviceExecutor).record(&copy, std::move(sourceOwner));
+            try
+            {
+                producer.commit();
+            }
+            catch (...)
+            {
+                producer.commandList.pop_back();
+                throw;
+            }
+            sourceCopy = producer.getSubmissionPoint();
+            displayDeviceExecutor->wait(sourceCopy);
         }
 
-        std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos;
+        VkSemaphoreSubmitInfo available{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+        available.semaphore = imageAvailableSemaphores[currentFrame];
+        available.stageMask = VK_PIPELINE_STAGE_2_BLIT_BIT;
+        VkSemaphoreSubmitInfo finished{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+        finished.semaphore = renderFinishedSemaphores[imageIndex];
+        finished.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+        auto& blit = crossDevice ? *displayDeviceExecutor : producer;
+        PresentImageCommand presentImage(crossDevice ? displayImage : *handle, swapChainImages[imageIndex], displaySize);
+        std::optional<CopyBufferToImageCommand> upload;
+        const auto commands = blit.commandList.size();
+        const auto waits = blit.waitSemaphores.size(), signals = blit.signalSemaphores.size();
+        try
         {
-            VkSemaphoreSubmitInfo waitInfo{};
-            waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-            waitInfo.pNext = nullptr;
-            waitInfo.semaphore = imageAvailableSemaphores[currentFrame];
-            waitInfo.value = 0;
-            waitInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-            waitSemaphoreInfos.push_back(waitInfo);
+            if (crossDevice)
+                blit.record(&upload.emplace(dstStaging, displayImage, 0, 0, 0, 1));
+            blit.waitSemaphores.push_back(available);
+            blit.signalSemaphores.push_back(finished);
+            blit.record(&presentImage, std::move(sourceOwner));
+            blit.commit();
         }
-
-        std::vector<VkSemaphoreSubmitInfo> signalSemaphoreInfos;
+        catch (...)
         {
-            VkSemaphoreSubmitInfo signalInfo{};
-            signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-            signalInfo.pNext = nullptr;
-            signalInfo.semaphore = renderFinishedSemaphores[imageIndex];
-            signalInfo.value = 0;
-            signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            signalSemaphoreInfos.push_back(signalInfo);
+            // Leave a caller-owned executor free of borrowed WSI commands and semaphores on retry.
+            blit.commandList.resize(commands);
+            blit.waitSemaphores.resize(waits);
+            blit.signalSemaphores.resize(signals);
+            throw;
         }
-
-        // 执行 Blit 和转换布局
-        BlitImageCommand blitCmd(this->displayImage, swapChainImages[imageIndex]);
-        TransitionImageLayoutCommand transitionCmd(swapChainImages[imageIndex],
-                                                   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                                   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                                   VK_ACCESS_2_NONE);
-
-        /**displayDeviceExecutors[currentFrame] << &blitCmd << &transitionCmd
-                                              << displayDeviceExecutors[currentFrame]->wait(waitSemaphoreInfos, signalSemaphoreInfos)
-                                              << displayDeviceExecutors[currentFrame]->commit();*/
-
-        displayDeviceExecutor->waitFence = acquireFences[currentFrame];
-        *displayDeviceExecutor << &blitCmd << &transitionCmd
-                               << displayDeviceExecutor->wait(waitSemaphoreInfos, signalSemaphoreInfos)
-                               << displayDeviceExecutor->commit();
+        acquireConsumed[currentFrame] = blit.getSubmissionPoint();
+        if (crossDevice)
+        {
+            sourceCopy = {}; // The display submission now covers the source copy as well.
+            producer.wait(blit).commit(true);
+        }
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -678,49 +590,24 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &swapChain;
         presentInfo.pImageIndices = &imageIndex;
-        presentInfo.pNext = nullptr;  // 不再使用 VkSwapchainPresentFenceInfoKHR
-
-        // 移除: VK_EXT_swapchain_maintenance1 相关代码
-        // VkSwapchainPresentFenceInfoKHR presentFenceInfo{};
-        // presentFenceInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR;
-        // presentFenceInfo.swapchainCount = 1;
-        // presentFenceInfo.pFences = &presentFences[currentFrame];
-        // presentFenceInfo.pNext = const_cast<void *>(presentInfo.pNext);
-        // presentInfo.pNext = &presentFenceInfo;
-
-        auto commitToQueue = [&](DeviceManager::QueueUtils *currentRecordQueue) -> bool {
-            // 让 pickQueueAndCommit 后续提交使用正确的 present 队列
-            displayDeviceExecutor->currentRecordQueue = currentRecordQueue;
-
-            // 1. 先执行 Present（只依赖 binary semaphore）
-            VkResult presentResult = vkQueuePresentKHR(currentRecordQueue->vkQueue, &presentInfo);
-
-            if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR)
-            {
-                CFW_LOG_ERROR("vkQueuePresentKHR failed: {}", static_cast<int>(presentResult));
-                return false;
-            }
-
-            // 2. 提交一个空的命令缓冲区来推进 timeline
-            // 这确保 pickQueueAndCommit 增加的 timelineValue 能被 GPU signal
-            vkResetCommandBuffer(currentRecordQueue->commandBuffer, 0);
-
-            VkCommandBufferBeginInfo beginInfo{};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-            vkBeginCommandBuffer(currentRecordQueue->commandBuffer, &beginInfo);
-            vkEndCommandBuffer(currentRecordQueue->commandBuffer); // 空命令
-
-            return true;
-        };
-
-        displayDeviceExecutor->pickQueueAndCommit(currentQueueIndex, presentQueues, commitToQueue);
-        currentFrame = (currentFrame + 1) % swapChainImages.size();
-        return true;
+        VkResult presentResult;
+        {
+            std::lock_guard lock(*presentQueue->queueMutex);
+            presentResult = vkQueuePresentKHR(presentQueue->vkQueue, &presentInfo);
+        }
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_ERROR_SURFACE_LOST_KHR || presentResult == VK_SUBOPTIMAL_KHR ||
+            (presentResult == VK_SUCCESS && result == VK_SUBOPTIMAL_KHR))
+        {
+            cleanUpDisplayManager();
+            return;
+        }
+        coronaHardwareCheck(presentResult);
+        currentFrame = (currentFrame + 1) % imageAvailableSemaphores.size();
     }
     catch (const std::exception &e)
     {
-        return false;
+        CFW_LOG_ERROR("Display frame failed: {}", e.what());
+        cleanUpDisplayManager();
+        throw;
     }
 }

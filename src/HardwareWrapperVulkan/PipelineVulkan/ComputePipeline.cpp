@@ -1,148 +1,101 @@
-﻿#include "ComputePipeline.h"
+#include "ComputePipeline.h"
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
-#include "Compiler/ShaderLanguageConverter.h"
-#include <cstring>
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
+#include <span>
+#include <array>
+#include <stdexcept>
 
-namespace
+template<class CS>
+struct ComputePipeline<CS>::Impl
 {
-using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
+    std::shared_ptr<ComputePipelineVulkan> backend;
+    std::unique_ptr<EmbeddedShader::ComputePipelineObject> variants;
+    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries;
 
-constexpr uint32_t kDescriptorHandle32Size = sizeof(uint32_t);
-constexpr uint32_t kDescriptorHandle64Size = sizeof(uint32_t) * 2;
+    static Impl& checked(const std::unique_ptr<Impl>& impl)
+    {
+        if (!impl || !impl->backend) throw std::runtime_error("Empty ComputePipeline<> handle");
+        return *impl;
+    }
+};
 
-bool copy_to_push_constant(HardwarePushConstant &target, uint64_t byteOffset, const void *src, size_t size)
+template<class CS>
+ComputePipeline<CS>::ComputePipeline() = default;
+
+template<class CS>
+ComputePipeline<CS>::ComputePipeline(EmbeddedShader::ComputeEntry shader, ktm::uvec3 numthreads,
+                                     EmbeddedShader::CompilerOption options, const std::source_location& location)
+    : impl_(std::make_unique<Impl>())
 {
-    uint8_t *dst = target.getData();
-    if (!dst || !src || size == 0)
-    {
-        return false;
+    if (shader.module) {
+        impl_->backend = std::make_shared<ComputePipelineVulkan>(*shader.module);
+        return;
     }
-
-    const uint64_t targetSize = target.getSize();
-    if (byteOffset > targetSize || size > targetSize - byteOffset)
-    {
-        return false;
-    }
-
-    std::memcpy(dst + byteOffset, src, size);
-    return true;
+    auto compiled = shader.compile(numthreads, std::move(options), location);
+    impl_->backend = std::make_shared<ComputePipelineVulkan>(compiled);
+    impl_->autoBindEntries = std::move(compiled.autoBindEntries);
+    if (!compiled.conditions.empty())
+        impl_->variants = std::make_unique<EmbeddedShader::ComputePipelineObject>(std::move(compiled));
 }
 
-uint32_t descriptor_write_size(uint32_t reflectedTypeSize)
+template<class CS>
+ComputePipeline<CS>::~ComputePipeline() = default;
+
+template<class CS>
+ComputePipeline<CS>::ComputePipeline(ComputePipeline&&) noexcept = default;
+
+template<class CS>
+ComputePipeline<CS>& ComputePipeline<CS>::operator=(ComputePipeline&&) noexcept = default;
+
+template<class CS>
+HardwareExecutor::Command ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
-    if (reflectedTypeSize == 0)
+    auto& impl = Impl::checked(impl_);
+    if (auto& variants = impl.variants)
     {
-        return kDescriptorHandle64Size;
-    }
-    return reflectedTypeSize >= kDescriptorHandle64Size ? kDescriptorHandle64Size : kDescriptorHandle32Size;
-}
-
-bool write_descriptor_handle(HardwarePushConstant &target, uint64_t byteOffset, uint32_t reflectedTypeSize, uint32_t descriptorIndex)
-{
-    const uint32_t writeSize = descriptor_write_size(reflectedTypeSize);
-    if (writeSize >= kDescriptorHandle64Size)
-    {
-        const uint32_t handleData[2] = {descriptorIndex, 0};
-        return copy_to_push_constant(target, byteOffset, handleData, sizeof(handleData));
-    }
-    return copy_to_push_constant(target, byteOffset, &descriptorIndex, sizeof(descriptorIndex));
-}
-
-bool is_buffer_resource_bind_type(BindType bindType)
-{
-    return bindType == BindType::rawBuffer || bindType == BindType::storageBuffer;
-}
-
-bool is_image_resource_bind_type(BindType bindType)
-{
-    return bindType == BindType::sampledImages ||
-           bindType == BindType::texture ||
-           bindType == BindType::sampler ||
-           bindType == BindType::storageTexture;
-}
-} // namespace
-
-ComputePipelineVulkan::ComputePipelineVulkan()
-{
-    executorType = CommandRecordVulkan::ExecutorType::Compute;
-}
-
-ComputePipelineVulkan::ComputePipelineVulkan(std::string shaderCode,
-                                             EmbeddedShader::ShaderLanguage /*language*/,
-                                             const std::source_location &sourceLocation)
-    : ComputePipelineVulkan()
-{
-    // Keep the legacy signature; Helicon's runtime compiler now consumes Slang source.
-    EmbeddedShader::ShaderCodeCompiler compiler(shaderCode,
-                                                EmbeddedShader::ShaderStage::ComputeShader,
-                                                EmbeddedShader::CompilerOption(),
-                                                sourceLocation);
-
-    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, EmbeddedShader::Ast::Parser::getBindless());
-
-    const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
-    if (pushConstantSize > 0)
-    {
-        this->pushConstant = HardwarePushConstant(pushConstantSize, 0);
+        auto conditions = variants->compute->getCurrentConditionInfo();
+        if (conditions != variants->conditions)
+        {
+            impl.backend = std::make_shared<ComputePipelineVulkan>(variants->updateAutoBind(conditions));
+            impl.autoBindEntries = std::move(variants->autoBindEntries);
+            variants->conditions = std::move(conditions);
+        }
     }
 
-    // 初始化 per-pipeline UBO
-    uboSize = this->shaderCode.shaderResources.uniformBufferSize;
-    if (uboSize > 0)
-    {
-        tempUBO = HardwarePushConstant(uboSize, 0);
-        uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
-    }
+    for (const auto& entry : impl.autoBindEntries) impl.backend->bindAuto(entry);
+    return HardwareExecutor::Command(std::make_shared<HardwareExecutor::Command::Impl::Dispatch>(
+        impl.backend, ktm::uvec3{x, y, z}));
 }
 
-ComputePipelineVulkan::ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler &compiler,
-                                             const std::source_location &sourceLocation)
-    : ComputePipelineVulkan()
+template struct ComputePipeline<void>;
+template struct EmbeddedShader::BoundField<ComputePipeline<>>;
+
+ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ComputePipelineObject& shader)
+    : ComputePipelineVulkan(shader.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, shader.conditions)) {}
+
+ComputePipelineVulkan::ComputePipelineVulkan(EmbeddedShader::ShaderCodeModule module)
+    : shaderCode(std::move(module))
 {
-    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler.getCompilerOption().enableBindless, compiler.getCurrentConditionInfo());
-
-    const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
-    if (pushConstantSize > 0)
-    {
-        this->pushConstant = HardwarePushConstant(pushConstantSize, 0);
-    }
-
-    // 初始化 per-pipeline UBO
-    uboSize = this->shaderCode.shaderResources.uniformBufferSize;
-    if (uboSize > 0)
-    {
-        tempUBO = HardwarePushConstant(uboSize, 0);
-        uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
-    }
-}
-
-ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &spirV,
-                                             const std::source_location &sourceLocation)
-    : ComputePipelineVulkan()
-{
-    // Reuse SPIR-V and reflection emitted together by the current Slang compiler.
-    const auto &resources = spirV.shaderResources;
-
-    this->shaderCode = spirV;
+    bindings.addLayout(shaderCode.shaderResources);
+    const auto &resources = shaderCode.shaderResources;
 
     const uint32_t pushConstantSize = resources.pushConstantSize;
     if (pushConstantSize > 0)
     {
-        this->pushConstant = HardwarePushConstant(pushConstantSize, 0);
+        this->pushConstant = std::make_unique<uint8_t[]>(pushConstantSize);
     }
 
     uboSize = resources.uniformBufferSize;
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
-        uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
+        tempUBO = std::make_unique<uint8_t[]>(uboSize);
     }
 }
 
 ComputePipelineVulkan::~ComputePipelineVulkan()
 {
+    if (!pipeline && !pipelineLayout && !uboDescriptorSetLayout) return;
     VkDevice device = VK_NULL_HANDLE;
     if (const auto mainDevice = getHardwareContext().getMainDevice())
     {
@@ -151,8 +104,6 @@ ComputePipelineVulkan::~ComputePipelineVulkan()
 
     if (device != VK_NULL_HANDLE)
     {
-        vkDeviceWaitIdle(device);
-
         if (pipeline != VK_NULL_HANDLE)
         {
             vkDestroyPipeline(device, pipeline, nullptr);
@@ -166,11 +117,6 @@ ComputePipelineVulkan::~ComputePipelineVulkan()
         }
 
         // 清理 per-pipeline UBO 描述符资源
-        if (uboDescriptorPool != VK_NULL_HANDLE)
-        {
-            vkDestroyDescriptorPool(device, uboDescriptorPool, nullptr);
-            uboDescriptorPool = VK_NULL_HANDLE;
-        }
         if (uboDescriptorSetLayout != VK_NULL_HANDLE)
         {
             vkDestroyDescriptorSetLayout(device, uboDescriptorSetLayout, nullptr);
@@ -181,108 +127,20 @@ ComputePipelineVulkan::~ComputePipelineVulkan()
 
 void ComputePipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
-    const auto typedBindType = static_cast<BindType>(bindType);
-    if (typedBindType == BindType::pushConstantMembers)
-    {
-        copy_to_push_constant(pushConstant, byteOffset, data, size);
-        return;
-    }
-    if (typedBindType == BindType::uniformBufferMembers)
-    {
-        if (copy_to_push_constant(tempUBO, byteOffset, data, size))
-        {
-            uboDescriptorDirty = true;
-        }
-        return;
-    }
+    bindings.writeValue({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize},
+                        bindType, byteOffset, data, size);
 }
 
-void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, PipelineBinding value,
+                                              int32_t bindType, uint32_t slot)
 {
-    const auto typedBindType = static_cast<BindType>(bindType);
-    const uint32_t descriptorIndex = const_cast<HardwareBuffer &>(buffer).storeDescriptor();
-
-    if (typedBindType == BindType::pushConstantMembers)
-    {
-        write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex);
-        return;
-    }
-    if (typedBindType == BindType::uniformBufferMembers)
-    {
-        if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
-        {
-            uboDescriptorDirty = true;
-        }
-        return;
-    }
-    if (!is_buffer_resource_bind_type(typedBindType))
-    {
-        return;
-    }
-
-    if (write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex))
-    {
-        return;
-    }
-    if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
-    {
-        uboDescriptorDirty = true;
-    }
+    bindings.writeResource({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize},
+                           bindType, byteOffset, typeSize, std::move(value), VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, slot);
 }
 
-void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
+void ComputePipelineVulkan::bindAuto(const EmbeddedShader::AutoBindEntry& entry)
 {
-    const auto typedBindType = static_cast<BindType>(bindType);
-    const uint32_t descriptorIndex = const_cast<HardwareImage &>(image).storeDescriptor();
-
-    if (typedBindType == BindType::pushConstantMembers)
-    {
-        write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex);
-        return;
-    }
-    if (typedBindType == BindType::uniformBufferMembers)
-    {
-        if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
-        {
-            uboDescriptorDirty = true;
-        }
-        return;
-    }
-    if (!is_image_resource_bind_type(typedBindType))
-    {
-        return;
-    }
-
-    if (write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex))
-    {
-        return;
-    }
-    if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
-    {
-        uboDescriptorDirty = true;
-    }
-}
-
-ComputePipelineVulkan *ComputePipelineVulkan::operator()(uint16_t x, uint16_t y, uint16_t z)
-{
-    groupCount = {x, y, z};
-    return this;
-}
-
-CommandRecordVulkan::RequiredBarriers ComputePipelineVulkan::getRequiredBarriers(HardwareExecutorVulkan &hardwareExecutor)
-{
-    RequiredBarriers requiredBarriers;
-    requiredBarriers.memoryBarriers.resize(1);
-
-    auto &barrier = requiredBarriers.memoryBarriers[0];
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    barrier.pNext = nullptr;
-    barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-    barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-
-    return requiredBarriers;
+    bindings.bindAuto({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, {tempUBO.get(), uboSize}, entry);
 }
 
 void ComputePipelineVulkan::createComputePipeline()
@@ -315,7 +173,8 @@ void ComputePipelineVulkan::createComputePipeline()
     // 创建 per-pipeline UBO 描述符（如果有 UBO）
     if (uboSize > 0)
     {
-        createPerPipelineUBODescriptor();
+        if (!uboDescriptorSetLayout)
+            uboDescriptorSetLayout = createUniformSnapshotLayout(device);
     }
 
     std::vector<VkDescriptorSetLayout> setLayouts;
@@ -351,143 +210,34 @@ void ComputePipelineVulkan::createComputePipeline()
     vkDestroyShaderModule(device, shaderModule, nullptr);
 }
 
-void ComputePipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExecutor)
+HardwareExecutor::Command::Impl::Dispatch::Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups)
+    : backend(std::move(pipeline)), groupCount(groups),
+      pushConstant(copyParameterBytes(backend->pushConstant.get(), backend->shaderCode.shaderResources.pushConstantSize)),
+      uniformBytes(copyParameterBytes(backend->tempUBO.get(), backend->uboSize)),
+      bindings(backend->bindings.snapshot()) {}
+
+void HardwareExecutor::Command::Impl::Dispatch::resolveResourceUses(ResourceAccessList& result)
 {
-    // 延迟创建管线
-    if (pipelineLayout == VK_NULL_HANDLE || pipeline == VK_NULL_HANDLE)
-    {
-        createComputePipeline();
-    }
+    bindings->resolveResourceUses(result);
+}
 
-    const VkCommandBuffer commandBuffer = hardwareExecutor.currentRecordQueue->commandBuffer;
-
-    // 绑定管线
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-
-    // 上传 UBO 数据并更新描述符
-    if (uboSize > 0 && tempUBO.getData())
-    {
-        uboBuffer.copyFromData(tempUBO.getData(), uboSize);
-        if (uboDescriptorDirty)
-        {
-            updateUBODescriptor();
-            uboDescriptorDirty = false;
-        }
-    }
-
-    // 绑定描述符集
-    std::vector<VkDescriptorSet> descriptorSets;
-    descriptorSets.reserve(4);
+void HardwareExecutor::Command::Impl::Dispatch::commitCommand(HardwareExecutorVulkan& executor)
+{
+    if (!backend->pipelineLayout || !backend->pipeline) backend->createComputePipeline();
+    const auto commandBuffer = executor.currentRecordQueue->commandBuffer;
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, backend->pipeline);
+    bindings->prepareDescriptors();
+    bindings->writeParameters(pushConstant, uniformBytes);
+    if (!uniform) uniform = backend->uniformPool.acquire(uniformBytes, backend->uboDescriptorSetLayout);
+    std::array<VkDescriptorSet, 4> sets{};
+    const auto& tables = getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors;
     for (size_t i = 0; i < 3; ++i)
-    {
-        descriptorSets.push_back(getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors[i].descriptorSet);
-    }
-    if (uboSize > 0)
-    {
-        descriptorSets.push_back(uboDescriptorSet);
-    }
-
-    vkCmdBindDescriptorSets(commandBuffer,
-                            VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipelineLayout,
-                            0,
-                            static_cast<uint32_t>(descriptorSets.size()),
-                            descriptorSets.data(),
-                            0,
-                            nullptr);
-
-    // 推送常量
-    if (const void *data = pushConstant.getData(); data != nullptr)
-    {
-        const uint32_t pushConstantSize = shaderCode.shaderResources.pushConstantSize;
-        if (pushConstantSize > 0)
-        {
-            vkCmdPushConstants(commandBuffer,
-                               pipelineLayout,
-                               VK_SHADER_STAGE_COMPUTE_BIT,
-                               0,
-                               pushConstantSize,
-                               data);
-        }
-    }
-
-    // 调度计算任务
+        sets[i] = bindings->sets[i] ? bindings->sets[i] : tables[i].descriptorSet;
+    sets[3] = uniform ? uniform->set : VK_NULL_HANDLE;
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, backend->pipelineLayout,
+                            0, sets[3] ? 4 : 3, sets.data(), 0, nullptr);
+    if (!pushConstant.empty())
+        vkCmdPushConstants(commandBuffer, backend->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, static_cast<uint32_t>(pushConstant.size()), pushConstant.data());
     vkCmdDispatch(commandBuffer, groupCount.x, groupCount.y, groupCount.z);
-}
-
-void ComputePipelineVulkan::createPerPipelineUBODescriptor()
-{
-    const auto mainDevice = getHardwareContext().getMainDevice();
-    if (!mainDevice)
-    {
-        throw std::runtime_error("No main device available");
-    }
-    const VkDevice device = mainDevice->deviceManager.getLogicalDevice();
-
-    // 创建描述符集布局 - 单个 UBO 实例
-    VkDescriptorSetLayoutBinding layoutBinding{};
-    layoutBinding.binding = 0;
-    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    layoutBinding.descriptorCount = 1;
-    layoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
-    layoutBinding.pImmutableSamplers = nullptr;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &layoutBinding;
-
-    coronaHardwareCheck(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &uboDescriptorSetLayout));
-
-    // 创建描述符池
-    VkDescriptorPoolSize poolSize{};
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = 1;
-
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
-    poolInfo.maxSets = 1;
-
-    coronaHardwareCheck(vkCreateDescriptorPool(device, &poolInfo, nullptr, &uboDescriptorPool));
-
-    // 分配描述符集
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = uboDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &uboDescriptorSetLayout;
-
-    coronaHardwareCheck(vkAllocateDescriptorSets(device, &allocInfo, &uboDescriptorSet));
-
-    uboDescriptorDirty = true;
-}
-
-void ComputePipelineVulkan::updateUBODescriptor()
-{
-    const auto mainDevice = getHardwareContext().getMainDevice();
-    if (!mainDevice)
-    {
-        return;
-    }
-    const VkDevice device = mainDevice->deviceManager.getLogicalDevice();
-
-    auto bufferHandle = globalBufferStorages.acquire_read(uboBuffer.getBufferID());
-
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = bufferHandle->bufferHandle;
-    bufferInfo.offset = 0;
-    bufferInfo.range = uboSize;
-
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = uboDescriptorSet;
-    write.dstBinding = 0;
-    write.dstArrayElement = 0;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.pBufferInfo = &bufferInfo;
-
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }

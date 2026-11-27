@@ -4,7 +4,7 @@
 #include <Codegen/BuiltinVariate.h>
 #include <Codegen/CustomLibrary.h>
 #include <Codegen/ComputePipelineObject.h>
-#include <Codegen/RasterizedPipelineObject.h>
+#include <Codegen/RasterPipelineObject.h>
 #include <Codegen/MathProxy.h>
 
 #include <Compiler/ShaderCodeCompiler.h>

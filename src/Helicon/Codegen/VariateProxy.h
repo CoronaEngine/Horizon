@@ -2,6 +2,7 @@
 
 #include "Compiler/ShaderLanguageConverter.h"
 #include "boost/pfr.hpp"
+#include <cstdint>
 #include <sstream>
 #include <regex>
 #include <type_traits>
@@ -16,25 +17,9 @@
 #include <Codegen/ParseHelper.h>
 #include <Codegen/MathProxy.h>
 
-// Forward declarations for Level 2 resource binding (defined in horizon.h)
-#ifdef HORIZON_LEGACY_API
+// Forward declarations for Level 2 resource binding (defined in Horizon.h)
 struct HardwareImage;
 struct HardwareBuffer;
-struct HardwareImageCreateInfo;
-namespace Corona::Horizon
-{
-    using HardwareImage = ::HardwareImage;
-    using HardwareBuffer = ::HardwareBuffer;
-    using HardwareImageDesc = ::HardwareImageCreateInfo;
-}
-#else
-namespace Corona::Horizon
-{
-	class HardwareImage;
-	class HardwareBuffer;
-	struct HardwareImageDesc;
-}
-#endif
 
 namespace EmbeddedShader
 {
@@ -151,7 +136,7 @@ namespace EmbeddedShader
 		friend struct GPU_ELSE_BRANCH;
 
 	    friend VariateProxy<ktm::fvec4> position();
-		friend class RasterizedPipelineObject;
+		friend class RasterPipelineObject;
 		friend class Generator::SlangGenerator;
 		using value_type = Type;
 
@@ -747,7 +732,7 @@ namespace EmbeddedShader
 			if constexpr (Texture2DProxyTraits<Type>::value)
 			{
 				auto textureType = std::make_shared<Ast::TextureType>();
-				textureType->texelType = Ast::AST::createType<Type::value_type>();
+				textureType->texelType = Ast::AST::createType<typename Type::value_type>();
 				node = Ast::AST::defineUniversalArray(std::move(textureType));
 			}
 			else node = Ast::AST::defineUniversalArray<Type>();
@@ -761,14 +746,14 @@ namespace EmbeddedShader
 		}
 
 		// 绑定既有 HardwareBuffer：Array<T> arr = existingBuffer;
-		ArrayProxy(Corona::Horizon::HardwareBuffer& buffer) : ArrayProxy()
+		ArrayProxy(::HardwareBuffer& buffer) : ArrayProxy()
 		{
 			boundResource_ = &buffer;
 		}
 
 		// 重新绑定(逐 draw 换 buffer 时用)。dirtyVersion 自增，
 		// 否则 bind_auto_resources 的脏检查会整批跳过。
-		ArrayProxy& operator=(Corona::Horizon::HardwareBuffer& buffer)
+		ArrayProxy& operator=(::HardwareBuffer& buffer)
 		{
 			boundResource_ = &buffer;
 			if (dirtyVersion)
@@ -824,6 +809,7 @@ namespace EmbeddedShader
 			return "";
 		}
 	private:
+        friend std::shared_ptr<Ast::Value> proxy_wrap(const ArrayProxy& proxy) { return proxy.node; }
 		std::shared_ptr<Ast::Value> node;
 		void* boundResource_ = nullptr;
 		size_t* dirtyVersion = nullptr;
@@ -890,22 +876,14 @@ namespace EmbeddedShader
 			}
 		}
 
-		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in horizon.h (after HardwareImage is complete).
-		void createResource(const Corona::Horizon::HardwareImageDesc& createInfo);
-
-		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
-		Texture2DProxy(Corona::Horizon::HardwareImage& img) : Texture2DProxy()
+		// The image must outlive its use through this proxy.
+		Texture2DProxy(::HardwareImage& img) : Texture2DProxy()
 		{
 			boundResource_ = &img;
 		}
 
-		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
-		Texture2DProxy(Corona::Horizon::HardwareImage&& img) : Texture2DProxy()
-		{
-			ownedResource_ = std::make_unique<Corona::Horizon::HardwareImage>(std::move(img));
-			boundResource_ = ownedResource_.get();
-		}
+		Texture2DProxy(Texture2DProxy&&) noexcept = default;
+		Texture2DProxy& operator=(Texture2DProxy&&) noexcept = default;
 
 		// Texture2DProxy(SamplerProxy&& sampler)
 		// {
@@ -955,15 +933,9 @@ namespace EmbeddedShader
 			return {Ast::AST::at(node, index.node)};
 		}
 
-		VariateProxy<Type> sample(SamplerProxy& sampler,const VariateProxy<ktm::fvec2>& location)
+		VariateProxy<Type> sample(SamplerProxy&, const VariateProxy<ktm::fvec2>& location)
 		{
-			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
-			assert(!isHybrid);
-			sampler.init("SamplerState");
-			sampler.node->access(Ast::AccessPermissions::ReadOnly);
-			node->access(Ast::AccessPermissions::ReadOnly);
-			auto func = Ast::AST::callFunc("Sample",Ast::AST::createType<Type>(),{sampler.node,location.node});
-			return {Ast::AST::access(node,func->parse(), func->type)};
+			return sample(location);
 		}
 
 		VariateProxy<Type> sample(const VariateProxy<ktm::fvec2>& location)
@@ -987,7 +959,7 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		Texture2DProxy& operator=(Corona::Horizon::HardwareImage& img)
+		Texture2DProxy& operator=(::HardwareImage& img)
 	    {
 		    boundResource_ = &img;
 		    if (dirtyVersion)
@@ -995,7 +967,7 @@ namespace EmbeddedShader
 		    return *this;
 	    }
 
-		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
+		::HardwareImage* resource() const { return static_cast<::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
 		// Usage in FS lambda: outputImage << Float4(r, g, b, a);
@@ -1009,13 +981,9 @@ namespace EmbeddedShader
 			if (tex) tex->renderTargetLocation = static_cast<int32_t>(location);
 		}
 
-		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
-		Corona::Horizon::HardwareImage& image() const { return *static_cast<Corona::Horizon::HardwareImage*>(ownedResource_.get()); }
-
 		std::shared_ptr<Ast::Value> node;
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
-		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
 	    size_t* dirtyVersion = nullptr;
 	};
 
@@ -1046,22 +1014,14 @@ namespace EmbeddedShader
 			}
 		}
 
-		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in horizon.h (after HardwareImage is complete).
-		void createResource(const Corona::Horizon::HardwareImageDesc& createInfo);
-
-		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
-		TextureCubeProxy(Corona::Horizon::HardwareImage& img) : TextureCubeProxy()
+		// The image must outlive its use through this proxy.
+		TextureCubeProxy(::HardwareImage& img) : TextureCubeProxy()
 		{
 			boundResource_ = &img;
 		}
 
-		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
-		TextureCubeProxy(Corona::Horizon::HardwareImage&& img) : TextureCubeProxy()
-		{
-			ownedResource_ = std::make_unique<Corona::Horizon::HardwareImage>(std::move(img));
-			boundResource_ = ownedResource_.get();
-		}
+		TextureCubeProxy(TextureCubeProxy&&) noexcept = default;
+		TextureCubeProxy& operator=(TextureCubeProxy&&) noexcept = default;
 
 		// Texture2DProxy(SamplerProxy&& sampler)
 		// {
@@ -1083,25 +1043,14 @@ namespace EmbeddedShader
 		// 	std::reinterpret_pointer_cast<Ast::Texture2DType>(node->type)->name = "Sampler2D";
 		// }
 
-		VariateProxy<Type> sample(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir)
+		VariateProxy<Type> sample(SamplerProxy&, const VariateProxy<ktm::fvec3>& dir)
 		{
-			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
-			assert(!isHybrid);
-			sampler.init("SamplerState");
-			sampler.node->access(Ast::AccessPermissions::ReadOnly);
-			node->access(Ast::AccessPermissions::ReadOnly);
-			auto func = Ast::AST::callFunc("Sample",Ast::AST::createType<Type>(),{sampler.node,dir.node});
-			return {Ast::AST::access(node,func->parse(), func->type)};
+			return sample(dir);
 		}
 
-        VariateProxy<Type> sampleLevel(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
+        VariateProxy<Type> sampleLevel(SamplerProxy&, const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
 		{
-		    assert(!isHybrid);
-		    sampler.init("SamplerState");
-		    sampler.node->access(Ast::AccessPermissions::ReadOnly);
-		    node->access(Ast::AccessPermissions::ReadOnly);
-		    auto func = Ast::AST::callFunc("SampleLevel",Ast::AST::createType<Type>(),{sampler.node,dir.node,lod.node});
-		    return {Ast::AST::access(node,func->parse(), func->type)};
+			return sampleLevel(dir, lod);
 		}
 
 		VariateProxy<Type> sample(const VariateProxy<ktm::fvec3>& dir)
@@ -1137,13 +1086,13 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		TextureCubeProxy& operator=(Corona::Horizon::HardwareImage& img) {
+		TextureCubeProxy& operator=(::HardwareImage& img) {
 		    boundResource_ = &img;
 		    if (dirtyVersion)
 		        ++*dirtyVersion;
 		    return *this;
 		}
-		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
+		::HardwareImage* resource() const { return static_cast<::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
 		// Usage in FS lambda: outputImage << Float4(r, g, b, a);
@@ -1157,13 +1106,9 @@ namespace EmbeddedShader
 			if (tex) tex->renderTargetLocation = static_cast<int32_t>(location);
 		}
 
-		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
-		Corona::Horizon::HardwareImage& image() const { return *static_cast<Corona::Horizon::HardwareImage*>(ownedResource_.get()); }
-
 		std::shared_ptr<Ast::Value> node;
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
-		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
         size_t* dirtyVersion = nullptr;
 	};
 
@@ -1200,7 +1145,7 @@ namespace EmbeddedShader
 	    FunctionProxy(std::string funcName, std::string returnType, std::vector<std::pair<std::string,std::string>> args,SlangModule* sourceModule)
         : node(Ast::AST::functionDeclaration(std::move(funcName),std::move(returnType),std::move(args))),sourceModule(std::move(sourceModule)) {}
 
-		Ret operator()(Args... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
+		Ret operator()(const Args&... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
 				ParseHelper::IsArrayProxy<Ret>::value ||
 				ParseHelper::IsTexture2DProxy<Ret>::value ||
 				(!std::same_as<void,Ret>))
@@ -1212,11 +1157,11 @@ namespace EmbeddedShader
 				//Ast::AST::addGlobalStatement(node);
 				isBuildDeclaration = true;
 			}
-			Ret ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<typename Ret::value_type>(),{proxy_wrap(args)...})};
+			Ret ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<typename Ret::value_type>(),{proxy_wrap(args)...}, node.get())};
 			return ret;
 		}
 
-		void operator()(Args... args) requires std::same_as<void,Ret>
+		void operator()(const Args&... args) requires std::same_as<void,Ret>
 		{
 		    if (sourceModule) Ast::AST::getEmbeddedShaderStructure().slangModuleSource.insert(sourceModule);
 			if (!isBuildDeclaration)
@@ -1224,7 +1169,7 @@ namespace EmbeddedShader
 				//Ast::AST::addGlobalStatement(node);
 				isBuildDeclaration = true;
 			}
-			Ast::AST::addLocalUniversalStatement(Ast::AST::callFunc(node->funcName,nullptr,{proxy_wrap(args)...}));
+			Ast::AST::addLocalUniversalStatement(Ast::AST::callFunc(node->funcName,nullptr,{proxy_wrap(args)...}, node.get()));
 		}
 	private:
 		std::shared_ptr<Ast::FunctionDeclaration> node;
@@ -1242,7 +1187,7 @@ namespace EmbeddedShader
 	    FunctionProxy(std::string funcName, std::string returnType, std::vector<std::pair<std::string,std::string>> args,SlangModule* sourceModule)
         : node(Ast::AST::functionDeclaration(std::move(funcName),std::move(returnType),std::move(args))),sourceModule(std::move(sourceModule)) {}
 
-		VariateProxy<Ret> operator()(Args... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
+		VariateProxy<Ret> operator()(const Args&... args) requires (ParseHelper::IsVariateProxy<Ret>::value ||
 				ParseHelper::IsArrayProxy<Ret>::value ||
 				ParseHelper::IsTexture2DProxy<Ret>::value ||
 				(!std::same_as<void,Ret>))
@@ -1253,7 +1198,7 @@ namespace EmbeddedShader
 				//Ast::AST::addGlobalStatement(node);//需要处理当返回值被忽略时，函数调用未被生成的问题
 				isBuildDeclaration = true;
 			}
-			VariateProxy<Ret> ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<Ret>(),{proxy_wrap(args)...})};
+			VariateProxy<Ret> ret{Ast::AST::callFunc(node->funcName,Ast::AST::createType<Ret>(),{proxy_wrap(args)...}, node.get())};
 			return ret;
 		}
 	private:
@@ -1262,50 +1207,51 @@ namespace EmbeddedShader
 	    SlangModule* sourceModule = nullptr;
 	};
 
-	struct BindingKey
-	{
-		// Direct-access metadata (populated by generated .hpp at compile time)
-		uint64_t byteOffset = ~0ULL;
-		uint32_t typeSize = 0;
-		int32_t  bindType = -1;   // mirrors ShaderResources::BindType; -1 = no metadata
-		uint32_t location = 0;
-		uint32_t set = 0;
-		uint32_t binding = 0;
-
-		bool hasMetadata() const { return bindType >= 0; }
-
-		// --- Level 2: Resource binding ---
-		BindingKey& operator=(Corona::Horizon::HardwareImage& img) { boundImage_ = &img; boundBuffer_ = nullptr; return *this; }
-		BindingKey& operator=(Corona::Horizon::HardwareBuffer& buf) { boundBuffer_ = &buf; boundImage_ = nullptr; return *this; }
-		Corona::Horizon::HardwareImage* boundImage() const { return boundImage_; }
-		Corona::Horizon::HardwareBuffer* boundBuffer() const { return boundBuffer_; }
-
-		Corona::Horizon::HardwareImage* boundImage_ = nullptr;
-		Corona::Horizon::HardwareBuffer* boundBuffer_ = nullptr;
-	};
-
-	// Pipeline-bound field proxy for direct member access syntax:
-	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
-	// PipelineType is RasterizerPipeline or ComputePipeline.
-	// operator= implementation is deferred to Horizon.h (needs ResourceProxy).
+	// Field proxy used by generated Slang pipeline specializations.
 	template<typename PipelineType>
 	struct BoundField
 	{
 		PipelineType* pipeline_;
 		uint64_t byteOffset;
 		uint32_t typeSize;
-		int32_t  bindType;
+		int32_t bindType;
 		uint32_t location;
 		uint32_t set;
 		uint32_t binding;
 
 		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc,
-		           uint32_t set_ = 0, uint32_t binding_ = 0)
+				   uint32_t set_ = 0, uint32_t binding_ = 0, uint64_t descriptorCount = UINT64_MAX,
+				   Ast::AccessPermissions access = Ast::AccessPermissions::None, bool aliased = false)
 			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc),
-			  set(set_), binding(binding_) {}
+			  set(set_), binding(binding_), descriptorCount_(descriptorCount), access_(access), aliased_(aliased) {}
+
+		BoundField operator[](uint32_t element) const;
 
 		template<typename T>
-		BoundField& operator=(const T& value);
+		BoundField& operator=(const T& value)
+		{
+			if (!pipeline_) return *this;
+			if constexpr (std::is_same_v<std::remove_cvref_t<T>, ::HardwareImage> ||
+						  std::is_same_v<std::remove_cvref_t<T>, ::HardwareBuffer> ||
+						  std::is_same_v<std::remove_cvref_t<T>, Descriptor>)
+				writeResource(value);
+			else
+				writeValue(&value, sizeof(T));
+			return *this;
+		}
+
+	private:
+		using Descriptor = typename PipelineType::Descriptor;
+
+		uint64_t descriptorCount_; // 0 for unbounded arrays, UINT64_MAX for ordinary value/output fields.
+		Ast::AccessPermissions access_;
+		bool aliased_;
+		uint32_t element_{};
+		void writeBinding(auto value);
+		void writeValue(const void* data, size_t size);
+		void writeResource(const ::HardwareBuffer& buffer);
+		void writeResource(const ::HardwareImage& image);
+		void writeResource(const Descriptor& descriptor);
 	};
 
 	template<typename ElementType>

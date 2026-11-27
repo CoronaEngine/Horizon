@@ -79,7 +79,6 @@ void DeviceManager::cleanUpDeviceManager()
         transferQueues.clear();
         queueFamilies.clear();
         physicalDevice = VK_NULL_HANDLE;
-        currentGraphicsQueueIndex = 0;
         currentComputeQueueIndex = 0;
         currentTransferQueueIndex = 0;
         return;
@@ -113,7 +112,6 @@ void DeviceManager::cleanUpDeviceManager()
     logicalDevice = VK_NULL_HANDLE;
     physicalDevice = VK_NULL_HANDLE;
 
-    currentGraphicsQueueIndex = 0;
     currentComputeQueueIndex = 0;
     currentTransferQueueIndex = 0;
 }
@@ -135,12 +133,6 @@ void DeviceManager::destroyQueueResources(std::vector<QueueUtils> &queues)
             queue.queueMutex.reset();
             queue.deviceManager = nullptr;
             continue;
-        }
-
-        if (queue.commandBuffer != VK_NULL_HANDLE && queue.commandPool != VK_NULL_HANDLE)
-        {
-            vkFreeCommandBuffers(logicalDevice, queue.commandPool, 1, &queue.commandBuffer);
-            queue.commandBuffer = VK_NULL_HANDLE;
         }
 
         if (queue.commandPool != VK_NULL_HANDLE)
@@ -208,7 +200,7 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
 
     deviceFeaturesUtils.rayTracingPipelineProperties.pNext = &deviceFeaturesUtils.accelerationStructureProperties;
     deviceFeaturesUtils.supportedProperties.pNext = &deviceFeaturesUtils.rayTracingPipelineProperties;
-    deviceFeaturesUtils.accelerationStructureProperties.pNext = nullptr;
+    deviceFeaturesUtils.accelerationStructureProperties.pNext = &deviceFeaturesUtils.multiviewProperties;
 
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceFeaturesUtils.supportedProperties);
     printDeviceInfo(deviceFeaturesUtils.supportedProperties.properties);
@@ -248,6 +240,9 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
 
     for (int i = 0; i < queueFamilies.size(); i++)
     {
+        // Graphics recording and presentation use queue zero of a supported family.
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            queueFamilies[i].queueCount = 1;
         queuePriorities[i].resize(queueFamilies[i].queueCount, 1.0f);
 
         VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -263,14 +258,83 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
-    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
     createInfo.enabledLayerCount = 0;
     createInfo.ppEnabledLayerNames = nullptr;
     createInfo.pEnabledFeatures = nullptr;
-    createInfo.pNext = deviceFeaturesUtils.featuresChain.getChainHead();
+    void* enabledFeatures = deviceFeaturesUtils.featuresChain.getChainHead();
+
+    constexpr std::array rayExtensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR ray{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    if (deviceFeaturesUtils.featuresChain.supportsBufferAddress() &&
+        std::ranges::all_of(rayExtensions, [&](const char* name) {
+            return std::ranges::any_of(availableExtensions, [&](const auto& ext) { return strcmp(name, ext.extensionName) == 0; });
+        })) {
+        accel.pNext = &ray;
+        VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &accel};
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &query);
+        if (accel.accelerationStructure && ray.rayTracingPipeline) {
+            requiredExtensions.insert(requiredExtensions.end(), rayExtensions.begin(), rayExtensions.end());
+            ray = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, enabledFeatures, VK_TRUE};
+            accel = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &ray, VK_TRUE};
+            enabledFeatures = &accel;
+            deviceFeaturesUtils.rayTrace = true;
+        }
+    }
+
+    auto& mesh = deviceFeaturesUtils.meshShaderFeatures;
+    if (std::ranges::any_of(availableExtensions, [](const auto& extension) {
+            return strcmp(extension.extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0;
+        })) {
+        VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &mesh};
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &query);
+        if (mesh.meshShader) {
+            VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                   &deviceFeaturesUtils.meshShaderProperties};
+            vkGetPhysicalDeviceProperties2(physicalDevice, &properties);
+            mesh.primitiveFragmentShadingRateMeshShader = VK_FALSE;
+            mesh.meshShaderQueries = VK_FALSE;
+            if (!deviceFeaturesUtils.featuresChain.supportsMultiview())
+                mesh.multiviewMeshShader = VK_FALSE;
+            mesh.pNext = enabledFeatures;
+            enabledFeatures = &mesh;
+            requiredExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+        }
+    }
+
+    // Implicit-LOD sampling in compute shaders uses quad derivatives. Other
+    // shaders and devices can continue using the ordinary device feature set.
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivatives{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
+    if (std::ranges::any_of(availableExtensions, [](const auto& extension) {
+            return strcmp(extension.extensionName, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME) == 0;
+        })) {
+        VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &derivatives};
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &query);
+        if (derivatives.computeDerivativeGroupQuads) {
+            deviceFeaturesUtils.computeDerivativeGroupQuads = true;
+            requiredExtensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+            derivatives.computeDerivativeGroupLinear = VK_FALSE;
+            derivatives.pNext = enabledFeatures;
+            enabledFeatures = &derivatives;
+        }
+    }
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
+    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    createInfo.pNext = enabledFeatures;
 
     coronaHardwareCheck(vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice));
+    if (deviceFeaturesUtils.rayTrace) {
+        deviceFeaturesUtils.createAS = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCreateAccelerationStructureKHR"));
+        deviceFeaturesUtils.destroyAS = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(logicalDevice, "vkDestroyAccelerationStructureKHR"));
+        deviceFeaturesUtils.buildSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureBuildSizesKHR"));
+        deviceFeaturesUtils.addressAS = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureDeviceAddressKHR"));
+        deviceFeaturesUtils.buildAS = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdBuildAccelerationStructuresKHR"));
+        deviceFeaturesUtils.createRayPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCreateRayTracingPipelinesKHR"));
+        deviceFeaturesUtils.rayGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkGetRayTracingShaderGroupHandlesKHR"));
+        deviceFeaturesUtils.traceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdTraceRaysKHR"));
+    }
 }
 
 void DeviceManager::createQueueUtils()
@@ -334,9 +398,8 @@ void DeviceManager::createQueueUtils()
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = queue.commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
-
-        coronaHardwareCheck(vkAllocateCommandBuffers(logicalDevice, &allocInfo, &queue.commandBuffer));
+        allocInfo.commandBufferCount = static_cast<uint32_t>(queue.commandBuffers.size());
+        coronaHardwareCheck(vkAllocateCommandBuffers(logicalDevice, &allocInfo, queue.commandBuffers.data()));
     };
 
     int queue_count = 0;
@@ -406,25 +469,20 @@ void DeviceManager::createQueueUtils()
 //     return true;
 // }
 
-std::vector<DeviceManager::QueueUtils> DeviceManager::pickAvailableQueues(std::function<bool(const QueueUtils &)> predicate) const
+const DeviceManager::QueueUtils* DeviceManager::findPresentQueue(VkSurfaceKHR surface, uint32_t& graphicsFamily) const
 {
-    std::vector<QueueUtils> result;
-
-    auto addMatchingQueues = [&](const std::vector<QueueUtils> &queues) {
-        for (const auto &queue : queues)
+    if (graphicsQueues.empty()) return nullptr; // Presentation uses a graphics blit on this device.
+    for (const auto* queues : {&graphicsQueues, &computeQueues, &transferQueues})
+        for (const auto& queue : *queues)
         {
-            if (predicate(queue))
+            VkBool32 supported = VK_FALSE;
+            if (vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queue.queueFamilyIndex, surface, &supported) == VK_SUCCESS && supported)
             {
-                result.push_back(queue);
+                graphicsFamily = graphicsQueues.front().queueFamilyIndex;
+                return &queue;
             }
         }
-    };
-
-    addMatchingQueues(graphicsQueues);
-    addMatchingQueues(computeQueues);
-    addMatchingQueues(transferQueues);
-
-    return result;
+    return nullptr;
 }
 
 DeviceManager::ExternalSemaphoreHandle DeviceManager::exportSemaphore(VkSemaphore &semaphore)

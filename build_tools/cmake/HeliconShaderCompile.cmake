@@ -24,7 +24,7 @@ endif()
 
 # 解析源文件中的 shader include 指令
 # 返回: shader lang list, shader path list, shader relative path list
-function(_helicon_parse_shader_includes source_files source_dir out_langs out_paths out_rel_paths out_source_paths out_scanned_files)
+function(_helicon_parse_shader_includes source_files source_dir output_dir out_langs out_paths out_rel_paths out_source_paths out_scanned_files)
     set(_helicon_lang_list "")
     set(_helicon_path_list "")
     set(_helicon_rel_path_list "")
@@ -74,9 +74,22 @@ function(_helicon_parse_shader_includes source_files source_dir out_langs out_pa
             
             # 处理相对路径 -> 绝对路径（用于编译）
             if(NOT IS_ABSOLUTE "${_helicon_raw_shader_path}")
-                #get_filename_component(FILE_DIR "${_helicon_source_file}" DIRECTORY)
-                #get_filename_component(_helicon_shader_path "${FILE_DIR}/${_helicon_raw_shader_path}" ABSOLUTE)
                 get_filename_component(_helicon_shader_path "${source_dir}/${_helicon_raw_shader_path}" ABSOLUTE)
+                # A bare filename may refer to a shader beside the including C++ file.
+                # Give each such directory its own generated include path for matching basenames.
+                get_filename_component(_shader_name "${_helicon_raw_shader_path}" NAME)
+                get_filename_component(_cpp_dir "${_helicon_source_file}" DIRECTORY)
+                if(NOT EXISTS "${_helicon_shader_path}" AND _shader_name STREQUAL _helicon_raw_shader_path
+                   AND EXISTS "${_cpp_dir}/${_shader_name}")
+                    set(_helicon_shader_path "${_cpp_dir}/${_shader_name}")
+                    file(RELATIVE_PATH _local_dir "${source_dir}" "${_cpp_dir}")
+                    if(_local_dir MATCHES "^\\.\\." OR IS_ABSOLUTE "${_local_dir}")
+                        string(SHA256 _local_dir "${_cpp_dir}")
+                    endif()
+                    set(_helicon_relative_path "${_local_dir}/${_shader_name}")
+                    set_property(SOURCE "${_helicon_source_file}" DIRECTORY "${source_dir}" APPEND
+                        PROPERTY INCLUDE_DIRECTORIES "${output_dir}/${_local_dir}")
+                endif()
             else()
                 set(_helicon_shader_path "${_helicon_raw_shader_path}")
             endif()
@@ -99,14 +112,58 @@ function(_helicon_parse_shader_includes source_files source_dir out_langs out_pa
     set(${out_scanned_files} "${_helicon_scanned_files}" PARENT_SCOPE)
 endfunction()
 
-# ============================================================================
-# 主函数：为目标设置 shader 自动编译
-# 用法: helicon_compile_shaders(TARGET [OUTPUT_DIR <dir>])
-# 
-# 参数:
-#   TARGET      - 目标名称 (必需)
-#   OUTPUT_DIR  - 输出目录 (可选, 默认: ${CMAKE_CURRENT_BINARY_DIR}/helicon_generated/<target>)
-# ============================================================================
+# Generate the stage header once. Paired stages also export the serialized module for reflection.
+function(_helicon_compile_stage source header language stage module_output dependencies)
+    get_filename_component(_directory "${header}" DIRECTORY)
+    get_filename_component(_extension "${source}" LAST_EXT)
+    file(MAKE_DIRECTORY "${_directory}")
+
+    if(NOT stage)
+        # Match the stage hints used for standalone HLSL/GLSL/SLANG includes.
+        get_filename_component(_stem "${source}" NAME_WE)
+        get_filename_component(_ext "${source}" EXT)
+        string(TOLOWER "${_stem}" _stem)
+        string(TOLOWER "${_ext}" _ext)
+        if(_ext MATCHES "\\.(vert|vs)")
+            set(stage vert)
+        elseif(_ext MATCHES "\\.(frag|fs)")
+            set(stage frag)
+        elseif(_ext MATCHES "\\.(comp|cs)")
+            set(stage comp)
+        elseif(_stem MATCHES "frag")
+            set(stage frag)
+        elseif(_stem MATCHES "comp|compute")
+            set(stage comp)
+        elseif(_stem MATCHES "vert")
+            set(stage vert)
+        endif()
+    endif()
+    set(_options)
+    set(_outputs "${header}")
+    if(stage)
+        list(APPEND _options -t "${stage}")
+    endif()
+    if(module_output)
+        get_filename_component(_module_directory "${module_output}" DIRECTORY)
+        file(MAKE_DIRECTORY "${_module_directory}")
+        list(APPEND _options -module-output "${module_output}")
+        list(APPEND _outputs "${module_output}")
+    endif()
+    string(TOLOWER "${language}" language)
+    add_custom_command(
+        OUTPUT ${_outputs}
+        COMMAND $<TARGET_FILE:ShaderCompileScripts> -l "${language}" -s "${source}" -o "${_directory}"
+                -output-file-extension "${_extension}.hpp" ${_options} ${ARGN}
+        DEPENDS "${source}" ${dependencies} ShaderCompileScripts
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        COMMENT "[Helicon] Compiling shader: ${source}"
+        VERBATIM)
+endfunction()
+
+# RASTER_PAIRS takes triples: generated header (relative to OUTPUT_DIR), vertex source, fragment source.
+# MESH_PAIRS uses header, mesh, fragment. TASK_MESH_PAIRS uses header, task, mesh, fragment.
+# RAY_TRACE_PIPELINES uses header, raygen, miss, closest-hit.
+# Shader sources are relative to the target's source directory or absolute.
 function(helicon_compile_shaders target_name)
     if(NOT TARGET ShaderCompileScripts)
         message(FATAL_ERROR
@@ -115,169 +172,167 @@ function(helicon_compile_shaders target_name)
             "or provide HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE.")
     endif()
 
-    # 解析可选参数
-    cmake_parse_arguments(_helicon_arg "" "OUTPUT_DIR" "" ${ARGN})
-    
-    if(NOT _helicon_arg_OUTPUT_DIR)
-        set(_helicon_arg_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/helicon_generated/${target_name}")
+    cmake_parse_arguments(_args "" "OUTPUT_DIR" "DEPENDS;RASTER_PAIRS;MESH_PAIRS;TASK_MESH_PAIRS;RAY_TRACE_PIPELINES" ${ARGN})
+    if(NOT _args_OUTPUT_DIR)
+        set(_args_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/helicon_generated/${target_name}")
     endif()
-    
-    # 确保输出目录存在
-    file(MAKE_DIRECTORY "${_helicon_arg_OUTPUT_DIR}")
-    
-    # 获取目标的所有源文件
-    get_target_property(_helicon_target_sources ${target_name} SOURCES)
-    get_target_property(_helicon_target_source_dir ${target_name} SOURCE_DIR)
-    
-    if(NOT _helicon_target_sources)
-        #message(STATUS "[Helicon] ${target_name}: No sources found, skipping shader compilation")
-        return()
-    endif()
-    
-    # 解析所有源文件中的 shader include
-    _helicon_parse_shader_includes("${_helicon_target_sources}" "${_helicon_target_source_dir}"
-        _helicon_shader_langs _helicon_shader_paths _helicon_shader_rel_paths
-        _helicon_shader_source_paths _helicon_shader_scanned_files)
-
-    # 把"含 shader include 的源文件"注册为 configure 依赖。
-    # 要生成哪些 shader 的集合在 configure 时冻结；若不监视这些文件，
-    # 改名/新增 shader(只改源里的 #include GLSL(...))不会触发重新扫描，
-    # 导致旧命令留下孤儿 .hpp、新 shader 永不生成(编译期 C1083)。
-    # 监视后，编辑这些文件即自动重配置、重新冻结正确的命令集。
-    if(_helicon_shader_scanned_files)
-        set_property(DIRECTORY APPEND PROPERTY
-            CMAKE_CONFIGURE_DEPENDS ${_helicon_shader_scanned_files})
+    cmake_path(ABSOLUTE_PATH _args_OUTPUT_DIR BASE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}" NORMALIZE)
+    get_target_property(_sources ${target_name} SOURCES)
+    get_target_property(_source_dir ${target_name} SOURCE_DIR)
+    _helicon_parse_shader_includes("${_sources}" "${_source_dir}" "${_args_OUTPUT_DIR}"
+        _languages _shader_paths _relative_paths _source_files _scanned_files)
+    if(_scanned_files)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_scanned_files})
     endif()
 
-    # 计算 shader 数量
-    list(LENGTH _helicon_shader_paths _helicon_shader_count)
-    
-    if(_helicon_shader_count EQUAL 0)
-        #message(STATUS "[Helicon] ${target_name}: No shader includes found")
-        return()
-    endif()
-    
-    #message(STATUS "[Helicon] ${target_name}: Found ${_helicon_shader_count} shader(s) to compile")
-    
-    set(_helicon_generated_headers "")
-    
-    # 为每个 shader 创建编译命令
-    math(EXPR _helicon_last_idx "${_helicon_shader_count} - 1")
-    foreach(_helicon_idx RANGE ${_helicon_last_idx})
-        list(GET _helicon_shader_langs ${_helicon_idx} _helicon_shader_lang)
-        list(GET _helicon_shader_paths ${_helicon_idx} _helicon_shader_path)
-        list(GET _helicon_shader_rel_paths ${_helicon_idx} _helicon_shader_rel_path)
-        list(GET _helicon_shader_source_paths ${_helicon_idx} _helicon_shader_source_file)
-        
-        # 检查 shader 文件是否存在
-        if(NOT EXISTS "${_helicon_shader_path}")
-            #message(WARNING "[Helicon] Shader file not found: ${_helicon_shader_path}")
+    set(_stage_headers)
+    set(_pair_headers)
+    set(_pairs)
+    set(_paired_ids)
+    set(_roles_RASTER_PAIRS vert frag)
+    set(_roles_MESH_PAIRS mesh frag)
+    set(_roles_TASK_MESH_PAIRS task mesh frag)
+    set(_roles_RAY_TRACE_PIPELINES raygen miss closesthit)
+    foreach(_kind IN ITEMS RASTER_PAIRS MESH_PAIRS TASK_MESH_PAIRS RAY_TRACE_PIPELINES)
+        list(LENGTH _roles_${_kind} _stages_per_pipeline)
+        list(LENGTH _args_${_kind} _count)
+        math(EXPR _remainder "${_count} % (${_stages_per_pipeline} + 1)")
+        if(_remainder)
+            message(FATAL_ERROR "${_kind} expects a header followed by the stages: ${_roles_${_kind}}")
+        endif()
+    endforeach()
+    while(_args_RASTER_PAIRS OR _args_MESH_PAIRS OR _args_TASK_MESH_PAIRS OR _args_RAY_TRACE_PIPELINES)
+        if(_args_RASTER_PAIRS)
+            set(_kind RASTER_PAIRS)
+        elseif(_args_MESH_PAIRS)
+            set(_kind MESH_PAIRS)
+        elseif(_args_RAY_TRACE_PIPELINES)
+            set(_kind RAY_TRACE_PIPELINES)
+        else()
+            set(_kind TASK_MESH_PAIRS)
+        endif()
+        set(_stages ${_roles_${_kind}})
+        list(POP_FRONT _args_${_kind} _pair_header)
+        cmake_path(NORMAL_PATH _pair_header)
+        if(IS_ABSOLUTE "${_pair_header}" OR _pair_header MATCHES "^\\.\\.(/|$)")
+            message(FATAL_ERROR "Pipeline header must be relative to OUTPUT_DIR: ${_pair_header}")
+        endif()
+        set(_output "${_args_OUTPUT_DIR}/${_pair_header}")
+        get_filename_component(_directory "${_output}" DIRECTORY)
+        set(_pipeline_ids)
+        foreach(_stage IN LISTS _stages)
+            list(POP_FRONT _args_${_kind} _${_stage})
+            cmake_path(ABSOLUTE_PATH _${_stage} BASE_DIRECTORY "${_source_dir}" NORMALIZE)
+            set(_source "${_${_stage}}")
+            if(NOT EXISTS "${_source}")
+                message(FATAL_ERROR "Registered ${_stage} shader does not exist: ${_source}")
+            endif()
+            string(SHA256 _id "${_source}")
+            if(_id IN_LIST _paired_ids AND NOT _role_${_id} STREQUAL _stage)
+                message(FATAL_ERROR "Shader registered for incompatible stages: ${_source}")
+            endif()
+            if(NOT _id IN_LIST _paired_ids)
+                file(RELATIVE_PATH _relative "${_source_dir}" "${_source}")
+                if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\./")
+                    file(RELATIVE_PATH _relative "${PROJECT_SOURCE_DIR}" "${_source}")
+                endif()
+                if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\./")
+                    get_filename_component(_dir "${_source}" DIRECTORY)
+                    get_filename_component(_name "${_source}" NAME)
+                    string(SHA256 _external_dir "${_dir}")
+                    set(_relative "external/${_external_dir}/${_name}")
+                endif()
+                set(_header_${_id} "${_args_OUTPUT_DIR}/${_relative}.hpp")
+                set(_ir_${_id} "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${target_name}.dir/slang/${_relative}.slang-module")
+                if(_header_${_id} IN_LIST _pair_headers OR _header_${_id} IN_LIST _stage_headers)
+                    message(FATAL_ERROR "Duplicate generated shader header: ${_header_${_id}}")
+                endif()
+                set(_source_${_id} "${_source}")
+                set(_role_${_id} "${_stage}")
+                list(APPEND _paired_ids "${_id}")
+                list(APPEND _stage_headers "${_header_${_id}}")
+            endif()
+            list(APPEND _pipeline_ids "${_id}")
+        endforeach()
+
+        set(_flags_vert vs)
+        set(_flags_frag fs)
+        set(_flags_mesh ms)
+        set(_flags_task ts)
+        set(_flags_raygen rg)
+        set(_flags_miss mi)
+        set(_flags_closesthit ch)
+        set(_stage_args)
+        set(_stage_modules)
+        foreach(_id IN LISTS _pipeline_ids)
+            set(_other_ids ${_pipeline_ids})
+            list(REMOVE_ITEM _other_ids "${_id}")
+            list(TRANSFORM _other_ids PREPEND "HORIZON_HELICON_STAGE_")
+            list(JOIN _other_ids "," _required)
+            get_filename_component(_stage_dir "${_header_${_id}}" DIRECTORY)
+            file(RELATIVE_PATH _pair_include "${_stage_dir}" "${_output}")
+            list(APPEND _partners_${_id} -raster-partner "${_required}" "${_pair_include}")
+            file(RELATIVE_PATH _stage_header "${_directory}" "${_header_${_id}}")
+            set(_flag "-${_flags_${_role_${_id}}}")
+            list(APPEND _stage_args "${_flag}" "${_source_${_id}}" "${_flag}-header" "${_stage_header}" "${_flag}-ir" "${_ir_${_id}}")
+            list(APPEND _stage_modules "${_ir_${_id}}")
+        endforeach()
+        list(JOIN _pipeline_ids "|" _pair)
+        if(_output IN_LIST _stage_headers OR _output IN_LIST _pair_headers OR _pair IN_LIST _pairs)
+            message(FATAL_ERROR "Duplicate stage combination or generated header: ${_pair_header}")
+        endif()
+        file(MAKE_DIRECTORY "${_directory}")
+        add_custom_command(
+            OUTPUT "${_output}"
+            COMMAND $<TARGET_FILE:ShaderCompileScripts> -raster-pair -o "${_output}"
+                    ${_stage_args}
+            DEPENDS ${_stage_modules} ShaderCompileScripts
+            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+            COMMENT "[Helicon] Generating shader pipeline: ${_pair_header}"
+            VERBATIM)
+        list(APPEND _pair_headers "${_output}")
+        list(APPEND _pairs "${_pair}")
+    endwhile()
+
+    # A shared stage needs every partner before its single compilation command is declared.
+    foreach(_id IN LISTS _paired_ids)
+        set(_source "${_source_${_id}}")
+        list(FIND _shader_paths "${_source}" _scanned)
+        cmake_path(GET _source EXTENSION LAST_ONLY _ext)
+        string(TOLOWER "${_ext}" _ext)
+        if(_scanned GREATER_EQUAL 0)
+            list(GET _languages ${_scanned} _language)
+        elseif(_ext STREQUAL ".slang")
+            set(_language slang)
+        elseif(_ext STREQUAL ".hlsl")
+            set(_language hlsl)
+        else()
+            set(_language glsl)
+        endif()
+        _helicon_compile_stage("${_source}" "${_header_${_id}}" "${_language}" "${_role_${_id}}" "${_ir_${_id}}"
+            "${_args_DEPENDS}" -raster-ready "HORIZON_HELICON_STAGE_${_id}" ${_partners_${_id}})
+    endforeach()
+
+    foreach(_language _shader _relative _consumer IN ZIP_LISTS _languages _shader_paths _relative_paths _source_files)
+        if(NOT EXISTS "${_shader}")
             continue()
         endif()
-        
-        # 计算输出路径（保持相对路径结构）
-        # 例如: shaders/example.hlsl -> ${OUTPUT_DIR}/shaders/example.hlsl.hpp
-        get_filename_component(_helicon_shader_rel_dir "${_helicon_shader_rel_path}" DIRECTORY)
-        get_filename_component(_helicon_shader_name "${_helicon_shader_path}" NAME)
-        get_filename_component(_helicon_shader_ext "${_helicon_shader_path}" EXT)
-        
-        if(_helicon_shader_rel_dir)
-            set(_helicon_output_subdir "${_helicon_arg_OUTPUT_DIR}/${_helicon_shader_rel_dir}")
-        else()
-            set(_helicon_output_subdir "${_helicon_arg_OUTPUT_DIR}")
+        set(_header "${_args_OUTPUT_DIR}/${_relative}.hpp")
+        if(_header IN_LIST _pair_headers)
+            message(FATAL_ERROR "Pipeline and stage generate the same header: ${_header}")
         endif()
-        
-        # 确保输出子目录存在
-        file(MAKE_DIRECTORY "${_helicon_output_subdir}")
-        
-        set(_helicon_output_header "${_helicon_output_subdir}/${_helicon_shader_name}.hpp")
-        
-        # 转换语言参数为小写
-        string(TOLOWER "${_helicon_shader_lang}" _helicon_lang_lower)
-        
-        # 从文件名推断 shader stage
-        get_filename_component(_helicon_shader_name_we "${_helicon_shader_path}" NAME_WE)
-        string(TOLOWER "${_helicon_shader_name_we}" _helicon_shader_name_lower)
-        string(TOLOWER "${_helicon_shader_ext}" _helicon_shader_ext_lower)
-        
-        set(_helicon_shader_stage_arg "")
-        if(_helicon_shader_ext_lower MATCHES "\\.(vert|vs)")
-            set(_helicon_shader_stage_arg "-t" "vert")
-        elseif(_helicon_shader_ext_lower MATCHES "\\.(frag|fs)")
-            set(_helicon_shader_stage_arg "-t" "frag")
-        elseif(_helicon_shader_ext_lower MATCHES "\\.(comp|cs)")
-            set(_helicon_shader_stage_arg "-t" "comp")
-        elseif(_helicon_shader_name_lower MATCHES "frag")
-            set(_helicon_shader_stage_arg "-t" "frag")
-        elseif(_helicon_shader_name_lower MATCHES "comp|compute")
-            set(_helicon_shader_stage_arg "-t" "comp")
-        elseif(_helicon_shader_name_lower MATCHES "vert")
-            set(_helicon_shader_stage_arg "-t" "vert")
+        if(NOT _header IN_LIST _stage_headers)
+            _helicon_compile_stage("${_shader}" "${_header}" "${_language}" "" "" "${_args_DEPENDS}")
+            list(APPEND _stage_headers "${_header}")
         endif()
-        
-        # Extract only the last extension to avoid duplication with multi-dot
-        # shader filenames (e.g. .comp.glsl -> .glsl, not .comp.glsl).
-        string(REGEX MATCH "\\.[^.]+$" _helicon_shader_last_ext "${_helicon_shader_name}")
-        if(NOT _helicon_shader_last_ext)
-            set(_helicon_shader_last_ext ".h")
-        endif()
-
-        #message(STATUS "[Helicon]   - ${_helicon_shader_rel_path} (${_helicon_shader_lang}) -> ${_helicon_shader_rel_path}.hpp")
-        
-        # 添加自定义命令（增量编译）
-        add_custom_command(
-            OUTPUT "${_helicon_output_header}"
-            COMMAND $<TARGET_FILE:ShaderCompileScripts>
-                -l ${_helicon_lang_lower}
-                -s "${_helicon_shader_path}"
-                -o "${_helicon_output_subdir}"
-                -output-file-extension "${_helicon_shader_last_ext}.hpp"
-                ${_helicon_shader_stage_arg}
-            DEPENDS "${_helicon_shader_path}" ShaderCompileScripts
-            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-            COMMENT "[Helicon] Compiling shader: ${_helicon_shader_rel_path}"
-            VERBATIM
-        )
-        
-        list(APPEND _helicon_generated_headers "${_helicon_output_header}")
-
-        get_source_file_property(_helicon_existing_object_depends
-            "${_helicon_shader_source_file}"
-            DIRECTORY "${_helicon_target_source_dir}"
-            OBJECT_DEPENDS)
-        if(NOT _helicon_existing_object_depends OR
-           _helicon_existing_object_depends STREQUAL "NOTFOUND")
-            set(_helicon_existing_object_depends "")
-        endif()
-
-        list(APPEND _helicon_existing_object_depends "${_helicon_output_header}")
-        list(REMOVE_DUPLICATES _helicon_existing_object_depends)
-        set_source_files_properties("${_helicon_shader_source_file}"
-            DIRECTORY "${_helicon_target_source_dir}"
-            PROPERTIES OBJECT_DEPENDS "${_helicon_existing_object_depends}")
+        set_property(SOURCE "${_consumer}" DIRECTORY "${_source_dir}" APPEND PROPERTY OBJECT_DEPENDS "${_header}")
     endforeach()
-    
-    # 创建自定义目标
-    if(_helicon_generated_headers)
-        set(_helicon_shader_target "${target_name}_shaders")
-        add_custom_target(${_helicon_shader_target}
-            DEPENDS ${_helicon_generated_headers}
-            COMMENT "[Helicon] All shaders for ${target_name} compiled"
-        )
-        
-        # 确保 shader 在主目标之前编译
-        add_dependencies(${target_name} ${_helicon_shader_target})
 
-        set_source_files_properties(${_helicon_generated_headers}
-            PROPERTIES GENERATED TRUE)
-        target_sources(${target_name} PRIVATE ${_helicon_generated_headers})
-
-        # 添加 include 路径（OUTPUT_DIR 作为根目录）
-        # BEFORE: keep freshly-generated shader headers ahead of any stale
-        # build-cache copies on transitive include paths so they can't be shadowed.
-        target_include_directories(${target_name} BEFORE PUBLIC
-            "$<BUILD_INTERFACE:${_helicon_arg_OUTPUT_DIR}>")
-        
-        #message(STATUS "[Helicon] ${target_name}: Output directory: ${_helicon_arg_OUTPUT_DIR}")
+    set(_headers ${_stage_headers} ${_pair_headers})
+    if(_headers)
+        add_custom_target(${target_name}_shaders DEPENDS ${_headers})
+        add_dependencies(${target_name} ${target_name}_shaders)
+        target_sources(${target_name} PRIVATE ${_headers})
+        target_include_directories(${target_name} BEFORE PUBLIC "$<BUILD_INTERFACE:${_args_OUTPUT_DIR}>")
     endif()
 endfunction()

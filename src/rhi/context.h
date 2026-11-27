@@ -13,15 +13,12 @@
 namespace ocarina {
 class Device;
 class DynamicModule;
+namespace test {
+struct RHIContextTestAccess;
+}
+
 class OC_RHI_API RHIContext : public concepts::Noncopyable {
-
-    OC_MAKE_INSTANCE_CONSTRUCTOR(RHIContext, s_context)
-
-public:
-    [[nodiscard]] static RHIContext &instance() noexcept;
-    static void destroy_instance();
-
-private:
+    friend struct test::RHIContextTestAccess;
     struct Impl {
         fs::path runtime_directory;
         fs::path cache_directory;
@@ -30,9 +27,14 @@ private:
         Impl() = default;
     };
     ocarina::unique_ptr<Impl> impl_;
+    static RHIContext *s_context;
+
+    RHIContext();
+    void set_cache_directory(const fs::path &directory);
 
 public:
-    RHIContext &init(const fs::path &path, string_view cache_dir = ".cache");
+    [[nodiscard]] static RHIContext &instance() noexcept;
+    static void destroy_instance();
     virtual ~RHIContext() noexcept;
     [[nodiscard]] const fs::path &runtime_directory() const noexcept;
     [[nodiscard]] const fs::path &cache_directory() const noexcept;

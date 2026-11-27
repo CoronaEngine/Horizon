@@ -148,9 +148,7 @@ namespace EmbeddedShader::Generator
 		static std::shared_ptr<Ast::Variate> getInstanceIndexInput();
 		static std::shared_ptr<Ast::Variate> getVertexIndexInput();
 	private:
-		static bool bindless();
 		static thread_local inline std::string uboMembers;
-		static thread_local inline std::string parameterBlockMembers;
 		static thread_local inline std::string pushConstantMembers;
 		static thread_local inline std::string bindlessHandleMembers;
 		static thread_local inline ktm::uvec3 numthreads = ktm::uvec3(1);

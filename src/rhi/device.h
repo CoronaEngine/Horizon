@@ -103,6 +103,7 @@ public:
             cleanup_callbacks_.clear();
             for (auto &item : callbacks) item.second();
         }
+        [[nodiscard]] virtual bool supports_ray_queries() const noexcept { return false; }
         [[nodiscard]] virtual bool supports_buffer_export() const noexcept { return false; }
         [[nodiscard]] virtual bool supports_bc7_textures() const noexcept { return false; }
         [[nodiscard]] virtual bool supports_raytracing() const noexcept { return false; }
@@ -251,6 +252,7 @@ public:
         return impl_->get_aligned_memory_size(handle);
     }
 
+    [[nodiscard]] bool supports_ray_queries() const noexcept { return impl_->supports_ray_queries(); }
     [[nodiscard]] bool supports_buffer_export() const noexcept { return impl_->supports_buffer_export(); }
     [[nodiscard]] bool supports_bc7_textures() const noexcept { return impl_->supports_bc7_textures(); }
     [[nodiscard]] TraceCapabilities trace_capabilities() const noexcept { return impl_->trace_capabilities(); }

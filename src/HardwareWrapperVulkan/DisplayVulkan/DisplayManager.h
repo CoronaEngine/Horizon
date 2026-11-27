@@ -1,17 +1,13 @@
 ﻿#pragma once
 
-#include <chrono>
-#include <numeric>
-#include <unordered_map>
-
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 
 class DisplayManager
 {
   public:
-    DisplayManager();
+    DisplayManager() = default;
     ~DisplayManager();
 
     // 禁止拷贝和移动
@@ -20,9 +16,7 @@ class DisplayManager
     DisplayManager(DisplayManager &&) = delete;
     DisplayManager &operator=(DisplayManager &&) = delete;
 
-    bool initDisplayManager(void *surface);
-    bool waitExecutor(HardwareExecutorVulkan &executor);
-    bool displayFrame(void *surface, HardwareImage displayImage);
+    void displayFrame(void *surface, const HardwareImage& source, HardwareExecutorVulkan& producer);
 
   private:
     // Vulkan 核心资源
@@ -36,17 +30,17 @@ class DisplayManager
     uint32_t currentFrame{0};
 
     // 交换链资源
-    std::vector<ResourceManager::ImageHardwareWrap> swapChainImages;
+    std::vector<VkImage> swapChainImages;
     ResourceManager::ImageHardwareWrap displayImage{};
 
     // 同步对象
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
-    std::vector<VkFence> acquireFences;
+    std::vector<SubmissionPoint> acquireConsumed;
 
     // 队列和设备
-    std::atomic_uint16_t currentQueueIndex{0};
-    std::vector<DeviceManager::QueueUtils> presentQueues;
+    const DeviceManager::QueueUtils* presentQueue{};
+    uint32_t blitQueueFamily{};
     std::shared_ptr<HardwareContext::HardwareUtils> displayDevice;
 
     // 跨设备传输资源
@@ -56,12 +50,11 @@ class DisplayManager
     ResourceManager::BufferHardwareWrap dstStaging{};
 
     // 执行器
-    std::shared_ptr<HardwareExecutorVulkan> waitedExecutor;
-    std::shared_ptr<HardwareExecutorVulkan> mainDeviceExecutor;
-    std::shared_ptr<HardwareExecutorVulkan> displayDeviceExecutor;
-    //std::vector<std::shared_ptr<HardwareExecutorVulkan>> displayDeviceExecutors;
+    SubmissionPoint sourceCopy;
+    std::unique_ptr<HardwareExecutorVulkan> displayDeviceExecutor;
 
     // 内部方法
+    bool initDisplayManager(void *surface);
     void cleanUpDisplayManager();
     void createVkSurface(void *surface);
     void choosePresentDevice();
@@ -70,10 +63,6 @@ class DisplayManager
     void recreateSwapChain();
 
     void cleanupSyncObjects();
-    void cleanupSwapChainImages();
-    void cleanupStagingBuffers();
-    void cleanupDisplayImage();
-
-    bool needsSwapChainRecreation(const ktm::uvec2 &newSize) const;
+    void cleanupCrossDeviceTransfer();
     void setupCrossDeviceTransfer(const ResourceManager::ImageHardwareWrap &sourceImage);
 };
