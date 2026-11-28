@@ -8,6 +8,12 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include <new>
 
+#if defined(__APPLE__)
+#import <Cocoa/Cocoa.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#endif
+
 namespace {
 struct PresentImageCommand final : CommandRecordVulkan
 {
@@ -238,6 +244,19 @@ void DisplayManager::createVkSurface(void *surface)
                                                 &vkSurface));
 
 #elif __APPLE__
+    // MoltenVK 只有拿到 CAMetalLayer 才能创建窗口表面，否则
+    // vkCreateMacOSSurfaceMVK 返回 VK_ERROR_SURFACE_LOST_KHR。
+    // GLFW 的 Cocoa view 默认没有 Metal layer，这里补上。
+    NSView *metalView = (__bridge NSView *)surface;
+    if (![metalView.layer isKindOfClass:[CAMetalLayer class]])
+    {
+        CAMetalLayer *metalLayer = [CAMetalLayer layer];
+        metalLayer.device = MTLCreateSystemDefaultDevice();
+        metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        [metalView setWantsLayer:YES];
+        [metalView setLayer:metalLayer];
+    }
+
     VkMacOSSurfaceCreateInfoMVK createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK;
     createInfo.pView = surface;
