@@ -74,7 +74,8 @@ class SlangConan(ConanFile):
         sdk_dir = os.path.join(self.build_folder, "sdk")
         get(
             self,
-            url=f"{self.homepage}/releases/download/v{self.version}/{asset_name}",
+            url=(os.environ.get("SLANG_DOWNLOAD_BASE") or self.homepage)
+                + f"/releases/download/v{self.version}/{asset_name}",
             sha256=sha256,
             destination=sdk_dir,
             strip_root=False,
