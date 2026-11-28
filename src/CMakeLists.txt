@@ -59,5 +59,11 @@ if(HORIZON_BUILD_ENGINE)
             "-framework QuartzCore"
             "-framework Metal"
         )
+        # volk 在 macOS 上通过 dlopen("libvulkan.1.dylib") 查找 loader，而由 sshd、
+        # Finder 或 launchd 启动的进程拿不到 DYLD_LIBRARY_PATH，因此把 Conan 提供的
+        # loader 直接链接进来，由 dyld 在进程启动时加载。
+        if(TARGET Vulkan::Loader)
+            target_link_libraries(Horizon PRIVATE Vulkan::Loader)
+        endif()
     endif()
 endif()
