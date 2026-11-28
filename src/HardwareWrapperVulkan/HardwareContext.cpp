@@ -107,8 +107,7 @@ void HardwareContext::prepareFeaturesChain()
 #if _WIN32 || _WIN64
         extensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif __APPLE__
-        extensions.insert(VK_MVK_MOLTENVK_EXTENSION_NAME);
-        extensions.insert(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+        extensions.insert(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
 #elif __linux__
         // Keep Xlib macros out of the backend headers. This only needs the extension name.
         extensions.insert("VK_KHR_xlib_surface");

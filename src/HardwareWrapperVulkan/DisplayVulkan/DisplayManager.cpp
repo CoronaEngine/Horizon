@@ -244,27 +244,27 @@ void DisplayManager::createVkSurface(void *surface)
                                                 &vkSurface));
 
 #elif __APPLE__
-    // MoltenVK 只有拿到 CAMetalLayer 才能创建窗口表面，否则
-    // vkCreateMacOSSurfaceMVK 返回 VK_ERROR_SURFACE_LOST_KHR。
-    // GLFW 的 Cocoa view 默认没有 Metal layer，这里补上。
+    // 窗口表面需要 CAMetalLayer：GLFW 的 Cocoa view 默认没有，
+    // 缺少时补一层（vkCreateMetalSurfaceEXT 通过 pLayer 传入）。
     NSView *metalView = (__bridge NSView *)surface;
-    if (![metalView.layer isKindOfClass:[CAMetalLayer class]])
+    CAMetalLayer *metalLayer = (CAMetalLayer *)metalView.layer;
+    if (![metalLayer isKindOfClass:[CAMetalLayer class]])
     {
-        CAMetalLayer *metalLayer = [CAMetalLayer layer];
+        metalLayer = [CAMetalLayer layer];
         metalLayer.device = MTLCreateSystemDefaultDevice();
         metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         [metalView setWantsLayer:YES];
         [metalView setLayer:metalLayer];
     }
 
-    VkMacOSSurfaceCreateInfoMVK createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK;
-    createInfo.pView = surface;
+    VkMetalSurfaceCreateInfoEXT createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+    createInfo.pLayer = metalLayer;
 
     auto instance = getHardwareContext().getVulkanInstance();
-    auto createSurface = reinterpret_cast<PFN_vkCreateMacOSSurfaceMVK>(
-        vkGetInstanceProcAddr(instance, "vkCreateMacOSSurfaceMVK"));
-    if (!createSurface) throw std::runtime_error("VK_MVK_macos_surface is unavailable");
+    auto createSurface = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
+        vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
+    if (!createSurface) throw std::runtime_error("VK_EXT_metal_surface is unavailable");
     coronaHardwareCheck(createSurface(instance,
                                                 &createInfo,
                                                 nullptr,
