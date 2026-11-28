@@ -247,6 +247,12 @@ void HardwareContext::createVkInstance(const CreateCallback &initInfo)
     createInfo.ppEnabledLayerNames = requiredLayers.data();
     createInfo.pNext = nullptr;
 
+#if defined(__APPLE__)
+    // MoltenVK 是 portability 驱动。loader 只有在实例显式请求枚举 portability
+    // 设备时才会加载它，否则 vkCreateInstance 以 VK_ERROR_INCOMPATIBLE_DRIVER 失败。
+    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
 #ifdef CABBAGE_ENGINE_DEBUG
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
     if (!requiredLayers.empty())
