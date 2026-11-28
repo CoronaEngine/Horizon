@@ -12,6 +12,11 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(CFW_PLATFORM_APPLE)
 #define VK_USE_PLATFORM_MACOS_MVK
+// Vulkan-Headers 1.4 only ships VK_MVK_macos_surface; the MoltenVK-private
+// extension tokens (VK_MVK_moltenvk) moved to MoltenVK's own headers.
+#ifndef VK_MVK_MOLTENVK_EXTENSION_NAME
+#define VK_MVK_MOLTENVK_EXTENSION_NAME "VK_MVK_moltenvk"
+#endif
 #elif !defined(CFW_PLATFORM_LINUX) && !defined(CFW_PLATFORM_UNIX)
 #error "Platform not supported by this example."
 #endif
