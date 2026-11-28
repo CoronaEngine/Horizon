@@ -178,9 +178,16 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     const bool shader_fma_extension = supports(VK_KHR_SHADER_FMA_EXTENSION_NAME);
     VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR};
     if (shader_fma_extension) prepend_feature(shader_fma);
+#if defined(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)
+    // Portability drivers advertise a reduced feature set that has to be queried
+    // and chained explicitly. Khronos deprecated the Portability Initiative and
+    // newer Vulkan-Headers releases no longer define this extension.
     const bool portability_device = supports(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     VkPhysicalDevicePortabilitySubsetFeaturesKHR portability{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR};
     if (portability_device) prepend_feature(portability);
+#else
+    constexpr bool portability_device = false;
+#endif
     if (trace_extensions.acceleration_structure) prepend_feature(accel);
     if (trace_extensions.ray_query) prepend_feature(query);
     if (trace_extensions.ray_tracing_pipeline) prepend_feature(rt_pipeline);
@@ -258,12 +265,14 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         prepend_feature(rt_pipeline);
     }
 
+#if defined(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)
     if (portability_device) {
         exts.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
         has_image_view_swizzle_ = portability.imageViewFormatSwizzle != VK_FALSE;
         portability = {.sType = portability.sType, .imageViewFormatSwizzle = portability.imageViewFormatSwizzle};
         prepend_feature(portability);
     }
+#endif
     if (has_pipeline_statistics_)
         exts.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 #ifdef _WIN32
