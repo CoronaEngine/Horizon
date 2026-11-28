@@ -4,6 +4,8 @@
 #include "HardwareWrapperVulkan/HardwareContext.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <initializer_list>
 #include <numeric>
 #include <utility>
 
@@ -210,12 +212,6 @@ void ResourceManager::createTextureSampler()
 
 void ResourceManager::createBindlessDescriptorSet()
 {
-    struct DescriptorTypeConfig
-    {
-        VkDescriptorType type;
-        std::function<uint32_t(const VkPhysicalDeviceDescriptorIndexingProperties &)> computeMaxCount;
-    };
-
     #ifdef CABBAGE_ENGINE_DEBUG
     // CFW_LOG_DEBUG("[ResourceManager] Descriptor Indexing Properties:\n"
     //               "  maxUpdateAfterBindDescriptorsInAllPools: {}\n"
@@ -232,76 +228,99 @@ void ResourceManager::createBindlessDescriptorSet()
     //               cachedIndexingProperties.maxPerStageDescriptorUpdateAfterBindStorageImages);
 #endif
 
-    constexpr uint32_t PREFERRED_MAX_RESOURCES = 10000u;
+    // Bindless capacities are derived from the device's descriptor-indexing
+    // properties, so one code path scales from a desktop GPU to a portability
+    // driver such as MoltenVK without per-device tuning.
+    constexpr uint32_t kPreferredMaxResources = 10000u;
+    constexpr uint32_t kBindlessArrayCount = 3u;
+    // Pools are provisioned with headroom over the layout size. Over-provisioning
+    // is legal, and implementations do not account descriptor counts identically.
+    constexpr uint32_t kPoolHeadroom = 2u;
+    constexpr uint32_t kMinRecommendedCapacity = 1024u;
 
-    const DescriptorTypeConfig configs[3] =
-        {
-            // Uniform Buffer
-            // 目前限制为总数的四分之一，以避免单一类型耗尽资源
-            // 现在更新为三分之一
-            /*{
-                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                [](const auto &props) {
-                    return std::min({PREFERRED_MAX_RESOURCES,
-                                     props.maxUpdateAfterBindDescriptorsInAllPools / 4,
-                                     props.maxPerStageUpdateAfterBindResources / 4,
-                                     props.maxPerStageDescriptorUpdateAfterBindUniformBuffers,
-                                     props.maxDescriptorSetUpdateAfterBindUniformBuffers});
-                }},*/
-            // Combined Image Sampler
-            {
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                [](const auto &props) {
-                    return std::min({PREFERRED_MAX_RESOURCES,
-                                     props.maxUpdateAfterBindDescriptorsInAllPools / 3,
-                                     props.maxPerStageUpdateAfterBindResources / 3,
-                                     props.maxPerStageDescriptorUpdateAfterBindSampledImages,
-                                     props.maxDescriptorSetUpdateAfterBindSampledImages});
-                }},
-            // Storage Buffer
-            {
-                VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                [](const auto &props) {
-                    return std::min({PREFERRED_MAX_RESOURCES,
-                                     props.maxUpdateAfterBindDescriptorsInAllPools / 3,
-                                     props.maxPerStageUpdateAfterBindResources / 3,
-                                     props.maxPerStageDescriptorUpdateAfterBindStorageBuffers,
-                                     props.maxDescriptorSetUpdateAfterBindStorageBuffers});
-                }},
-            // Storage Image
-            {
-                VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                [](const auto &props) {
-                    return std::min({PREFERRED_MAX_RESOURCES,
-                                     props.maxUpdateAfterBindDescriptorsInAllPools / 3,
-                                     props.maxPerStageUpdateAfterBindResources / 3,
-                                     props.maxPerStageDescriptorUpdateAfterBindStorageImages,
-                                     props.maxDescriptorSetUpdateAfterBindStorageImages});
-                }}};
-
-    std::array<uint32_t, 3> maxResourceCounts;
-    for (size_t i = 0; i < 3; ++i)
+    // Descriptor-indexing limits report 0 for "not supported" rather than "no
+    // descriptors", so only non-zero limits take part in the minimum.
+    const auto nonzeroMin = [](std::initializer_list<uint64_t> values, uint64_t fallback)
     {
-        maxResourceCounts[i] = configs[i].computeMaxCount(cachedIndexingProperties);
+        uint64_t result = fallback;
+        for (uint64_t value : values)
+            if (value != 0u) result = std::min(result, value);
+        return result;
+    };
+
+    const auto &props = cachedIndexingProperties;
+    if (props.maxUpdateAfterBindDescriptorsInAllPools == 0u &&
+        props.maxPerStageUpdateAfterBindResources == 0u)
+    {
+        throw std::runtime_error(
+            "Device does not support update-after-bind descriptor indexing: "
+            "maxUpdateAfterBindDescriptorsInAllPools and maxPerStageUpdateAfterBindResources are both 0");
     }
 
-    constexpr VkDescriptorBindingFlags bindingFlags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
-                                                    | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 
-                                                    | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+    // The three bindless arrays share the aggregate budgets while every pool is
+    // provisioned kPoolHeadroom times its layout size, so a single array may only
+    // claim aggregate / (kBindlessArrayCount * kPoolHeadroom).
+    const uint64_t aggregateBudget =
+        nonzeroMin({props.maxUpdateAfterBindDescriptorsInAllPools,
+                    props.maxPerStageUpdateAfterBindResources},
+                   kPreferredMaxResources) /
+        (kBindlessArrayCount * kPoolHeadroom);
+
+    const auto deriveCapacity = [&](uint64_t perStageTypeLimit, uint64_t perSetTypeLimit)
+    {
+        return static_cast<uint32_t>(nonzeroMin({perStageTypeLimit, perSetTypeLimit, aggregateBudget},
+                                                kPreferredMaxResources));
+    };
+
+    constexpr VkDescriptorType kBindlessTypes[kBindlessArrayCount] = {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
+
+    std::array<uint32_t, kBindlessArrayCount> maxResourceCounts{};
+    maxResourceCounts[0] = deriveCapacity(props.maxPerStageDescriptorUpdateAfterBindSampledImages,
+                                          props.maxDescriptorSetUpdateAfterBindSampledImages);
+    maxResourceCounts[1] = deriveCapacity(props.maxPerStageDescriptorUpdateAfterBindStorageBuffers,
+                                          props.maxDescriptorSetUpdateAfterBindStorageBuffers);
+    maxResourceCounts[2] = deriveCapacity(props.maxPerStageDescriptorUpdateAfterBindStorageImages,
+                                          props.maxDescriptorSetUpdateAfterBindStorageImages);
+
+    for (uint32_t capacity : maxResourceCounts)
+    {
+        if (capacity == 0u)
+            throw std::runtime_error("Device reported a zero bindless descriptor capacity");
+        if (capacity < kMinRecommendedCapacity)
+            std::fprintf(stderr,
+                         "[Horizon] bindless capacity %u is below the recommended minimum %u\n",
+                         capacity, kMinRecommendedCapacity);
+    }
+    std::fprintf(stderr,
+                 "[Horizon] bindless capacity: sampled=%u storage-buffer=%u storage-image=%u "
+                 "(preferred=%u headroom=%u aggregateBudget=%llu)\n",
+                 maxResourceCounts[0], maxResourceCounts[1], maxResourceCounts[2],
+                 kPreferredMaxResources, kPoolHeadroom,
+                 static_cast<unsigned long long>(aggregateBudget));
+
+    // Fixed-size bindings with PARTIALLY_BOUND behave like a variable descriptor
+    // count for this single descriptor set, while keeping pool sizing exact and
+    // avoiding the optional variable-count path that portability drivers
+    // implement unevenly.
+    constexpr VkDescriptorBindingFlags bindingFlags =
+        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 
     VkDevice logicalDevice = device->getLogicalDevice();
 
-    for (size_t i = 0; i < 3; ++i)
+    for (uint32_t i = 0; i < kBindlessArrayCount; ++i)
     {
         const uint32_t maxCount = maxResourceCounts[i];
-        const VkDescriptorType descriptorType = configs[i].type;
+        const VkDescriptorType descriptorType = kBindlessTypes[i];
         auto &table = bindlessDescriptors[i];
         table.capacity = table.nextIndex = maxCount;
         table.slots.assign(maxCount, BindlessDescriptorSet::Slot::Free);
         table.freeIndices.reserve(maxCount);
         table.retiredIndices.reserve(maxCount);
 
-        // 创建描述符集布局
+        // 创建描述符集布局（固定尺寸 + PARTIALLY_BOUND）
         VkDescriptorSetLayoutBinding binding{};
         binding.binding = 0;
         binding.descriptorType = descriptorType;
@@ -322,10 +341,10 @@ void ResourceManager::createBindlessDescriptorSet()
 
         coronaHardwareCheck(vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &bindlessDescriptors[i].descriptorSetLayout));
 
-        // 创建描述符池
+        // 创建描述符池：按 headroom 超额供给，避免驱动内部记账差异
         VkDescriptorPoolSize poolSize{};
         poolSize.type = descriptorType;
-        poolSize.descriptorCount = maxCount;
+        poolSize.descriptorCount = maxCount * kPoolHeadroom;
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -336,18 +355,16 @@ void ResourceManager::createBindlessDescriptorSet()
 
         coronaHardwareCheck(vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &bindlessDescriptors[i].descriptorPool));
 
-        // 分配描述符集（支持变长）
-        VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
-        variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        variableCountInfo.descriptorSetCount = 1;
-        variableCountInfo.pDescriptorCounts = &maxCount;
+        std::fprintf(stderr, "[Horizon] bindless[%u] type=%d layout=%u pool=%u\n",
+                     static_cast<unsigned>(i), static_cast<int>(descriptorType),
+                     maxCount, poolSize.descriptorCount);
 
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = bindlessDescriptors[i].descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &bindlessDescriptors[i].descriptorSetLayout;
-        allocInfo.pNext = &variableCountInfo;
+        allocInfo.pNext = nullptr;
 
         coronaHardwareCheck(vkAllocateDescriptorSets(logicalDevice, &allocInfo, &bindlessDescriptors[i].descriptorSet));
     }
