@@ -360,7 +360,7 @@ void test_indirect_draws(bool forceSingleDraw)
         const std::array<std::array<float, 3>, 6> vertices{{
             {-1,-1,1}, {3,-1,1}, {-1,3,1}, {-1,0,1}, {3,0,1}, {-1,2,1}
         }};
-        HardwareBuffer leftVertices(std::span(vertices).first<3>(), HardwareBuffer::Usage::VertexBuffer);
+        HardwareBuffer leftVertices{std::span(vertices).first<3>(), HardwareBuffer::Usage::VertexBuffer};
         HardwareBuffer rightVertices(vertices, HardwareBuffer::Usage::VertexBuffer);
         HardwareBuffer leftIndices(std::array<uint16_t,3>{0,1,2}, HardwareBuffer::Usage::IndexBuffer);
         HardwareBuffer rightIndices(std::array<uint32_t,7>{99,1,2,3,4,5,6}, HardwareBuffer::Usage::IndexBuffer);
